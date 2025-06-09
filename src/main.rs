@@ -183,9 +183,15 @@ fn command_execution(
         return;
     }
     if keyboard_input.just_pressed(KeyCode::Enter) {
-        match console_state.input.trim() {
+        let cmd = console_state.input.trim();
+        match cmd {
             "blink start" => blink_state.blinking = true,
             "blink stop" => blink_state.blinking = false,
+            "help" => {
+                console_state.input = "Commands:\nhelp\nblink start\nblink stop".to_string();
+                // keep console open to show help
+                return;
+            }
             _ => {}
         }
         console_state.input.clear();
@@ -207,16 +213,29 @@ fn update_console_ui(
     }
 }
 
+use bevy::pbr::MeshMaterial3d;
+use bevy::prelude::{StandardMaterial, Assets};
+
 fn blinking_system(
     time: Res<Time>,
     mut blink_state: ResMut<BlinkState>,
-    mut query: Query<&mut Visibility, With<BlinkCube>>,
+    query: Query<&MeshMaterial3d<StandardMaterial>, With<BlinkCube>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
     if blink_state.blinking {
         blink_state.timer.tick(time.delta());
         if blink_state.timer.just_finished() {
-            for mut vis in query.iter_mut() {
-                vis.toggle_visible_hidden();
+            for mesh_material in &query {
+                // Deref gives us &Handle<StandardMaterial>
+                let handle = mesh_material.clone();
+                if let Some(mat) = materials.get_mut(&handle) {
+                    // toggle between white and red each second
+                    mat.base_color = if mat.base_color == Color::WHITE {
+                        Color::BLACK
+                    } else {
+                        Color::WHITE
+                    };
+                }
             }
         }
     }
