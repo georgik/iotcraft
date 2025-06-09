@@ -1,6 +1,10 @@
 use bevy::prelude::*;
-use bevy::ui::{PositionType, UiRect, Val};
+use bevy::ui::{Node, PositionType, Val};
+use bevy::render::view::Visibility;
+use bevy::text::{TextFont, TextColor, TextLayout, JustifyText};
 use bevy::input::ButtonInput;
+use bevy::input::keyboard::KeyboardInput;
+use bevy::input::ButtonState;
 use bevy::time::{Timer, TimerMode};
 
 #[derive(Resource, Default)]
@@ -102,26 +106,26 @@ fn setup(
         MeshMaterial3d(materials.add(StandardMaterial::default())),
         Transform::from_translation(Vec3::new(0.0, 0.5, 0.0)),
         BlinkCube,
+        Visibility::default(),
     ));
 
+    // console UI
     commands.spawn((
-        TextBundle::from_section(
-            "",
-            TextStyle {
-                font: asset_server.load("fonts/FiraSans-Bold.ttf"),
-                font_size: 20.0,
-                color: Color::WHITE,
-            },
-        )
-        .with_style(Style {
-            position_type: PositionType::Absolute,
-            position: UiRect {
-                bottom: Val::Px(5.0),
-                left: Val::Px(5.0),
-                ..default()
-            },
+        Text::new(""),
+        TextFont {
+            font: asset_server.load("fonts/FiraSans-Bold.ttf"),
+            font_size: 20.0,
             ..default()
-        }),
+        },
+        TextColor(Color::WHITE),
+        TextLayout::new_with_justify(JustifyText::Left),
+        Node {
+            position_type: PositionType::Absolute,
+            bottom: Val::Px(5.0),
+            left: Val::Px(5.0),
+            ..default()
+        },
+        Visibility::Hidden,
         ConsoleUi,
     ));
 
@@ -142,7 +146,7 @@ fn toggle_console(
     mut console_state: ResMut<ConsoleState>,
     keyboard_input: Res<ButtonInput<KeyCode>>,
 ) {
-    if keyboard_input.just_pressed(KeyCode::T) {
+    if keyboard_input.just_pressed(KeyCode::KeyT) {
         console_state.active = !console_state.active;
         if !console_state.active {
             console_state.input.clear();
@@ -152,20 +156,20 @@ fn toggle_console(
 
 fn console_input(
     mut console_state: ResMut<ConsoleState>,
-    mut char_evr: EventReader<ReceivedCharacter>,
-    keyboard_input: Res<Input<KeyCode>>,
+    mut key_evr: EventReader<KeyboardInput>,
 ) {
     if !console_state.active {
         return;
     }
-    for ev in char_evr.iter() {
-        let c = ev.char;
-        if !c.is_control() {
-            console_state.input.push(c);
+    for ev in key_evr.read() {
+        if ev.state == ButtonState::Pressed {
+            if let Some(text) = &ev.text {
+                console_state.input.push_str(text);
+            }
+            if ev.key_code == KeyCode::Backspace {
+                console_state.input.pop();
+            }
         }
-    }
-    if keyboard_input.just_pressed(KeyCode::Back) {
-        console_state.input.pop();
     }
 }
 
@@ -177,7 +181,7 @@ fn command_execution(
     if !console_state.active {
         return;
     }
-    if keyboard_input.just_pressed(KeyCode::Return) {
+    if keyboard_input.just_pressed(KeyCode::Enter) {
         match console_state.input.trim() {
             "blink start" => blink_state.blinking = true,
             "blink stop" => blink_state.blinking = false,
@@ -193,8 +197,12 @@ fn update_console_ui(
     mut query: Query<(&mut Text, &mut Visibility), With<ConsoleUi>>,
 ) {
     for (mut text, mut visibility) in query.iter_mut() {
-        text.sections[0].value = console_state.input.clone();
-        visibility.is_visible = console_state.active;
+        text.0 = console_state.input.clone();
+        *visibility = if console_state.active {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
     }
 }
 
@@ -207,7 +215,7 @@ fn blinking_system(
         blink_state.timer.tick(time.delta());
         if blink_state.timer.just_finished() {
             for mut vis in query.iter_mut() {
-                vis.is_visible = !vis.is_visible;
+                vis.toggle_visible_hidden();
             }
         }
     }
