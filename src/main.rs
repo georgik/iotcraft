@@ -1,5 +1,5 @@
 use bevy::prelude::*;
-use bevy::ui::{Node, PositionType, Val};
+use bevy::ui::{Node, PositionType, Val, BackgroundColor};
 use bevy::render::view::Visibility;
 use bevy::text::{TextFont, TextColor, TextLayout, JustifyText};
 use bevy::input::ButtonInput;
@@ -125,6 +125,7 @@ fn setup(
             left: Val::Px(5.0),
             ..default()
         },
+        BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.5)),
         Visibility::Hidden,
         ConsoleUi,
     ));
