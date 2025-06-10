@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use std::thread;
 use std::time::Duration;
-use rumqttd::{Broker, Config, ServerConfig};
+use rumqttd::{Broker, Config};
 use rumqttc::{AsyncClient, MqttOptions, QoS, EventLoop};
 #[derive(Resource)]
 struct MqttClientResource(AsyncClient);
@@ -44,12 +44,14 @@ struct BlinkCube;
 struct ConsoleUi;
 
 fn main() {
-    // start embedded MQTT broker
+    // start embedded MQTT broker (load from rumqttd.toml)
     thread::spawn(|| {
-        let mut cfg = Config::default();
-        // add at least one server listener for the broker
-        cfg.servers.push(ServerConfig::default());
-        let mut broker = Broker::new(cfg);
+        let file_cfg = config::Config::builder()
+            .add_source(config::File::with_name("rumqttd.toml"))
+            .build()
+            .unwrap();
+        let rumq_cfg: rumqttd::Config = file_cfg.try_deserialize().unwrap();
+        let mut broker = Broker::new(rumq_cfg);
         broker.start().unwrap();
     });
 
