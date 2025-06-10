@@ -145,13 +145,11 @@ fn setup(
 
 fn toggle_console(
     mut console_state: ResMut<ConsoleState>,
-    keyboard_input: Res<ButtonInput<KeyCode>>,
+    mut keyboard_input: ResMut<ButtonInput<KeyCode>>,
 ) {
-    if keyboard_input.just_pressed(KeyCode::KeyT) {
-        console_state.active = !console_state.active;
-        if !console_state.active {
-            console_state.input.clear();
-        }
+    if keyboard_input.just_pressed(KeyCode::F12) && !console_state.active {
+        console_state.active = true;
+        keyboard_input.clear_just_pressed(KeyCode::F12);
     }
 }
 
