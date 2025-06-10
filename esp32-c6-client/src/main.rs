@@ -138,12 +138,14 @@ async fn main(spawner: Spawner) {
     let config = embassy_net::Config::dhcpv4(Default::default());
     let seed = (rng.random() as u64) << 32 | rng.random() as u64;
 
-    let (stack, runner) = embassy_net::new(
+    let (stack_local, runner) = embassy_net::new(
         wifi_device,
         config,
         mk_static!(StackResources<3>, StackResources::new()),
         seed,
     );
+    // promote stack to 'static for tasks
+    let stack = mk_static!(Stack<'static>, stack_local);
 
     spawner
         .spawn(hardware_task_runner(led, CHANNEL.receiver()))
@@ -151,41 +153,39 @@ async fn main(spawner: Spawner) {
 
     spawner.spawn(connection(wifi_controller)).ok();
     spawner.spawn(tick_task()).ok();
+    // spawn a task to wait for network and launch MQTT
+    spawner.spawn(mqtt_launcher(stack)).ok();
 
+}
+
+
+#[embassy_executor::task]
+async fn mqtt_launcher(stack: &'static Stack<'static>) {
+    // wait for link up
     loop {
         if stack.is_link_up() {
             break;
         }
         Timer::after(Duration::from_millis(500)).await;
     }
-
+    // once we have an IP, connect socket and run MQTT
     loop {
         if let Some(config) = stack.config_v4() {
-            println!("Got IP: {}", config.address);
-            // static buffers for the TCP socket
+            info!("Got IP: {}", config.address);
+            // static buffers
             let rx_buffer = mk_static!([u8; 4096], [0; 4096]);
             let tx_buffer = mk_static!([u8; 4096], [0; 4096]);
-
-            // Create the socket
-            let mut socket = TcpSocket::new(stack, rx_buffer, tx_buffer);
-
-            // Connect to the server
-            let remote_endpoint = (SERVER_IP.parse::<Ipv4Addr>().expect("Invalid SERVER_IP address"), 25566);
-
-            if let Err(e) = socket.connect(remote_endpoint).await {
-                println!("Failed to connect to server: {:?}", e);
-                return;
-            }
-            println!("Connected to server at {}:{}", remote_endpoint.0, remote_endpoint.1);
-
-            spawner.spawn(mqtt_task(socket)).unwrap();
-
+            let mut socket = TcpSocket::new(*stack, rx_buffer, tx_buffer);
+            let remote_endpoint = (SERVER_IP.parse().unwrap(), 1883);
+            socket.connect(remote_endpoint).await.unwrap();
+            info!("Connected to MQTT broker at {}:1883", remote_endpoint.0);
+            // hand off to mqtt_task
+            mqtt_task(socket);
+            break;
         }
         Timer::after(Duration::from_millis(500)).await;
     }
-
 }
-
 
 
 
@@ -317,6 +317,9 @@ async fn mqtt_task(mut socket: TcpSocket<'static>) {
     config.add_max_subscribe_qos(QualityOfService::QoS1);
     config.add_client_id("esp32-client");
     config.max_packet_size = 100;
+
+    info!("MQTT connecting to broker at {}:1883", SERVER_IP);
+
     // create the MQTT client
     let mut client = MqttClient::<_, 5, _>::new(
         socket,
