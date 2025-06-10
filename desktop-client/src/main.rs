@@ -1,3 +1,4 @@
+use log::info;
 use bevy::prelude::*;
 use std::thread;
 use std::time::Duration;
@@ -13,6 +14,8 @@ use bevy::input::ButtonInput;
 use bevy::input::keyboard::KeyboardInput;
 use bevy::input::ButtonState;
 use bevy::time::{Timer, TimerMode};
+use bevy::pbr::MeshMaterial3d;
+use bevy::prelude::{StandardMaterial, Assets};
 
 #[derive(Resource, Default)]
 struct ConsoleState {
@@ -44,17 +47,6 @@ struct BlinkCube;
 struct ConsoleUi;
 
 fn main() {
-    // start embedded MQTT broker (load from rumqttd.toml)
-    thread::spawn(|| {
-        let file_cfg = config::Config::builder()
-            .add_source(config::File::with_name("rumqttd.toml"))
-            .build()
-            .unwrap();
-        let rumq_cfg: rumqttd::Config = file_cfg.try_deserialize().unwrap();
-        let mut broker = Broker::new(rumq_cfg);
-        broker.start().unwrap();
-    });
-
     // start MQTT client
     let (mqtt_client, mut eventloop) = {
         let mut opts = MqttOptions::new("bevy_cube", "127.0.0.1", 1883);
@@ -62,14 +54,20 @@ fn main() {
         AsyncClient::new(opts, 10)
     };
     // run the event loop on its own runtime
-   let rt = Builder::new_current_thread()
-       .enable_all()
-       .build()
-       .unwrap();
+    // use single-thread runtime with IO & time enabled
+    let rt = Builder::new_current_thread()
+        .enable_all()
+        .enable_io()
+        .enable_time()
+        .build()
+        .unwrap();
     thread::spawn(move || {
         rt.block_on(async move {
             loop {
-                let _ = eventloop.poll().await;
+                match eventloop.poll().await {
+                    Ok(notification) => info!("MQTT event: {:?}", notification),
+                    Err(err) => info!("MQTT error: {:?}", err),
+                }
             }
         });
     });
@@ -230,8 +228,14 @@ fn command_execution(
     if keyboard_input.just_pressed(KeyCode::Enter) {
         let cmd = console_state.input.trim();
         match cmd {
-            "blink start" => blink_state.blinking = true,
-            "blink stop" => blink_state.blinking = false,
+            "blink start" => {
+                blink_state.blinking = true;
+                info!("Command executed: {}", cmd);
+            }
+            "blink stop" => {
+                blink_state.blinking = false;
+                info!("Command executed: {}", cmd);
+            }
             "help" => {
                 console_state.input = "Commands:\nhelp\nblink start\nblink stop".to_string();
                 // keep console open to show help
@@ -257,9 +261,6 @@ fn update_console_ui(
         };
     }
 }
-
-use bevy::pbr::MeshMaterial3d;
-use bevy::prelude::{StandardMaterial, Assets};
 
 fn blinking_system(
     time: Res<Time>,
@@ -289,9 +290,15 @@ fn blink_publisher_system(
     mut blink_state: ResMut<BlinkState>,
     mut client: ResMut<MqttClientResource>,
 ) {
+
     if blink_state.blinking != blink_state.last_sent {
+        info!(
+            "blink_publisher_system: blinking={}, last_sent={}",
+            blink_state.blinking, blink_state.last_sent
+        );
         let payload = if blink_state.blinking { "ON" } else { "OFF" };
         let _ = client.0.publish("home/cube/light", QoS::AtMostOnce, false, payload);
         blink_state.last_sent = blink_state.blinking;
+        info!("Published payload: {}", payload);
     }
 }
