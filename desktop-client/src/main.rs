@@ -3,10 +3,7 @@ use bevy::prelude::*;
 use std::thread;
 use std::time::Duration;
 use rumqttd::{Broker, Config};
-use rumqttc::{AsyncClient, MqttOptions, QoS, EventLoop};
-#[derive(Resource)]
-struct MqttClientResource(AsyncClient);
-use tokio::runtime::Builder;
+use rumqttc::{Client, MqttOptions, QoS, Event, Outgoing};
 use bevy::ui::{Node, PositionType, Val, BackgroundColor};
 use bevy::render::view::Visibility;
 use bevy::text::{TextFont, TextColor, TextLayout, JustifyText};
@@ -47,38 +44,12 @@ struct BlinkCube;
 struct ConsoleUi;
 
 fn main() {
-    // start MQTT client
-    let (mqtt_client, mut eventloop) = {
-        let mut opts = MqttOptions::new("bevy_cube", "127.0.0.1", 1883);
-        opts.set_keep_alive(Duration::from_secs(5));
-        AsyncClient::new(opts, 10)
-    };
-    // run the event loop on its own runtime
-    // use single-thread runtime with IO & time enabled
-    let rt = Builder::new_current_thread()
-        .enable_all()
-        .enable_io()
-        .enable_time()
-        .build()
-        .unwrap();
-    thread::spawn(move || {
-        rt.block_on(async move {
-            loop {
-                match eventloop.poll().await {
-                    Ok(notification) => info!("MQTT event: {:?}", notification),
-                    Err(err) => info!("MQTT error: {:?}", err),
-                }
-            }
-        });
-    });
-
     App::new()
         .add_plugins(DefaultPlugins)
         .add_systems(Startup, setup)
         .add_systems(Update, draw_cursor)
         .insert_resource(ConsoleState::default())
         .insert_resource(BlinkState::default())
-        .insert_resource(MqttClientResource(mqtt_client))
         .add_systems(Update, toggle_console)
         .add_systems(Update, console_input)
         .add_systems(Update, command_execution)
@@ -286,19 +257,24 @@ fn blinking_system(
         }
     }
 }
-fn blink_publisher_system(
-    mut blink_state: ResMut<BlinkState>,
-    mut client: ResMut<MqttClientResource>,
-) {
-
+fn blink_publisher_system(mut blink_state: ResMut<BlinkState>) {
     if blink_state.blinking != blink_state.last_sent {
-        info!(
-            "blink_publisher_system: blinking={}, last_sent={}",
-            blink_state.blinking, blink_state.last_sent
-        );
         let payload = if blink_state.blinking { "ON" } else { "OFF" };
-        let _ = client.0.publish("home/cube/light", QoS::AtMostOnce, false, payload);
+        // sync MQTT client
+        let mut opts = MqttOptions::new("bevy_client", "127.0.0.1", 1883);
+        opts.set_keep_alive(Duration::from_secs(5));
+        let (mut client, mut connection) = Client::new(opts, 10);
+        client
+            .publish("home/cube/light", QoS::AtMostOnce, false, payload.as_bytes())
+            .unwrap();
+        // drive until publish is sent
+        for notification in connection.iter() {
+            if let Ok(Event::Outgoing(Outgoing::Publish(_))) = notification {
+                break;
+            }
+        }
+        // give broker time
+        std::thread::sleep(Duration::from_millis(100));
         blink_state.last_sent = blink_state.blinking;
-        info!("Published payload: {}", payload);
     }
 }
