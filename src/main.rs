@@ -1,4 +1,11 @@
 use bevy::prelude::*;
+use std::thread;
+use std::time::Duration;
+use rumqttd::{Broker, Config, ServerConfig};
+use rumqttc::{AsyncClient, MqttOptions, QoS, EventLoop};
+#[derive(Resource)]
+struct MqttClientResource(AsyncClient);
+use tokio::runtime::Builder;
 use bevy::ui::{Node, PositionType, Val, BackgroundColor};
 use bevy::render::view::Visibility;
 use bevy::text::{TextFont, TextColor, TextLayout, JustifyText};
@@ -17,6 +24,17 @@ struct ConsoleState {
 struct BlinkState {
     blinking: bool,
     timer: Timer,
+    last_sent: bool,
+}
+
+impl Default for BlinkState {
+    fn default() -> Self {
+        Self {
+            blinking: false,
+            timer: Timer::from_seconds(1.0, TimerMode::Repeating),
+            last_sent: false,
+        }
+    }
 }
 
 #[derive(Component)]
@@ -26,20 +44,47 @@ struct BlinkCube;
 struct ConsoleUi;
 
 fn main() {
+    // start embedded MQTT broker
+    thread::spawn(|| {
+        let mut cfg = Config::default();
+        // add at least one server listener for the broker
+        cfg.servers.push(ServerConfig::default());
+        let mut broker = Broker::new(cfg);
+        broker.start().unwrap();
+    });
+
+    // start MQTT client
+    let (mqtt_client, mut eventloop) = {
+        let mut opts = MqttOptions::new("bevy_cube", "127.0.0.1", 1883);
+        opts.set_keep_alive(Duration::from_secs(5));
+        AsyncClient::new(opts, 10)
+    };
+    // run the event loop on its own runtime
+   let rt = Builder::new_current_thread()
+       .enable_all()
+       .build()
+       .unwrap();
+    thread::spawn(move || {
+        rt.block_on(async move {
+            loop {
+                let _ = eventloop.poll().await;
+            }
+        });
+    });
+
     App::new()
         .add_plugins(DefaultPlugins)
         .add_systems(Startup, setup)
         .add_systems(Update, draw_cursor)
         .insert_resource(ConsoleState::default())
-        .insert_resource(BlinkState {
-            blinking: false,
-            timer: Timer::from_seconds(0.5, TimerMode::Repeating),
-        })
+        .insert_resource(BlinkState::default())
+        .insert_resource(MqttClientResource(mqtt_client))
         .add_systems(Update, toggle_console)
         .add_systems(Update, console_input)
         .add_systems(Update, command_execution)
         .add_systems(Update, update_console_ui)
         .add_systems(Update, blinking_system)
+        .add_systems(Update, blink_publisher_system)
         .run();
 }
 
@@ -236,5 +281,15 @@ fn blinking_system(
                 }
             }
         }
+    }
+}
+fn blink_publisher_system(
+    mut blink_state: ResMut<BlinkState>,
+    mut client: ResMut<MqttClientResource>,
+) {
+    if blink_state.blinking != blink_state.last_sent {
+        let payload = if blink_state.blinking { "ON" } else { "OFF" };
+        let _ = client.0.publish("home/cube/light", QoS::AtMostOnce, false, payload);
+        blink_state.last_sent = blink_state.blinking;
     }
 }
