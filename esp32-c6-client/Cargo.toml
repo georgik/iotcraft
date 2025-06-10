@@ -1,0 +1,72 @@
+[package]
+name = "iotcraft-esp32-c6-client"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+
+esp-hal = { version = "1.0.0-beta.1", features = [
+    "unstable",
+] }
+esp-alloc = { version = "0.8.0" }
+
+esp-wifi = { version = "0.14.1", features = [
+    "builtin-scheduler",
+    "esp-alloc",
+    "esp32c6",
+    "smoltcp",
+    "wifi",
+] }
+heapless = { version = "0.8.0", default-features = false }
+esp-hal-embassy  = { version = "0.8.1" }
+static_cell      = { version = "2.1.0",  features = ["nightly"] }
+
+embassy-executor    = { version = "0.7.0", features = ["task-arena-size-20480"] }
+embassy-sync = "0.7.0"
+embassy-net = { version = "0.7.0", features = [ "tcp", "udp", "dhcpv4", "medium-ethernet"] }
+embassy-time        = "0.4.0"
+embassy-futures = "0.1.1"
+embedded-io-async   = "0.6.1"
+esp-println = { version = "0.14.0", optional = true, features = ["log-04"] }
+
+# Graphic interface
+esp-bsp = { version = "0.4.1", optional = true }
+embedded-graphics = { version = "0.8.0", optional = true }
+embedded-hal = "1.0.0"
+#esp-hal-smartled = { version = "0.14.0", optional = true }
+#esp-hal-smartled = { git = "https://github.com/esp-rs/esp-hal-community.git", rev = "bc3b1c7", optional = true }
+esp-hal-smartled = { git = "https://github.com/jamessizeland/esp-hal-community-fork.git", rev= "d709818", optional = true }
+smart-leds = "0.4.0"
+#rumqttc = { version = "0.24.0", default-features = false }
+rust-mqtt = { version = "0.3.0", default-features = false }
+# Using embedded-mqtt for no_std support instead of rumqttc
+#embedded-mqtt = { version = "0.8.0", default-features = false }
+log = "0.4.27"
+
+[features]
+#default = [ "esp32-s3-headless" ]
+#default = [ "esp32-s3-box" ]
+default = [ "esp32-c6-devkitc-1" ]
+#default = [ "waveshare-esp32-c6-lcd-1-47" ]
+
+psram = []
+neopixel = [ "esp-hal-smartled/esp32c6" ]
+
+esp32c6 = [ "esp-hal/esp32c6", "esp-wifi/esp32c6", "esp-println/esp32c6", "esp-hal-embassy/esp32c6"]
+
+
+esp32-c6-devkitc-1 = [ "esp32c6", "neopixel" ]
+
+[profile.dev]
+# Rust debug is too slow.
+# For debug builds always builds with some optimization
+opt-level = "s"
+
+[profile.release]
+codegen-units = 1        # LLVM can perform better optimizations using a single thread
+debug = 2
+debug-assertions = false
+incremental = false
+lto = 'fat'
+opt-level = 's'
+overflow-checks = false
