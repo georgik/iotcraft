@@ -4,6 +4,7 @@ extern crate alloc;
 use esp_wifi::wifi::WifiDevice;
 use esp_hal::gpio::Level;
 use esp_hal::gpio::Output;
+use esp_hal::{delay, Blocking};
 use esp_hal::dma::DmaPriority;
 use esp_hal::dma::Owner::Dma;
 use esp_hal::spi::master::Spi;
@@ -48,6 +49,18 @@ use rust_mqtt::{
     packet::v5::publish_packet::QualityOfService,
     utils::rng_generator::CountingRng,
 };
+
+use esp_hal::i2c::master::I2c;
+use shtcx::{shtc3, PowerMode};
+
+use heapless::Vec as HVec;
+#[derive(Clone)]
+struct OutgoingMsg {
+    topic: &'static str,
+    payload: HVec<u8, 64>,
+}
+
+static PUBLISH_CHANNEL: Channel<CriticalSectionRawMutex, OutgoingMsg, 4> = Channel::new();
 
 // Define a static channel with a capacity of 1 for `HardwareEvent`s.
 static CHANNEL: Channel<CriticalSectionRawMutex, HardwareEvent, 1> = Channel::new();
@@ -147,6 +160,15 @@ async fn main(spawner: Spawner) {
     // promote stack to 'static for tasks
     let stack = mk_static!(Stack<'static>, stack_local);
 
+    // Initialize I²C for the SHTC3 temperature sensor (SDA=GPIO10, SCL=GPIO8)
+    let i2c_bus: I2cMasterBus = I2c::new(peripherals.I2C0, esp_hal::i2c::master::Config::default())
+        .unwrap()
+        .with_sda(peripherals.GPIO10)
+        .with_scl(peripherals.GPIO8);
+
+    // Spawn a task to read temperature every minute and publish via MQTT
+    spawner.spawn(sensor_task(i2c_bus)).unwrap();
+
     spawner
         .spawn(hardware_task_runner(led, CHANNEL.receiver()))
         .unwrap();
@@ -155,6 +177,7 @@ async fn main(spawner: Spawner) {
     spawner.spawn(net_task(runner)).ok();
     spawner.spawn(tick_task()).ok();
     // spawn a task to wait for network and launch MQTT
+    // spawn the launcher task which will create the socket and then call mqtt_task
     spawner.spawn(mqtt_launcher(stack)).ok();
 
 }
@@ -181,8 +204,8 @@ async fn mqtt_launcher(stack: &'static Stack<'static>) {
             let remote_endpoint = (server_ip, 1884);
             socket.connect(remote_endpoint).await.unwrap();
             info!("Connected to MQTT Socket at {}", remote_endpoint.0);
-            // hand off to mqtt_task
-            mqtt_task(socket).await;
+            // hand off to mqtt_task with publish-channel
+            mqtt_task(socket, PUBLISH_CHANNEL.receiver()).await;
             break;
         }
         Timer::after(Duration::from_millis(500)).await;
@@ -304,7 +327,7 @@ async fn hardware_task_runner(
     }
 }
 
-async fn mqtt_task(mut socket: TcpSocket<'static>) {
+async fn mqtt_task(mut socket: TcpSocket<'static>, mut pub_rx: embassy_sync::channel::Receiver<'static, CriticalSectionRawMutex, OutgoingMsg, 4>) {
     // allocate buffers for the client
     let mut recv_buffer = [0u8; 80];
     let mut write_buffer = [0u8; 80];
@@ -345,19 +368,17 @@ async fn mqtt_task(mut socket: TcpSocket<'static>) {
         }
         break;
     }
-    // process incoming messages
+    // process outgoing publishes
     loop {
-        if let Ok((_, payload)) = client.receive_message().await {
-            let payload_str = alloc::string::String::from_utf8_lossy(payload).to_string();
-            match payload_str.as_str() {
-                "ON" => {
-                    let _ = CHANNEL.sender().try_send(HardwareEvent::TurnOnLed);
-                }
-                "OFF" => {
-                    let _ = CHANNEL.sender().try_send(HardwareEvent::TurnOffLed);
-                }
-                _ => {}
-            }
+        let msg = pub_rx.receive().await;
+        // send each message through existing client
+        if let Err(err) = client.send_message(
+            msg.topic,
+            &msg.payload,
+            QualityOfService::QoS0,
+            false,
+        ).await {
+            error!("MQTT publish error: {:?}", err);
         }
     }
 }
@@ -366,3 +387,36 @@ async fn mqtt_task(mut socket: TcpSocket<'static>) {
 async fn net_task(mut runner: Runner<'static, WifiDevice<'static>>) {
     runner.run().await;
 }
+
+type I2cMasterBus = esp_hal::i2c::master::I2c<'static, Blocking>;
+type I2cMasterBusError = esp_hal::i2c::master::Error;
+
+#[embassy_executor::task]
+async fn sensor_task(mut i2c: I2cMasterBus) {
+    // Create the SHTC3 driver
+    let mut sensor =  shtc3(i2c);
+    let mut delay = esp_hal::delay::Delay::new();
+
+    loop {
+        // Measure temperature (and humidity, if needed)
+        let measurement = sensor.measure(PowerMode::NormalMode, &mut delay).unwrap();
+        let temperature = measurement.temperature;
+        let celsius = temperature.as_degrees_celsius() - 10.0;
+
+        // Format payload
+        let payload = alloc::format!("{:?}", celsius);
+        info!("Sensor measurement: {} C", payload);
+
+        // Publish over MQTT asynchronously through channel
+        let mut buf = HVec::<u8, 64>::new();
+        buf.extend_from_slice(payload.as_bytes()).unwrap();
+        let _ = PUBLISH_CHANNEL.sender().try_send(OutgoingMsg {
+            topic: "home/sensor/temperature",
+            payload: buf,
+        });
+
+        // wait for a minute
+        Timer::after(Duration::from_secs(60)).await;
+    }
+}
+

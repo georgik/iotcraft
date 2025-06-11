@@ -54,6 +54,8 @@ embassy-sync = "0.7.0"
 esp-hal-smartled = { git = "https://github.com/jamessizeland/esp-hal-community-fork.git", rev= "d709818" }
 smart-leds = "0.4.0"
 embassy-futures = "0.1.1"
+embedded-hal-bus = "0.3.0"
+shtcx = { version = "1.0.0" }
 
 
 
