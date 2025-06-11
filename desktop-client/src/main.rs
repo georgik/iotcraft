@@ -55,7 +55,6 @@ fn main() {
         .add_systems(Update, command_execution)
         .add_systems(Update, update_console_ui)
         .add_systems(Update, blinking_system)
-        .add_systems(Update, blink_publisher_system)
         .run();
 }
 
@@ -243,38 +242,25 @@ fn blinking_system(
         blink_state.timer.tick(time.delta());
         if blink_state.timer.just_finished() {
             for mesh_material in &query {
-                // Deref gives us &Handle<StandardMaterial>
                 let handle = mesh_material.clone();
                 if let Some(mat) = materials.get_mut(&handle) {
-                    // toggle between white and red each second
-                    mat.base_color = if mat.base_color == Color::WHITE {
-                        Color::BLACK
-                    } else {
-                        Color::WHITE
-                    };
+                    // toggle color
+                    let is_on = mat.base_color == Color::WHITE;
+                    mat.base_color = if is_on { Color::BLACK } else { Color::WHITE };
+                    // publish ON/OFF when state changes
+                    let payload = if is_on { "OFF" } else { "ON" };
+                    let mut opts = MqttOptions::new("bevy_client", "127.0.0.1", 1883);
+                    opts.set_keep_alive(Duration::from_secs(5));
+                    let (mut client, mut connection) = Client::new(opts, 10);
+                    client.publish("home/cube/light", QoS::AtMostOnce, false, payload.as_bytes()).unwrap();
+                    for notification in connection.iter() {
+                        if let Ok(Event::Outgoing(Outgoing::Publish(_))) = notification {
+                            break;
+                        }
+                    }
+                    std::thread::sleep(Duration::from_millis(100));
                 }
             }
         }
-    }
-}
-fn blink_publisher_system(mut blink_state: ResMut<BlinkState>) {
-    if blink_state.blinking != blink_state.last_sent {
-        let payload = if blink_state.blinking { "ON" } else { "OFF" };
-        // sync MQTT client
-        let mut opts = MqttOptions::new("bevy_client", "127.0.0.1", 1883);
-        opts.set_keep_alive(Duration::from_secs(5));
-        let (mut client, mut connection) = Client::new(opts, 10);
-        client
-            .publish("home/cube/light", QoS::AtMostOnce, false, payload.as_bytes())
-            .unwrap();
-        // drive until publish is sent
-        for notification in connection.iter() {
-            if let Ok(Event::Outgoing(Outgoing::Publish(_))) = notification {
-                break;
-            }
-        }
-        // give broker time
-        std::thread::sleep(Duration::from_millis(100));
-        blink_state.last_sent = blink_state.blinking;
     }
 }
