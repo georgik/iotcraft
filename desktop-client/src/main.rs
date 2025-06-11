@@ -34,9 +34,9 @@ impl Default for BlinkState {
     fn default() -> Self {
         Self {
             blinking: false,
-            light_state: true,
+            light_state: false,
             timer: Timer::from_seconds(1.0, TimerMode::Repeating),
-            last_sent: true,
+            last_sent: false,
         }
     }
 }
@@ -113,10 +113,17 @@ fn setup(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    // plane
+    // grass texture for ground
+    let grass_texture: Handle<Image> = asset_server.load("textures/grass.png");
+    let grass_material_handle = materials.add(StandardMaterial {
+        base_color_texture: Some(grass_texture),
+        ..default()
+    });
+
+    // ground plane with grass texture
     commands.spawn((
-        Mesh3d(meshes.add(Plane3d::default().mesh().size(20., 20.))),
-        MeshMaterial3d(materials.add(Color::srgb(0.3, 0.5, 0.3))),
+        Mesh3d(meshes.add(Plane3d::default().mesh().size(20.0, 20.0))),
+        MeshMaterial3d(grass_material_handle.clone()),
         Ground,
     ));
 
@@ -125,7 +132,7 @@ fn setup(
     let lamp_texture: Handle<Image> = asset_server.load("textures/lamp.png");
     let lamp_material = materials.add(StandardMaterial {
         base_color_texture: Some(lamp_texture),
-        base_color: Color::WHITE,
+        base_color: Color::srgb(0.2, 0.2, 0.2),
         ..default()
     });
     commands.spawn((
@@ -133,6 +140,21 @@ fn setup(
         MeshMaterial3d(lamp_material),
         Transform::from_translation(Vec3::new(0.0, 0.5, 0.0)),
         BlinkCube,
+        Visibility::default(),
+    ));
+
+    // block with Espressif logo texture
+    let block_mesh = meshes.add(Cuboid::new(1.0, 1.0, 1.0));
+    let esp_logo_texture: Handle<Image> = asset_server.load("textures/espressif.png");
+    let esp_logo_material = materials.add(StandardMaterial {
+        base_color_texture: Some(esp_logo_texture),
+        base_color: Color::WHITE,
+        ..default()
+    });
+    commands.spawn((
+        Mesh3d(block_mesh),
+        MeshMaterial3d(esp_logo_material),
+        Transform::from_translation(Vec3::new(3.0, 6.5, 2.0)),
         Visibility::default(),
     ));
 
@@ -279,7 +301,7 @@ fn blink_publisher_system(mut blink_state: ResMut<BlinkState>) {
         // sync MQTT client
         let mut opts = MqttOptions::new("bevy_client", "127.0.0.1", 1883);
         opts.set_keep_alive(Duration::from_secs(5));
-        let (mut client, mut connection) = Client::new(opts, 10);
+        let (client, mut connection) = Client::new(opts, 10);
         client
             .publish("home/cube/light", QoS::AtMostOnce, false, payload.as_bytes())
             .unwrap();
