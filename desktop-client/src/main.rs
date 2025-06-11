@@ -2,9 +2,9 @@ mod camera_controllers;
 use camera_controllers::{CameraController, CameraControllerPlugin};
 use log::info;
 use bevy::prelude::*;
-use std::thread;
+use bevy::asset::Handle;
+use bevy::image::Image;
 use std::time::Duration;
-use rumqttd::{Broker, Config};
 use rumqttc::{Client, MqttOptions, QoS, Event, Outgoing};
 use bevy::ui::{Node, PositionType, Val, BackgroundColor};
 use bevy::render::view::Visibility;
@@ -120,11 +120,17 @@ fn setup(
         Ground,
     ));
 
-    // cube
+    // cube with lamp texture
     let cube_mesh = meshes.add(Cuboid::new(1.0, 1.0, 1.0));
+    let lamp_texture: Handle<Image> = asset_server.load("textures/lamp.png");
+    let lamp_material = materials.add(StandardMaterial {
+        base_color_texture: Some(lamp_texture),
+        base_color: Color::WHITE,
+        ..default()
+    });
     commands.spawn((
         Mesh3d(cube_mesh),
-        MeshMaterial3d(materials.add(StandardMaterial::default())),
+        MeshMaterial3d(lamp_material),
         Transform::from_translation(Vec3::new(0.0, 0.5, 0.0)),
         BlinkCube,
         Visibility::default(),
@@ -252,14 +258,16 @@ fn blinking_system(
                 // Deref gives us &Handle<StandardMaterial>
                 let handle = mesh_material.clone();
                 if let Some(mat) = materials.get_mut(&handle) {
-                    // toggle between white and red each second
-                    mat.base_color = if mat.base_color == Color::WHITE {
+                    // toggle between dimmed and bright lamp each second
+                    if mat.base_color == Color::WHITE {
                         blink_state.light_state = false;
-                        Color::BLACK
+                        // dim the lamp
+                        mat.base_color = Color::srgb(0.2, 0.2, 0.2);
                     } else {
                         blink_state.light_state = true;
-                        Color::WHITE
-                    };
+                        // full brightness
+                        mat.base_color = Color::WHITE;
+                    }
                 }
             }
         }
