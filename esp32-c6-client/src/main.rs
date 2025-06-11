@@ -1,6 +1,7 @@
 #![no_std]
 #![no_main]
 extern crate alloc;
+use esp_wifi::wifi::WifiDevice;
 use esp_hal::gpio::Level;
 use esp_hal::gpio::Output;
 use esp_hal::dma::DmaPriority;
@@ -151,6 +152,7 @@ async fn main(spawner: Spawner) {
         .unwrap();
 
     spawner.spawn(connection(wifi_controller)).ok();
+    spawner.spawn(net_task(runner)).ok();
     spawner.spawn(tick_task()).ok();
     // spawn a task to wait for network and launch MQTT
     spawner.spawn(mqtt_launcher(stack)).ok();
@@ -354,4 +356,9 @@ async fn mqtt_task(mut socket: TcpSocket<'static>) {
             }
         }
     }
+}
+
+#[embassy_executor::task]
+async fn net_task(mut runner: Runner<'static, WifiDevice<'static>>) {
+    runner.run().await;
 }
