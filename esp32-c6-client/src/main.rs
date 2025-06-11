@@ -70,8 +70,8 @@ use embassy_futures::yield_now;
 use esp_wifi::config::PowerSaveMode;
 
 #[panic_handler]
-fn panic(_: &core::panic::PanicInfo) -> ! {
-    println!("panic!");
+fn panic(panic_info: &core::panic::PanicInfo) -> ! {
+    println!("Panic! {:?}", panic_info);
     loop {}
 }
 
@@ -178,11 +178,11 @@ async fn mqtt_launcher(stack: &'static Stack<'static>) {
             let tx_buffer = mk_static!([u8; 4096], [0; 4096]);
             let mut socket = TcpSocket::new(*stack, rx_buffer, tx_buffer);
             let server_ip: Ipv4Addr = SERVER_IP.parse().expect("Invalid SERVER_IP address");
-            let remote_endpoint = (server_ip, 1883);
+            let remote_endpoint = (server_ip, 1884);
             socket.connect(remote_endpoint).await.unwrap();
-            info!("Connected to MQTT broker at {}:1883", remote_endpoint.0);
+            info!("Connected to MQTT Socket at {}", remote_endpoint.0);
             // hand off to mqtt_task
-            mqtt_task(socket);
+            mqtt_task(socket).await;
             break;
         }
         Timer::after(Duration::from_millis(500)).await;
@@ -304,7 +304,6 @@ async fn hardware_task_runner(
     }
 }
 
-#[embassy_executor::task]
 async fn mqtt_task(mut socket: TcpSocket<'static>) {
     // allocate buffers for the client
     let mut recv_buffer = [0u8; 80];
@@ -320,7 +319,7 @@ async fn mqtt_task(mut socket: TcpSocket<'static>) {
     config.add_client_id("esp32-client");
     config.max_packet_size = 100;
 
-    info!("MQTT connecting to broker at {}:1883", SERVER_IP);
+    info!("MQTT connecting to broker at {}:1884", SERVER_IP);
 
     // create the MQTT client
     let mut client = MqttClient::<_, 5, _>::new(
@@ -331,16 +330,21 @@ async fn mqtt_task(mut socket: TcpSocket<'static>) {
         recv_buffer_len,
         config,
     );
-    // connect to broker
-    if let Err(err) = client.connect_to_broker().await {
-        error!("MQTT connect error: {:?}", err);
-        return;
+    loop {
+        // connect to broker with retry on failure
+        if let Err(err) = client.connect_to_broker().await {
+            error!("MQTT connect error: {:?}", err);
+            Timer::after(Duration::from_secs(5)).await;
+            continue;
+        }
+        // subscribe to lamp topic with retry on failure
+        if let Err(err) = client.subscribe_to_topic("home/cube/light").await {
+            error!("MQTT subscribe error: {:?}", err);
+            Timer::after(Duration::from_secs(5)).await;
+            continue;
+        }
+        break;
     }
-    // subscribe to lamp topic
-    client
-        .subscribe_to_topic("home/cube/light")
-        .await
-        .unwrap();
     // process incoming messages
     loop {
         if let Ok((_, payload)) = client.receive_message().await {
