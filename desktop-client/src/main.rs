@@ -1,3 +1,8 @@
+use rumqttc::Incoming;
+use std::sync::mpsc::Receiver;
+use std::sync::Mutex;
+use std::sync::mpsc;
+use std::thread;
 mod camera_controllers;
 use bevy::prelude::ClearColor;
 use camera_controllers::{CameraController, CameraControllerPlugin};
@@ -51,6 +56,47 @@ struct LogoCube;
 #[derive(Component)]
 struct ConsoleUi;
 
+#[derive(Resource)]
+struct TemperatureResource {
+    value: Option<f32>,
+}
+
+impl Default for TemperatureResource {
+    fn default() -> Self {
+        Self { value: None }
+    }
+}
+
+#[derive(Resource)]
+struct TemperatureReceiver(Mutex<Receiver<f32>>);
+
+#[derive(Component)]
+struct Thermometer;
+
+#[derive(Resource)]
+struct ThermometerMaterial(pub Handle<StandardMaterial>);
+
+/// Spawn a background thread to subscribe to the temperature topic and feed readings into the channel.
+fn spawn_mqtt_subscriber(mut commands: Commands) {
+    let (tx, rx) = mpsc::channel::<f32>();
+    thread::spawn(move || {
+        let mut mqttoptions = MqttOptions::new("desktop-subscriber", "127.0.0.1", 1883);
+        mqttoptions.set_keep_alive(Duration::from_secs(5));
+        let (mut client, mut connection) = Client::new(mqttoptions, 10);
+        client.subscribe("home/sensor/temperature", QoS::AtMostOnce).unwrap();
+        for notification in connection.iter() {
+            if let Ok(Event::Incoming(Incoming::Publish(p))) = notification {
+                if let Ok(s) = String::from_utf8(p.payload.to_vec()) {
+                    if let Ok(val) = s.parse::<f32>() {
+                        let _ = tx.send(val);
+                    }
+                }
+            }
+        }
+    });
+    commands.insert_resource(TemperatureReceiver(Mutex::new(rx)));
+}
+
 fn main() {
     App::new()
         .insert_resource(ClearColor(Color::srgb(0.53, 0.81, 0.92)))
@@ -60,12 +106,15 @@ fn main() {
         .add_systems(Update, draw_cursor)
         .insert_resource(ConsoleState::default())
         .insert_resource(BlinkState::default())
+        .insert_resource(TemperatureResource::default())
         .add_systems(Update, toggle_console)
+        .add_systems(Startup, spawn_mqtt_subscriber)
         .add_systems(Update, console_input)
         .add_systems(Update, command_execution)
         .add_systems(Update, update_console_ui)
         .add_systems(Update, blinking_system)
         .add_systems(Update, (blink_publisher_system, rotate_logo_system))
+        .add_systems(Update, (update_thermometer_material, update_temperature, update_thermometer_scale))
         .run();
 }
 
@@ -163,6 +212,20 @@ fn setup(
         Visibility::default(),
         LogoCube,
     ));
+
+    // thermometer 3D indicator
+    let thermo_mesh = meshes.add(Cuboid::new(0.2, 5.0, 0.2));
+    let thermo_handle = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.2, 0.2, 0.2),
+        ..default()
+    });
+    commands.spawn((
+        Mesh3d(thermo_mesh),
+        MeshMaterial3d(thermo_handle.clone()),
+        Transform::from_translation(Vec3::new(-3.0, 2.5, 2.0)),
+        Thermometer,
+    ));
+    commands.insert_resource(ThermometerMaterial(thermo_handle));
 
     // console UI
     commands.spawn((
@@ -331,5 +394,45 @@ fn rotate_logo_system(
         // rotate slowly around the Y axis
         transform.rotate_y(time.delta_secs() * 0.5);
         transform.rotate_x(time.delta_secs() * 0.5);
+    }
+}
+
+fn update_temperature(
+    mut temp_res: ResMut<TemperatureResource>,
+    receiver: Res<TemperatureReceiver>,
+) {
+    if let Ok(mut rx) = receiver.0.lock() {
+        if let Ok(val) = rx.try_recv() {
+            temp_res.value = Some(val);
+        }
+    }
+}
+
+fn update_thermometer_material(
+    temp: Res<TemperatureResource>,
+    thermo: Res<ThermometerMaterial>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    if let Some(mat) = materials.get_mut(&thermo.0) {
+        if temp.value.is_some() {
+            // reading received: red
+            mat.base_color = Color::srgb(1.0, 0.0, 0.0);
+        } else {
+            // no reading yet: gray
+            mat.base_color = Color::srgb(0.2, 0.2, 0.2);
+        }
+    }
+}
+
+fn update_thermometer_scale(
+    temp: Res<TemperatureResource>,
+    mut query: Query<&mut Transform, With<Thermometer>>,
+) {
+    if let Some(value) = temp.value {
+        for mut transform in &mut query {
+            // Scale Y axis proportional to temperature value, clamped to a reasonable range
+            let scale_y = (value / 100.0).clamp(0.1, 2.0);
+            transform.scale = Vec3::new(1.0, scale_y, 1.0);
+        }
     }
 }
