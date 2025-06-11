@@ -176,7 +176,8 @@ async fn mqtt_launcher(stack: &'static Stack<'static>) {
             let rx_buffer = mk_static!([u8; 4096], [0; 4096]);
             let tx_buffer = mk_static!([u8; 4096], [0; 4096]);
             let mut socket = TcpSocket::new(*stack, rx_buffer, tx_buffer);
-            let remote_endpoint = (SERVER_IP.parse().unwrap(), 1883);
+            let server_ip: Ipv4Addr = SERVER_IP.parse().expect("Invalid SERVER_IP address");
+            let remote_endpoint = (server_ip, 1883);
             socket.connect(remote_endpoint).await.unwrap();
             info!("Connected to MQTT broker at {}:1883", remote_endpoint.0);
             // hand off to mqtt_task
