@@ -46,6 +46,9 @@ impl Default for BlinkState {
 struct BlinkCube;
 
 #[derive(Component)]
+struct LogoCube;
+
+#[derive(Component)]
 struct ConsoleUi;
 
 fn main() {
@@ -62,7 +65,7 @@ fn main() {
         .add_systems(Update, command_execution)
         .add_systems(Update, update_console_ui)
         .add_systems(Update, blinking_system)
-        .add_systems(Update, blink_publisher_system)
+        .add_systems(Update, (blink_publisher_system, rotate_logo_system))
         .run();
 }
 
@@ -158,6 +161,7 @@ fn setup(
         MeshMaterial3d(esp_logo_material),
         Transform::from_translation(Vec3::new(3.0, 6.5, 2.0)),
         Visibility::default(),
+        LogoCube,
     ));
 
     // console UI
@@ -316,5 +320,16 @@ fn blink_publisher_system(mut blink_state: ResMut<BlinkState>) {
         // give broker time
         std::thread::sleep(Duration::from_millis(100));
         blink_state.last_sent = blink_state.light_state;
+    }
+}
+
+fn rotate_logo_system(
+    time: Res<Time>,
+    mut query: Query<&mut Transform, With<LogoCube>>,
+) {
+    for mut transform in &mut query {
+        // rotate slowly around the Y axis
+        transform.rotate_y(time.delta_secs() * 0.5);
+        transform.rotate_x(time.delta_secs() * 0.5);
     }
 }
