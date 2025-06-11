@@ -90,8 +90,7 @@ async fn main(spawner: Spawner) {
     println!(" ok");
 
     esp_println::logger::init_logger_from_env();
-
-
+    
     const memory_size: usize = 200 * 1024;
     print!("Initializing allocator with {} bytes...", memory_size);
     esp_alloc::heap_allocator!(size: memory_size);
@@ -161,7 +160,7 @@ async fn main(spawner: Spawner) {
 
 #[embassy_executor::task]
 async fn mqtt_launcher(stack: &'static Stack<'static>) {
-    // wait for link up
+    info!("Waiting for network connection...");
     loop {
         if stack.is_link_up() {
             break;

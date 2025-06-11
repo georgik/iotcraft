@@ -15,6 +15,7 @@ runner = "espflash flash --monitor"
 
 [env]
 DEFMT_LOG="info"
+ESP_LOG="INFO"
 
 [build]
 # ESP32-S3
