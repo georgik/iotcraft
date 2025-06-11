@@ -1,4 +1,5 @@
 mod camera_controllers;
+use bevy::prelude::ClearColor;
 use camera_controllers::{CameraController, CameraControllerPlugin};
 use log::info;
 use bevy::prelude::*;
@@ -49,6 +50,7 @@ struct ConsoleUi;
 
 fn main() {
     App::new()
+        .insert_resource(ClearColor(Color::srgb(0.53, 0.81, 0.92)))
         .add_plugins(DefaultPlugins)
         .add_plugins(CameraControllerPlugin)
         .add_systems(Startup, setup)
