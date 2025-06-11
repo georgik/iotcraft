@@ -26,6 +26,7 @@ struct ConsoleState {
 struct BlinkState {
     blinking: bool,
     timer: Timer,
+    light_state: bool,
     last_sent: bool,
 }
 
@@ -33,8 +34,9 @@ impl Default for BlinkState {
     fn default() -> Self {
         Self {
             blinking: false,
+            light_state: true,
             timer: Timer::from_seconds(1.0, TimerMode::Repeating),
-            last_sent: false,
+            last_sent: true,
         }
     }
 }
@@ -252,8 +254,10 @@ fn blinking_system(
                 if let Some(mat) = materials.get_mut(&handle) {
                     // toggle between white and red each second
                     mat.base_color = if mat.base_color == Color::WHITE {
+                        blink_state.light_state = false;
                         Color::BLACK
                     } else {
+                        blink_state.light_state = true;
                         Color::WHITE
                     };
                 }
@@ -262,8 +266,8 @@ fn blinking_system(
     }
 }
 fn blink_publisher_system(mut blink_state: ResMut<BlinkState>) {
-    if blink_state.blinking != blink_state.last_sent {
-        let payload = if blink_state.blinking { "ON" } else { "OFF" };
+    if blink_state.light_state != blink_state.last_sent {
+        let payload = if blink_state.light_state { "ON" } else { "OFF" };
         // sync MQTT client
         let mut opts = MqttOptions::new("bevy_client", "127.0.0.1", 1883);
         opts.set_keep_alive(Duration::from_secs(5));
@@ -279,6 +283,6 @@ fn blink_publisher_system(mut blink_state: ResMut<BlinkState>) {
         }
         // give broker time
         std::thread::sleep(Duration::from_millis(100));
-        blink_state.last_sent = blink_state.blinking;
+        blink_state.last_sent = blink_state.light_state;
     }
 }
