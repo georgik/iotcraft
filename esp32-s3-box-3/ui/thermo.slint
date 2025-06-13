@@ -1,0 +1,21 @@
+export component ThermoWindow inherits Window {
+    width: 320px;
+    height: 240px;
+    title: "Thermometer";
+
+    Text {
+        text: "N/A °C";
+        font-size: 36px;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        width: parent.width;
+        height: parent.height;
+    }
+    Image {
+        source: @image-url("slint-logo-square-light-80x80.png");
+        width: 80px;
+        height: 80px;
+        x: parent.width - self.width;
+        y: parent.height - self.height;
+    }
+}
