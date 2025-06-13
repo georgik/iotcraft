@@ -83,6 +83,22 @@ cd esp32-c3-devkit-rust-1
 cargo run --release
 ```
 
+#### Simulation
+
+Use Wokwi simulator ([wokwi-cli](https://docs.wokwi.com/wokwi-ci/cli-usage), 
+[JetBrains plugin](https://plugins.jetbrains.com/plugin/23826-wokwi-simulator) or 
+[VS Code plugin](https://docs.wokwi.com/vscode/getting-started)) to simulate ESP32-C3 device.
+
+```bash
+export SSID="Wokwi-GUEST"
+export PASSWORD=""
+export SERVER_IP="your_mqtt_broker_ip"
+
+cd esp32-c3-devkit-rust-1
+cargo build --release
+wokwi-cli
+```
+
 ## Development
 
 **Recommended IDE:** RustRover

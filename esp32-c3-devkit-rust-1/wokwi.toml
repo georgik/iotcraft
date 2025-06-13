@@ -1,0 +1,6 @@
+# Wokwi Configuration File
+# Reference: https://docs.wokwi.com/vscode/project-config
+[wokwi]
+version = 1
+firmware = 'target/riscv32imc-unknown-none-elf/release/iotcraft-esp32-c3-devkit-rust-1'
+elf = 'target/riscv32imc-unknown-none-elf/release/iotcraft-esp32-c3-devkit-rust-1'

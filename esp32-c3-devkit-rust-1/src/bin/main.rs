@@ -236,15 +236,22 @@ async fn connection(mut controller: WifiController<'static>) {
             let client_config = Configuration::Client(ClientConfiguration {
                 ssid: SSID.try_into().unwrap(),
                 password: PASSWORD.try_into().unwrap(),
+                auth_method: if !PASSWORD.is_empty() {
+                    esp_wifi::wifi::AuthMethod::WPA2Personal
+                } else {
+                    // No password. E.g., in case of Wokwi simulator
+                    esp_wifi::wifi::AuthMethod::None
+                },
                 ..Default::default()
             });
+
             controller.set_configuration(&client_config).unwrap();
             println!("Starting wifi");
             controller.start_async().await.unwrap();
             println!("Wifi started!");
         }
 
-        println!("About to connect...");
+        println!("About to connect to {}", SSID);
         match controller.connect_async().await {
             Ok(_) => println!("Wifi connected!"),
             Err(e) => {
