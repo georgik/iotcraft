@@ -1,9 +1,128 @@
+#[derive(Parser, ConsoleCommand)]
+#[command(name = "spawn")]
+struct SpawnCommand {
+    /// Device ID
+    device_id: String,
+    /// X coordinate
+    x: f32,
+    /// Y coordinate
+    y: f32,
+    /// Z coordinate
+    z: f32,
+}
+
+fn handle_spawn_command(
+    mut log: ConsoleCommand<SpawnCommand>,
+) {
+    if let Some(Ok(SpawnCommand { device_id, x, y, z })) = log.take() {
+        let payload = json!({
+            "device_id": device_id,
+            "device_type": "lamp",
+            "state": "online",
+            "location": { "x": x, "y": y, "z": z }
+        })
+        .to_string();
+
+        // Create a temporary client for simulation
+        let mut mqtt_options = MqttOptions::new("spawn-client", "127.0.0.1", 1883);
+        mqtt_options.set_keep_alive(Duration::from_secs(5));
+        let (client, mut connection) = Client::new(mqtt_options, 10);
+        
+        client
+            .publish("devices/announce", QoS::AtMostOnce, false, payload.as_bytes())
+            .unwrap();
+
+        // Drive the event loop to ensure the message is sent
+        for notification in connection.iter() {
+            if let Ok(Event::Outgoing(Outgoing::Publish(_))) = notification {
+                break;
+            }
+        }
+
+        reply!(log, "Spawn command sent for device {}", device_id);
+    }
+}
+
+#[derive(Resource)]
+struct DevicesTracker {
+    spawned_devices: HashSet<String>,
+}
+
+#[derive(Resource)]
+struct DeviceAnnouncementReceiver(Mutex<Receiver<String>>);
+
+#[derive(Component)]
+struct DeviceEntity {
+    device_id: String,
+    device_type: String,
+}
+
+fn listen_for_device_announcements(
+    mut commands: Commands,
+    device_receiver: Res<DeviceAnnouncementReceiver>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut tracker: ResMut<DevicesTracker>,
+) {
+    if let Ok(rx) = device_receiver.0.lock() {
+        if let Ok(device_json) = rx.try_recv() {
+            // Parse the JSON device announcement
+            if let Ok(device_data) = serde_json::from_str::<serde_json::Value>(&device_json) {
+                if let (Some(device_id), Some(device_type), Some(location)) = (
+                    device_data["device_id"].as_str(),
+                    device_data["device_type"].as_str(),
+                    device_data["location"].as_object()
+                ) {
+                    if !tracker.spawned_devices.contains(device_id) {
+                        tracker.spawned_devices.insert(device_id.to_string());
+                        
+                        // Extract location coordinates
+                        let x = location["x"].as_f64().unwrap_or(0.0) as f32;
+                        let y = location["y"].as_f64().unwrap_or(0.5) as f32;
+                        let z = location["z"].as_f64().unwrap_or(0.0) as f32;
+                        
+                        // Choose material based on device type
+                        let material = match device_type {
+                            "lamp" => materials.add(StandardMaterial {
+                                base_color: Color::srgb(1.0, 0.8, 0.2),
+                                ..default()
+                            }),
+                            "sensor" => materials.add(StandardMaterial {
+                                base_color: Color::srgb(0.2, 0.8, 1.0),
+                                ..default()
+                            }),
+                            _ => materials.add(StandardMaterial {
+                                base_color: Color::srgb(0.5, 0.5, 0.5),
+                                ..default()
+                            }),
+                        };
+                        
+                        // Spawn the device entity
+                        commands.spawn((
+                            Mesh3d(meshes.add(Cuboid::new(0.8, 0.8, 0.8))),
+                            MeshMaterial3d(material),
+                            Transform::from_translation(Vec3::new(x, y, z)),
+                            DeviceEntity {
+                                device_id: device_id.to_string(),
+                                device_type: device_type.to_string(),
+                            },
+                        ));
+                        
+                        info!("Spawned device: {} of type {} at ({}, {}, {})", device_id, device_type, x, y, z);
+                    }
+                }
+            }
+        }
+    }
+}
+
 use rumqttc::Incoming;
 use std::sync::mpsc::Receiver;
 use std::sync::Mutex;
 use std::sync::mpsc;
 use std::thread;
 mod camera_controllers;
+use std::collections::HashSet;
 use bevy::prelude::ClearColor;
 use camera_controllers::{CameraController, CameraControllerPlugin};
 use log::info;
@@ -17,6 +136,7 @@ use bevy::pbr::MeshMaterial3d;
 use bevy::prelude::{StandardMaterial, Assets};
 use bevy_console::{ConsolePlugin, ConsoleCommand, reply, AddConsoleCommand, ConsoleConfiguration, ConsoleOpen, ConsoleSet};
 use clap::Parser;
+use serde_json::json;
 
 // Console commands for bevy_console
 #[derive(Parser, ConsoleCommand)]
@@ -99,6 +219,27 @@ fn spawn_mqtt_subscriber(mut commands: Commands) {
         }
     });
     commands.insert_resource(TemperatureReceiver(Mutex::new(rx)));
+
+    // Create device announcement channel
+    let (device_tx, device_rx) = mpsc::channel::<String>();
+    commands.insert_resource(DeviceAnnouncementReceiver(Mutex::new(device_rx)));
+    commands.insert_resource(DevicesTracker { spawned_devices: HashSet::new() });
+    
+    // Subscribe to device announcements
+    thread::spawn(move || {
+        let mut mqttoptions = MqttOptions::new("device-subscriber", "127.0.0.1", 1883);
+        mqttoptions.set_keep_alive(Duration::from_secs(5));
+        let (client, mut connection) = Client::new(mqttoptions, 10);
+        client.subscribe("devices/announce", QoS::AtMostOnce).unwrap();
+        
+        for notification in connection.iter() {
+            if let Ok(Event::Incoming(Incoming::Publish(p))) = notification {
+                if let Ok(s) = String::from_utf8(p.payload.to_vec()) {
+                    let _ = device_tx.send(s);
+                }
+            }
+        }
+    });
 }
 
 fn main() {
@@ -117,6 +258,7 @@ fn main() {
         })
         .add_console_command::<BlinkCommand, _>(handle_blink_command)
         .add_console_command::<MqttCommand, _>(handle_mqtt_command)
+        .add_console_command::<SpawnCommand, _>(handle_spawn_command)
         .insert_resource(BlinkState::default())
         .insert_resource(TemperatureResource::default())
         .add_systems(Startup, setup)
@@ -127,6 +269,7 @@ fn main() {
         .add_systems(Update, (update_thermometer_material, update_temperature, update_thermometer_scale))
         .add_systems(Update, manage_camera_controller)
         .add_systems(Update, handle_console_escape.after(ConsoleSet::Commands))
+        .add_systems(Update, listen_for_device_announcements)
         .add_systems(Update, handle_console_t_key.after(ConsoleSet::Commands))
         .run();
 }
