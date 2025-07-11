@@ -12,20 +12,25 @@ use bevy::asset::Handle;
 use bevy::image::Image;
 use std::time::Duration;
 use rumqttc::{Client, MqttOptions, QoS, Event, Outgoing};
-use bevy::ui::{Node, PositionType, Val, BackgroundColor};
-use bevy::render::view::Visibility;
-use bevy::text::{TextFont, TextColor, TextLayout, JustifyText};
-use bevy::input::ButtonInput;
-use bevy::input::keyboard::KeyboardInput;
-use bevy::input::ButtonState;
 use bevy::time::{Timer, TimerMode};
 use bevy::pbr::MeshMaterial3d;
 use bevy::prelude::{StandardMaterial, Assets};
+use bevy_console::{ConsolePlugin, ConsoleCommand, reply, AddConsoleCommand, ConsoleConfiguration};
+use clap::Parser;
 
-#[derive(Resource, Default)]
-struct ConsoleState {
-    active: bool,
-    input: String,
+// Console commands for bevy_console
+#[derive(Parser, ConsoleCommand)]
+#[command(name = "blink")]
+struct BlinkCommand {
+    /// Action to perform: start or stop
+    action: String,
+}
+
+#[derive(Parser, ConsoleCommand)]
+#[command(name = "mqtt")]
+struct MqttCommand {
+    /// MQTT action: status or reconnect
+    action: String,
 }
 
 #[derive(Resource)]
@@ -53,8 +58,7 @@ struct BlinkCube;
 #[derive(Component)]
 struct LogoCube;
 
-#[derive(Component)]
-struct ConsoleUi;
+// ConsoleUi component is no longer needed with bevy_console
 
 #[derive(Resource)]
 struct TemperatureResource {
@@ -82,7 +86,7 @@ fn spawn_mqtt_subscriber(mut commands: Commands) {
     thread::spawn(move || {
         let mut mqttoptions = MqttOptions::new("desktop-subscriber", "127.0.0.1", 1883);
         mqttoptions.set_keep_alive(Duration::from_secs(5));
-        let (mut client, mut connection) = Client::new(mqttoptions, 10);
+        let (client, mut connection) = Client::new(mqttoptions, 10);
         client.subscribe("home/sensor/temperature", QoS::AtMostOnce).unwrap();
         for notification in connection.iter() {
             if let Ok(Event::Incoming(Incoming::Publish(p))) = notification {
@@ -102,16 +106,18 @@ fn main() {
         .insert_resource(ClearColor(Color::srgb(0.53, 0.81, 0.92)))
         .add_plugins(DefaultPlugins)
         .add_plugins(CameraControllerPlugin)
-        .add_systems(Startup, setup)
-        .add_systems(Update, draw_cursor)
-        .insert_resource(ConsoleState::default())
+        .add_plugins(ConsolePlugin)
+        .insert_resource(ConsoleConfiguration {
+            keys: vec![KeyCode::F12],
+            ..default()
+        })
+        .add_console_command::<BlinkCommand, _>(handle_blink_command)
+        .add_console_command::<MqttCommand, _>(handle_mqtt_command)
         .insert_resource(BlinkState::default())
         .insert_resource(TemperatureResource::default())
-        .add_systems(Update, toggle_console)
+        .add_systems(Startup, setup)
+        .add_systems(Update, draw_cursor)
         .add_systems(Startup, spawn_mqtt_subscriber)
-        .add_systems(Update, console_input)
-        .add_systems(Update, command_execution)
-        .add_systems(Update, update_console_ui)
         .add_systems(Update, blinking_system)
         .add_systems(Update, (blink_publisher_system, rotate_logo_system))
         .add_systems(Update, (update_thermometer_material, update_temperature, update_thermometer_scale))
@@ -227,26 +233,7 @@ fn setup(
     ));
     commands.insert_resource(ThermometerMaterial(thermo_handle));
 
-    // console UI
-    commands.spawn((
-        Text::new(""),
-        TextFont {
-            font: asset_server.load("fonts/FiraSans-Bold.ttf"),
-            font_size: 20.0,
-            ..default()
-        },
-        TextColor(Color::WHITE),
-        TextLayout::new_with_justify(JustifyText::Left),
-        Node {
-            position_type: PositionType::Absolute,
-            bottom: Val::Px(5.0),
-            left: Val::Px(5.0),
-            ..default()
-        },
-        BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.5)),
-        Visibility::Hidden,
-        ConsoleUi,
-    ));
+    // bevy_console handles the console UI now
 
     // light
     commands.spawn((
@@ -262,77 +249,57 @@ fn setup(
     ));
 }
 
-fn toggle_console(
-    mut console_state: ResMut<ConsoleState>,
-    mut keyboard_input: ResMut<ButtonInput<KeyCode>>,
-) {
-    if keyboard_input.just_pressed(KeyCode::F12) && !console_state.active {
-        console_state.active = true;
-        keyboard_input.clear_just_pressed(KeyCode::F12);
-    }
-}
-
-fn console_input(
-    mut console_state: ResMut<ConsoleState>,
-    mut key_evr: EventReader<KeyboardInput>,
-) {
-    if !console_state.active {
-        return;
-    }
-    for ev in key_evr.read() {
-        if ev.state == ButtonState::Pressed {
-            if let Some(text) = &ev.text {
-                console_state.input.push_str(text);
-            }
-            if ev.key_code == KeyCode::Backspace {
-                console_state.input.pop();
-            }
-        }
-    }
-}
-
-fn command_execution(
-    mut console_state: ResMut<ConsoleState>,
+// Console command handlers
+fn handle_blink_command(
+    mut log: ConsoleCommand<BlinkCommand>,
     mut blink_state: ResMut<BlinkState>,
-    keyboard_input: Res<ButtonInput<KeyCode>>,
 ) {
-    if !console_state.active {
-        return;
-    }
-    if keyboard_input.just_pressed(KeyCode::Enter) {
-        let cmd = console_state.input.trim();
-        match cmd {
-            "blink start" => {
+    if let Some(Ok(BlinkCommand { action })) = log.take() {
+        match action.as_str() {
+            "start" => {
                 blink_state.blinking = true;
-                info!("Command executed: {}", cmd);
+                reply!(log, "Blink started");
+                info!("Blink started via console");
             }
-            "blink stop" => {
+            "stop" => {
                 blink_state.blinking = false;
-                info!("Command executed: {}", cmd);
+                reply!(log, "Blink stopped");
+                info!("Blink stopped via console");
             }
-            "help" => {
-                console_state.input = "Commands:\nhelp\nblink start\nblink stop".to_string();
-                // keep console open to show help
-                return;
+            _ => {
+                reply!(log, "Usage: blink [start|stop]");
             }
-            _ => {}
         }
-        console_state.input.clear();
-        console_state.active = false;
     }
 }
 
-fn update_console_ui(
-    console_state: Res<ConsoleState>,
-    mut query: Query<(&mut Text, &mut Visibility), With<ConsoleUi>>,
+fn handle_mqtt_command(
+    mut log: ConsoleCommand<MqttCommand>,
+    temperature: Res<TemperatureResource>,
 ) {
-    for (mut text, mut visibility) in query.iter_mut() {
-        text.0 = console_state.input.clone();
-        *visibility = if console_state.active {
-            Visibility::Visible
-        } else {
-            Visibility::Hidden
-        };
+    if let Some(Ok(MqttCommand { action })) = log.take() {
+        match action.as_str() {
+            "status" => {
+                let status = if temperature.value.is_some() {
+                    "Connected to MQTT broker"
+                } else {
+                    "Connecting to MQTT broker..."
+                };
+                reply!(log, "{}", status);
+                info!("MQTT status requested via console");
+            }
+            "temp" => {
+                let temp_msg = if let Some(val) = temperature.value {
+                    format!("Current temperature: {:.1}°C", val)
+                } else {
+                    "No temperature data available".to_string()
+                };
+                reply!(log, "{}", temp_msg);
+            }
+            _ => {
+                reply!(log, "Usage: mqtt [status|temp]");
+            }
+        }
     }
 }
 
@@ -401,7 +368,7 @@ fn update_temperature(
     mut temp_res: ResMut<TemperatureResource>,
     receiver: Res<TemperatureReceiver>,
 ) {
-    if let Ok(mut rx) = receiver.0.lock() {
+    if let Ok(rx) = receiver.0.lock() {
         if let Ok(val) = rx.try_recv() {
             temp_res.value = Some(val);
         }
