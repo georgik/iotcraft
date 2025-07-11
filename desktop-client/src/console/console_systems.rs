@@ -1,14 +1,14 @@
 use bevy::prelude::*;
-use bevy_console::{reply, ConsoleCommand};
+use bevy_console::{ConsoleCommand, reply};
 use log::info;
-use std::time::Duration;
 use std::fs;
-use rumqttc::{Client, MqttOptions, QoS, Event, Outgoing};
+use std::time::Duration;
 use serde_json::json;
+use rumqttc::{Client, MqttOptions, QoS, Event, Outgoing};
 
 use super::console_types::*;
-use crate::mqtt::TemperatureResource;
 use crate::script::{ScriptExecutor, execute_script};
+use crate::mqtt::TemperatureResource;
 
 pub struct ConsolePlugin;
 

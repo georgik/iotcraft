@@ -1,6 +1,8 @@
 use bevy::prelude::*;
+use bevy_console::PrintConsoleLine;
+use log::info;
 use super::{script_types::*, script_helpers::*};
-use crate::console::{PrintConsoleLine, BlinkState};
+use crate::console::BlinkState;
 use crate::mqtt::TemperatureResource;
 
 pub struct ScriptPlugin;
@@ -52,8 +54,8 @@ pub fn script_execution_system(
 
 pub fn execute_pending_commands(
     mut pending_commands: ResMut<PendingCommands>,
-    mut print_console_line: EventWriter<super::console::PrintConsoleLine>,
-    mut blink_state: ResMut<super::console::BlinkState>,
+    mut print_console_line: EventWriter<PrintConsoleLine>,
+    mut blink_state: ResMut<BlinkState>,
     temperature: Res<crate::mqtt::TemperatureResource>,
 ) {
     for command in pending_commands.commands.drain(..) {

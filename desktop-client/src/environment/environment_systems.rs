@@ -4,7 +4,6 @@ use bevy::pbr::{MeshMaterial3d, PointLight};
 use super::environment_types::*;
 use crate::mqtt::TemperatureResource;
 use crate::console::BlinkCube;
-use crate::console::BlinkCube;
 use crate::camera_controllers::CameraController;
 
 pub struct EnvironmentPlugin;
@@ -98,7 +97,7 @@ fn setup(
 
 fn blinking_system(
     time: Res<Time>,
-    mut blink_state: ResMut<super::console::BlinkState>,
+    mut blink_state: ResMut<crate::console::BlinkState>,
     query: Query<&MeshMaterial3d<StandardMaterial>, With<BlinkCube>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {

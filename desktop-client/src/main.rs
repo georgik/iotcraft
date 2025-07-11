@@ -1,21 +1,56 @@
 use bevy::prelude::*;
 use camera_controllers::{CameraController, CameraControllerPlugin};
-use bevy_console::{ConsolePlugin, ConsoleCommand, reply, AddConsoleCommand, ConsoleConfiguration, ConsoleOpen, ConsoleSet, PrintConsoleLine};
-use clap::Parser;
-use log::{info, error};
+use bevy_console::{AddConsoleCommand, ConsoleCommand, reply, ConsoleOpen, PrintConsoleLine, ConsoleSet};
+use rumqttc::{Client, MqttOptions, QoS, Incoming, Event, Outgoing};
 use serde_json::json;
-use std::time::Duration;
-use std::fs;
-use rumqttc::{Client, MqttOptions, QoS, Event, Outgoing};
-use rumqttc::Incoming;
-use std::sync::mpsc::Receiver;
+use std::sync::mpsc::{self, Receiver};
 use std::sync::Mutex;
-use std::sync::mpsc;
 use std::thread;
 use std::collections::HashSet;
-use bevy::pbr::MeshMaterial3d;
+use std::time::Duration;
+use std::fs;
+use bevy_console::{ConsolePlugin, ConsoleConfiguration};
+use clap::Parser;
+use log::{info, error};
 
 mod camera_controllers;
+mod console;
+mod devices;
+mod environment;
+mod mqtt;
+mod script;
+
+// Re-export types for easier access
+use console::*;
+use devices::*;
+use environment::*;
+use mqtt::*;
+use script::*;
+
+// Define handle_blink_command function for console
+fn handle_blink_command(
+    mut log: ConsoleCommand<BlinkCommand>,
+    mut blink_state: ResMut<BlinkState>,
+) {
+    if let Some(Ok(BlinkCommand { action })) = log.take() {
+        info!("Console command: blink {}", action);
+        match action.as_str() {
+            "start" => {
+                blink_state.blinking = true;
+                reply!(log, "Blink started");
+                info!("Blink started via console");
+            }
+            "stop" => {
+                blink_state.blinking = false;
+                reply!(log, "Blink stopped");
+                info!("Blink stopped via console");
+            }
+            _ => {
+                reply!(log, "Usage: blink [start|stop]");
+            }
+        }
+    }
+}
 
 // CLI arguments
 #[derive(Parser)]
@@ -101,20 +136,6 @@ struct BlinkCube;
 struct LogoCube;
 
 // ConsoleUi component is no longer needed with bevy_console
-
-#[derive(Resource)]
-struct TemperatureResource {
-    value: Option<f32>,
-}
-
-impl Default for TemperatureResource {
-    fn default() -> Self {
-        Self { value: None }
-    }
-}
-
-#[derive(Resource)]
-struct TemperatureReceiver(Mutex<Receiver<f32>>);
 
 #[derive(Component)]
 struct Thermometer;
@@ -548,31 +569,6 @@ fn setup(
         Transform::from_xyz(15.0, 5.0, 15.0).looking_at(Vec3::ZERO, Vec3::Y),
         CameraController::default(),
     ));
-}
-
-// Console command handlers
-fn handle_blink_command(
-    mut log: ConsoleCommand<BlinkCommand>,
-    mut blink_state: ResMut<BlinkState>,
-) {
-    if let Some(Ok(BlinkCommand { action })) = log.take() {
-        info!("Console command: blink {}", action);
-        match action.as_str() {
-            "start" => {
-                blink_state.blinking = true;
-                reply!(log, "Blink started");
-                info!("Blink started via console");
-            }
-            "stop" => {
-                blink_state.blinking = false;
-                reply!(log, "Blink stopped");
-                info!("Blink stopped via console");
-            }
-            _ => {
-                reply!(log, "Usage: blink [start|stop]");
-            }
-        }
-    }
 }
 
 fn handle_mqtt_command(
