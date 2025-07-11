@@ -1,144 +1,21 @@
-#[derive(Parser, ConsoleCommand)]
-#[command(name = "spawn")]
-struct SpawnCommand {
-    /// Device ID
-    device_id: String,
-    /// X coordinate
-    x: f32,
-    /// Y coordinate
-    y: f32,
-    /// Z coordinate
-    z: f32,
-}
-
-fn handle_spawn_command(
-    mut log: ConsoleCommand<SpawnCommand>,
-) {
-    if let Some(Ok(SpawnCommand { device_id, x, y, z })) = log.take() {
-        info!("Console command: spawn {}", device_id);
-        let payload = json!({
-            "device_id": device_id,
-            "device_type": "lamp",
-            "state": "online",
-            "location": { "x": x, "y": y, "z": z }
-        })
-        .to_string();
-
-        // Create a temporary client for simulation
-        let mut mqtt_options = MqttOptions::new("spawn-client", "127.0.0.1", 1883);
-        mqtt_options.set_keep_alive(Duration::from_secs(5));
-        let (client, mut connection) = Client::new(mqtt_options, 10);
-        
-        client
-            .publish("devices/announce", QoS::AtMostOnce, false, payload.as_bytes())
-            .unwrap();
-
-        // Drive the event loop to ensure the message is sent
-        for notification in connection.iter() {
-            if let Ok(Event::Outgoing(Outgoing::Publish(_))) = notification {
-                break;
-            }
-        }
-
-        reply!(log, "Spawn command sent for device {}", device_id);
-    }
-}
-
-#[derive(Resource)]
-struct DevicesTracker {
-    spawned_devices: HashSet<String>,
-}
-
-#[derive(Resource)]
-struct DeviceAnnouncementReceiver(Mutex<Receiver<String>>);
-
-#[derive(Component)]
-struct DeviceEntity {
-    device_id: String,
-    device_type: String,
-}
-
-fn listen_for_device_announcements(
-    mut commands: Commands,
-    device_receiver: Res<DeviceAnnouncementReceiver>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut tracker: ResMut<DevicesTracker>,
-) {
-    if let Ok(rx) = device_receiver.0.lock() {
-        if let Ok(device_json) = rx.try_recv() {
-            // Parse the JSON device announcement
-            if let Ok(device_data) = serde_json::from_str::<serde_json::Value>(&device_json) {
-                if let (Some(device_id), Some(device_type), Some(location)) = (
-                    device_data["device_id"].as_str(),
-                    device_data["device_type"].as_str(),
-                    device_data["location"].as_object()
-                ) {
-                    if !tracker.spawned_devices.contains(device_id) {
-                        tracker.spawned_devices.insert(device_id.to_string());
-                        
-                        // Extract location coordinates
-                        let x = location["x"].as_f64().unwrap_or(0.0) as f32;
-                        let y = location["y"].as_f64().unwrap_or(0.5) as f32;
-                        let z = location["z"].as_f64().unwrap_or(0.0) as f32;
-                        
-                        // Choose material based on device type
-                        let material = match device_type {
-                            "lamp" => materials.add(StandardMaterial {
-                                base_color: Color::srgb(1.0, 0.8, 0.2),
-                                ..default()
-                            }),
-                            "sensor" => materials.add(StandardMaterial {
-                                base_color: Color::srgb(0.2, 0.8, 1.0),
-                                ..default()
-                            }),
-                            _ => materials.add(StandardMaterial {
-                                base_color: Color::srgb(0.5, 0.5, 0.5),
-                                ..default()
-                            }),
-                        };
-                        
-                        // Spawn the device entity
-                        commands.spawn((
-                            Mesh3d(meshes.add(Cuboid::new(0.8, 0.8, 0.8))),
-                            MeshMaterial3d(material),
-                            Transform::from_translation(Vec3::new(x, y, z)),
-                            DeviceEntity {
-                                device_id: device_id.to_string(),
-                                device_type: device_type.to_string(),
-                            },
-                        ));
-                        
-                        info!("Spawned device: {} of type {} at ({}, {}, {})", device_id, device_type, x, y, z);
-                    }
-                }
-            }
-        }
-    }
-}
-
+use bevy::prelude::*;
+use camera_controllers::{CameraController, CameraControllerPlugin};
+use bevy_console::{ConsolePlugin, ConsoleCommand, reply, AddConsoleCommand, ConsoleConfiguration, ConsoleOpen, ConsoleSet, PrintConsoleLine};
+use clap::Parser;
+use log::{info, error};
+use serde_json::json;
+use std::time::Duration;
+use std::fs;
+use rumqttc::{Client, MqttOptions, QoS, Event, Outgoing};
 use rumqttc::Incoming;
 use std::sync::mpsc::Receiver;
 use std::sync::Mutex;
 use std::sync::mpsc;
 use std::thread;
-mod camera_controllers;
 use std::collections::HashSet;
-use bevy::prelude::ClearColor;
-use camera_controllers::{CameraController, CameraControllerPlugin};
-use log::{info, error};
-use bevy::prelude::*;
-use bevy::asset::Handle;
-use bevy::image::Image;
-use std::time::Duration;
-use rumqttc::{Client, MqttOptions, QoS, Event, Outgoing};
-use bevy::time::{Timer, TimerMode};
 use bevy::pbr::MeshMaterial3d;
-use bevy::prelude::{StandardMaterial, Assets};
-use bevy_console::{ConsolePlugin, ConsoleCommand, reply, AddConsoleCommand, ConsoleConfiguration, ConsoleOpen, ConsoleSet, PrintConsoleLine};
-use clap::Parser;
-use std::fs;
-use serde_json::json;
+
+mod camera_controllers;
 
 // CLI arguments
 #[derive(Parser)]
@@ -169,6 +46,33 @@ struct MqttCommand {
 struct LoadCommand {
     /// Script file to load and execute
     filename: String,
+}
+
+#[derive(Parser, ConsoleCommand)]
+#[command(name = "spawn")]
+struct SpawnCommand {
+    /// Device ID
+    device_id: String,
+    /// X coordinate
+    x: f32,
+    /// Y coordinate
+    y: f32,
+    /// Z coordinate
+    z: f32,
+}
+
+#[derive(Resource)]
+struct DevicesTracker {
+    spawned_devices: HashSet<String>,
+}
+
+#[derive(Resource)]
+struct DeviceAnnouncementReceiver(Mutex<Receiver<String>>);
+
+#[derive(Component)]
+struct DeviceEntity {
+    device_id: String,
+    device_type: String,
 }
 
 #[derive(Resource)]
@@ -475,12 +379,13 @@ fn execute_pending_commands(
 fn main() {
     let args = Args::parse();
     let mut script_executor = ScriptExecutor::default();
-    
+
     // Set up startup script if provided
     if let Some(script_file) = args.script {
         script_executor.startup_script = Some(script_file);
         script_executor.execute_startup = true;
     }
+
     App::new()
         .insert_resource(ClearColor(Color::srgb(0.53, 0.81, 0.92)))
         .add_plugins(DefaultPlugins)
@@ -701,6 +606,51 @@ fn handle_mqtt_command(
     }
 }
 
+fn handle_spawn_command(
+    mut log: ConsoleCommand<SpawnCommand>,
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    asset_server: Res<AssetServer>,
+    mut devices_tracker: ResMut<DevicesTracker>,
+) {
+    if let Some(Ok(SpawnCommand { device_id, x, y, z })) = log.take() {
+        info!("Console command: spawn {} {} {} {}", device_id, x, y, z);
+        
+        // Check if device is already spawned
+        if devices_tracker.spawned_devices.contains(&device_id) {
+            reply!(log, "Device {} already spawned", device_id);
+            return;
+        }
+        
+        // Create device entity
+        let cube_mesh = meshes.add(Cuboid::new(1.0, 1.0, 1.0));
+        let lamp_texture: Handle<Image> = asset_server.load("textures/lamp.png");
+        let lamp_material = materials.add(StandardMaterial {
+            base_color_texture: Some(lamp_texture),
+            base_color: Color::srgb(0.2, 0.2, 0.2),
+            ..default()
+        });
+        
+        commands.spawn((
+            Mesh3d(cube_mesh),
+            MeshMaterial3d(lamp_material),
+            Transform::from_translation(Vec3::new(x, y, z)),
+            DeviceEntity {
+                device_id: device_id.clone(),
+                device_type: "lamp".to_string(),
+            },
+            Visibility::default(),
+        ));
+        
+        // Track the spawned device
+        devices_tracker.spawned_devices.insert(device_id.clone());
+        
+        reply!(log, "Device {} spawned at ({}, {}, {})", device_id, x, y, z);
+        info!("Device {} spawned via console", device_id);
+    }
+}
+
 fn blinking_system(
     time: Res<Time>,
     mut blink_state: ResMut<BlinkState>,
@@ -833,3 +783,63 @@ fn handle_console_t_key(
         console_open.open = true;
     }
 }
+
+// System to listen for device announcements via MQTT
+fn listen_for_device_announcements(
+    receiver: Res<DeviceAnnouncementReceiver>,
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    asset_server: Res<AssetServer>,
+    mut devices_tracker: ResMut<DevicesTracker>,
+) {
+    if let Ok(rx) = receiver.0.lock() {
+        while let Ok(announcement) = rx.try_recv() {
+            // Parse the JSON announcement
+            if let Ok(device_info) = serde_json::from_str::<serde_json::Value>(&announcement) {
+                if let (Some(device_id), Some(location)) = (
+                    device_info.get("device_id").and_then(|v| v.as_str()),
+                    device_info.get("location")
+                ) {
+                    if let (Some(x), Some(y), Some(z)) = (
+                        location.get("x").and_then(|v| v.as_f64()),
+                        location.get("y").and_then(|v| v.as_f64()),
+                        location.get("z").and_then(|v| v.as_f64())
+                    ) {
+                        // Check if device is already spawned
+                        if !devices_tracker.spawned_devices.contains(device_id) {
+                            // Create device entity
+                            let cube_mesh = meshes.add(Cuboid::new(1.0, 1.0, 1.0));
+                            let lamp_texture: Handle<Image> = asset_server.load("textures/lamp.png");
+                            let lamp_material = materials.add(StandardMaterial {
+                                base_color_texture: Some(lamp_texture),
+                                base_color: Color::srgb(0.2, 0.2, 0.2),
+                                ..default()
+                            });
+                            
+                            commands.spawn((
+                                Mesh3d(cube_mesh),
+                                MeshMaterial3d(lamp_material),
+                                Transform::from_translation(Vec3::new(x as f32, y as f32, z as f32)),
+                                DeviceEntity {
+                                    device_id: device_id.to_string(),
+                                    device_type: device_info.get("device_type")
+                                        .and_then(|v| v.as_str())
+                                        .unwrap_or("unknown")
+                                        .to_string(),
+                                },
+                                Visibility::default(),
+                            ));
+                            
+                            // Track the spawned device
+                            devices_tracker.spawned_devices.insert(device_id.to_string());
+                            
+                            info!("Device {} spawned at ({}, {}, {}) via MQTT", device_id, x, y, z);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
