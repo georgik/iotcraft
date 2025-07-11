@@ -15,7 +15,7 @@ use rumqttc::{Client, MqttOptions, QoS, Event, Outgoing};
 use bevy::time::{Timer, TimerMode};
 use bevy::pbr::MeshMaterial3d;
 use bevy::prelude::{StandardMaterial, Assets};
-use bevy_console::{ConsolePlugin, ConsoleCommand, reply, AddConsoleCommand, ConsoleConfiguration};
+use bevy_console::{ConsolePlugin, ConsoleCommand, reply, AddConsoleCommand, ConsoleConfiguration, ConsoleOpen, ConsoleSet};
 use clap::Parser;
 
 // Console commands for bevy_console
@@ -109,6 +109,10 @@ fn main() {
         .add_plugins(ConsolePlugin)
         .insert_resource(ConsoleConfiguration {
             keys: vec![KeyCode::F12],
+            left_pos: 200.0,
+            top_pos: 100.0,
+            height: 400.0,
+            width: 800.0,
             ..default()
         })
         .add_console_command::<BlinkCommand, _>(handle_blink_command)
@@ -121,6 +125,9 @@ fn main() {
         .add_systems(Update, blinking_system)
         .add_systems(Update, (blink_publisher_system, rotate_logo_system))
         .add_systems(Update, (update_thermometer_material, update_temperature, update_thermometer_scale))
+        .add_systems(Update, manage_camera_controller)
+        .add_systems(Update, handle_console_escape.after(ConsoleSet::Commands))
+        .add_systems(Update, handle_console_t_key.after(ConsoleSet::Commands))
         .run();
 }
 
@@ -129,7 +136,10 @@ fn draw_cursor(
     ground: Single<&GlobalTransform, With<Ground>>,
     windows: Query<&Window>,
     mut gizmos: Gizmos,
+    console_open: Res<ConsoleOpen>,
 ) {
+    if console_open.open { return; }
+
     let Ok(windows) = windows.single() else {
         return;
     };
@@ -401,5 +411,37 @@ fn update_thermometer_scale(
             let scale_y = (value / 100.0).clamp(0.1, 2.0);
             transform.scale = Vec3::new(1.0, scale_y, 1.0);
         }
+    }
+}
+
+// System to manage camera controller state based on console state
+fn manage_camera_controller(
+    console_open: Res<ConsoleOpen>,
+    mut camera_query: Query<&mut CameraController, With<Camera>>,
+) {
+    if let Ok(mut camera_controller) = camera_query.single_mut() {
+        // Disable camera controller when console is open
+        camera_controller.enabled = !console_open.open;
+    }
+}
+
+// System to handle ESC key to close console
+fn handle_console_escape(
+    mut console_open: ResMut<ConsoleOpen>,
+    keyboard_input: Res<ButtonInput<KeyCode>>,
+) {
+    if keyboard_input.just_pressed(KeyCode::Escape) && console_open.open {
+        console_open.open = false;
+    }
+}
+
+// System to handle 't' key to open console (only when closed)
+fn handle_console_t_key(
+    mut console_open: ResMut<ConsoleOpen>,
+    keyboard_input: Res<ButtonInput<KeyCode>>,
+) {
+    // Only open console with 't' when it's currently closed
+    if keyboard_input.just_pressed(KeyCode::KeyT) && !console_open.open {
+        console_open.open = true;
     }
 }
