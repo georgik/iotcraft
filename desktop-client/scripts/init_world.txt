@@ -1,0 +1,14 @@
+# IoT Craft World Initialization Script
+# This script demonstrates the script loading functionality
+
+# Spawn some devices to populate the world
+spawn ESP32-C3-01 2.0 0.5 1.0
+spawn ESP32-C3-02 -2.0 0.5 1.0
+spawn ESP32-C6-01 0.0 0.5 3.0
+spawn ESP32-S3-01 4.0 0.5 -1.0
+
+# Start the blinking system
+blink start
+
+# Check MQTT status
+mqtt status

@@ -15,6 +15,7 @@ fn handle_spawn_command(
     mut log: ConsoleCommand<SpawnCommand>,
 ) {
     if let Some(Ok(SpawnCommand { device_id, x, y, z })) = log.take() {
+        info!("Console command: spawn {}", device_id);
         let payload = json!({
             "device_id": device_id,
             "device_type": "lamp",
@@ -125,7 +126,7 @@ mod camera_controllers;
 use std::collections::HashSet;
 use bevy::prelude::ClearColor;
 use camera_controllers::{CameraController, CameraControllerPlugin};
-use log::info;
+use log::{info, error};
 use bevy::prelude::*;
 use bevy::asset::Handle;
 use bevy::image::Image;
@@ -134,9 +135,19 @@ use rumqttc::{Client, MqttOptions, QoS, Event, Outgoing};
 use bevy::time::{Timer, TimerMode};
 use bevy::pbr::MeshMaterial3d;
 use bevy::prelude::{StandardMaterial, Assets};
-use bevy_console::{ConsolePlugin, ConsoleCommand, reply, AddConsoleCommand, ConsoleConfiguration, ConsoleOpen, ConsoleSet};
+use bevy_console::{ConsolePlugin, ConsoleCommand, reply, AddConsoleCommand, ConsoleConfiguration, ConsoleOpen, ConsoleSet, PrintConsoleLine};
 use clap::Parser;
+use std::fs;
 use serde_json::json;
+
+// CLI arguments
+#[derive(Parser)]
+#[command(author, version, about, long_about = None)]
+struct Args {
+    /// Script file to execute on startup
+    #[arg(short, long)]
+    script: Option<String>,
+}
 
 // Console commands for bevy_console
 #[derive(Parser, ConsoleCommand)]
@@ -151,6 +162,13 @@ struct BlinkCommand {
 struct MqttCommand {
     /// MQTT action: status or reconnect
     action: String,
+}
+
+#[derive(Parser, ConsoleCommand)]
+#[command(name = "load")]
+struct LoadCommand {
+    /// Script file to load and execute
+    filename: String,
 }
 
 #[derive(Resource)]
@@ -242,7 +260,227 @@ fn spawn_mqtt_subscriber(mut commands: Commands) {
     });
 }
 
+// Script execution system
+#[derive(Resource)]
+struct ScriptExecutor {
+    commands: Vec<String>,
+    current_index: usize,
+    delay_timer: Timer,
+    startup_script: Option<String>,
+    execute_startup: bool,
+}
+
+#[derive(Resource)]
+struct PendingCommands {
+    commands: Vec<String>,
+}
+
+impl Default for ScriptExecutor {
+    fn default() -> Self {
+        Self {
+            commands: Vec::new(),
+            current_index: 0,
+            delay_timer: Timer::from_seconds(0.1, TimerMode::Repeating),
+            startup_script: None,
+            execute_startup: false,
+        }
+    }
+}
+
+fn execute_script(content: &str) -> Vec<String> {
+    content
+        .lines()
+        .map(|line| line.trim())
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        .map(|line| line.to_string())
+        .collect()
+}
+
+fn handle_load_command(
+    mut log: ConsoleCommand<LoadCommand>,
+    mut script_executor: ResMut<ScriptExecutor>,
+) {
+    if let Some(Ok(LoadCommand { filename })) = log.take() {
+        info!("Console command: load {}", filename);
+        match fs::read_to_string(&filename) {
+            Ok(content) => {
+                let commands = execute_script(&content);
+                script_executor.commands = commands;
+                script_executor.current_index = 0;
+                reply!(log, "Loaded {} commands from {}", script_executor.commands.len(), filename);
+                info!("Loaded script file: {}", filename);
+            }
+            Err(e) => {
+                reply!(log, "Error loading script {}: {}", filename, e);
+            }
+        }
+    }
+}
+
+fn script_execution_system(
+    mut script_executor: ResMut<ScriptExecutor>,
+    time: Res<Time>,
+    mut pending_commands: ResMut<PendingCommands>,
+) {
+    // Handle startup script execution
+    if script_executor.execute_startup {
+        if let Some(ref startup_script) = script_executor.startup_script.clone() {
+            match fs::read_to_string(startup_script) {
+                Ok(content) => {
+                    let commands = execute_script(&content);
+                    script_executor.commands = commands;
+                    script_executor.current_index = 0;
+                    info!("Loaded startup script: {}", startup_script);
+                }
+                Err(e) => {
+                    error!("Error loading startup script {}: {}", startup_script, e);
+                }
+            }
+        }
+        script_executor.execute_startup = false;
+    }
+    
+    // Execute commands from script
+    if !script_executor.commands.is_empty() && script_executor.current_index < script_executor.commands.len() {
+        script_executor.delay_timer.tick(time.delta());
+        
+        if script_executor.delay_timer.just_finished() {
+            let command = &script_executor.commands[script_executor.current_index];
+            
+            // Log the command execution
+            info!("Executing script command: {}", command);
+            
+            // Queue the command for execution
+            pending_commands.commands.push(command.clone());
+            
+            script_executor.current_index += 1;
+            
+            // Check if we've finished executing all commands
+            if script_executor.current_index >= script_executor.commands.len() {
+                script_executor.commands.clear();
+                script_executor.current_index = 0;
+                info!("Script execution completed");
+            }
+        }
+    }
+}
+
+fn execute_pending_commands(
+    mut pending_commands: ResMut<PendingCommands>,
+    mut print_console_line: EventWriter<PrintConsoleLine>,
+    mut blink_state: ResMut<BlinkState>,
+    temperature: Res<TemperatureResource>,
+) {
+    for command in pending_commands.commands.drain(..) {
+        info!("Executing queued command: {}", command);
+
+        // Parse command string and dispatch to appropriate handler
+        let parts: Vec<&str> = command.split_whitespace().collect();
+        if parts.is_empty() {
+            continue;
+        }
+
+        match parts[0] {
+            "blink" => {
+                if parts.len() == 2 {
+                    let action = parts[1];
+                    match action {
+                        "start" => {
+                            blink_state.blinking = true;
+                            print_console_line.write(PrintConsoleLine::new("Blink started".to_string()));
+                            info!("Blink started via script");
+                        }
+                        "stop" => {
+                            blink_state.blinking = false;
+                            print_console_line.write(PrintConsoleLine::new("Blink stopped".to_string()));
+                            info!("Blink stopped via script");
+                        }
+                        _ => {
+                            print_console_line.write(PrintConsoleLine::new("Usage: blink [start|stop]".to_string()));
+                        }
+                    }
+                }
+            }
+            "mqtt" => {
+                if parts.len() == 2 {
+                    let action = parts[1];
+                    match action {
+                        "status" => {
+                            let status = if temperature.value.is_some() {
+                                "Connected to MQTT broker"
+                            } else {
+                                "Connecting to MQTT broker..."
+                            };
+                            print_console_line.write(PrintConsoleLine::new(status.to_string()));
+                            info!("MQTT status requested via script");
+                        }
+                        "temp" => {
+                            let temp_msg = if let Some(val) = temperature.value {
+                                format!("Current temperature: {:.1}°C", val)
+                            } else {
+                                "No temperature data available".to_string()
+                            };
+                            print_console_line.write(PrintConsoleLine::new(temp_msg));
+                        }
+                        _ => {
+                            print_console_line.write(PrintConsoleLine::new("Usage: mqtt [status|temp]".to_string()));
+                        }
+                    }
+                }
+            }
+            "spawn" => {
+                if parts.len() == 5 {
+                    if let Ok(x) = parts[2].parse::<f32>() {
+                        if let Ok(y) = parts[3].parse::<f32>() {
+                            if let Ok(z) = parts[4].parse::<f32>() {
+                                let device_id = parts[1].to_string();
+                                
+                                // Create spawn command payload
+                                let payload = json!({
+                                    "device_id": device_id,
+                                    "device_type": "lamp",
+                                    "state": "online",
+                                    "location": { "x": x, "y": y, "z": z }
+                                }).to_string();
+
+                                // Create a temporary client for simulation
+                                let mut mqtt_options = MqttOptions::new("spawn-client", "127.0.0.1", 1883);
+                                mqtt_options.set_keep_alive(Duration::from_secs(5));
+                                let (client, mut connection) = Client::new(mqtt_options, 10);
+                                
+                                client
+                                    .publish("devices/announce", QoS::AtMostOnce, false, payload.as_bytes())
+                                    .unwrap();
+
+                                // Drive the event loop to ensure the message is sent
+                                for notification in connection.iter() {
+                                    if let Ok(Event::Outgoing(Outgoing::Publish(_))) = notification {
+                                        break;
+                                    }
+                                }
+                                
+                                print_console_line.write(PrintConsoleLine::new(format!("Spawn command sent for device {}", device_id)));
+                            }
+                        }
+                    }
+                }
+            }
+            _ => {
+                print_console_line.write(PrintConsoleLine::new(format!("Unknown command: {}", command)));
+            }
+        }
+    }
+}
+
 fn main() {
+    let args = Args::parse();
+    let mut script_executor = ScriptExecutor::default();
+    
+    // Set up startup script if provided
+    if let Some(script_file) = args.script {
+        script_executor.startup_script = Some(script_file);
+        script_executor.execute_startup = true;
+    }
     App::new()
         .insert_resource(ClearColor(Color::srgb(0.53, 0.81, 0.92)))
         .add_plugins(DefaultPlugins)
@@ -259,6 +497,7 @@ fn main() {
         .add_console_command::<BlinkCommand, _>(handle_blink_command)
         .add_console_command::<MqttCommand, _>(handle_mqtt_command)
         .add_console_command::<SpawnCommand, _>(handle_spawn_command)
+        .add_console_command::<LoadCommand, _>(handle_load_command)
         .insert_resource(BlinkState::default())
         .insert_resource(TemperatureResource::default())
         .add_systems(Startup, setup)
@@ -271,6 +510,10 @@ fn main() {
         .add_systems(Update, handle_console_escape.after(ConsoleSet::Commands))
         .add_systems(Update, listen_for_device_announcements)
         .add_systems(Update, handle_console_t_key.after(ConsoleSet::Commands))
+        .insert_resource(script_executor)
+        .insert_resource(PendingCommands { commands: Vec::new() })
+        .add_systems(Update, script_execution_system)
+        .add_systems(Update, execute_pending_commands)
         .run();
 }
 
@@ -408,6 +651,7 @@ fn handle_blink_command(
     mut blink_state: ResMut<BlinkState>,
 ) {
     if let Some(Ok(BlinkCommand { action })) = log.take() {
+        info!("Console command: blink {}", action);
         match action.as_str() {
             "start" => {
                 blink_state.blinking = true;
@@ -431,6 +675,7 @@ fn handle_mqtt_command(
     temperature: Res<TemperatureResource>,
 ) {
     if let Some(Ok(MqttCommand { action })) = log.take() {
+        info!("Console command: mqtt {}", action);
         match action.as_str() {
             "status" => {
                 let status = if temperature.value.is_some() {
