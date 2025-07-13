@@ -1,0 +1,56 @@
+name = "ESP32-S3 DHCP Gateway"
+description = "Firmware for ESP32-S3 as a DHCP gateway with provisioning capabilities."
+version = "0.1.0"
+
+# Source code repository that contains the firmware source
+[source]
+type = "git"
+url = "https://github.com/georgik/esp32-dhcp-server.git"
+
+# Build commands executed within the source directory
+[build]
+command = "idf.py build"
+
+# Flash commands, for flashing the built firmware to the ESP32-S3
+[flash]
+command = "idf.py flash"
+
+# Monitor commands, to view device logs interactively
+[monitor]
+command = "idf.py monitor"
+
+# Provisioning variables that can be replaced in template files or passed as build variables
+[provisioning]
+
+# SSID and Password for the gateway's own AP to serve clients
+ap_ssid = ""
+ap_password = ""
+
+# SSID and Password for the parent WiFi network the gateway connects to
+sta_ssid = ""
+sta_password = ""
+
+# MQTT server connection details
+mqtt_server_ip = ""
+mqtt_server_port = 1883
+
+# Path to configuration templates which contain placeholders matching the provisioning keys
+configuration_template_dir = "assets"
+
+# File paths for JSON templates with placeholders to be replaced on provisioning
+# These files would be in the source repo under config_templates
+configuration_files = [
+  "wifi_config.json.template",
+  "mqtt_config.json.template"
+]
+
+# Build variables that can be passed as environment variables or defines to the build system
+[build_variables]
+# Example of passing provisioning as defines to the compiler
+AP_SSID = "${ap_ssid}"
+AP_PASSWORD = "${ap_password}"
+STA_SSID = "${sta_ssid}"
+STA_PASSWORD = "${sta_password}"
+MQTT_SERVER_IP = "${mqtt_server_ip}"
+MQTT_SERVER_PORT = "${mqtt_server_port}"
+
