@@ -306,8 +306,8 @@ async fn hardware_task_runner(
 
 async fn mqtt_task(mut socket: TcpSocket<'static>) {
     // allocate buffers for the client
-    let mut recv_buffer = [0u8; 80];
-    let mut write_buffer = [0u8; 80];
+    let mut recv_buffer = [0u8; 256];
+    let mut write_buffer = [0u8; 256];
     let recv_buffer_len = recv_buffer.len();
     let write_buffer_len = write_buffer.len();
     // configure the MQTT client
@@ -345,6 +345,15 @@ async fn mqtt_task(mut socket: TcpSocket<'static>) {
         }
         break;
     }
+
+    // Send device announcement message
+    let announcement = r#"{"device_id":"esp32-c6-client","device_type":"lamp","state":"online","location":{"x":1.0,"y":0.5,"z":2.0}}"#;
+    if let Err(err) = client.send_message("devices/announce", announcement.as_bytes(), QualityOfService::QoS1, false).await {
+        error!("Failed to send device announcement: {:?}", err);
+    } else {
+        info!("Device announcement sent successfully");
+    }
+
     // process incoming messages
     loop {
         if let Ok((_, payload)) = client.receive_message().await {
