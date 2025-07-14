@@ -3,7 +3,6 @@ use bevy_console::PrintConsoleLine;
 use log::info;
 use super::{script_types::*, script_helpers::*};
 use crate::console::BlinkState;
-use crate::mqtt::TemperatureResource;
 
 pub struct ScriptPlugin;
 
@@ -54,9 +53,8 @@ pub fn script_execution_system(
 
 pub fn execute_pending_commands(
     mut pending_commands: ResMut<PendingCommands>,
-    mut print_console_line: EventWriter<PrintConsoleLine>,
-    mut blink_state: ResMut<BlinkState>,
-    temperature: Res<crate::mqtt::TemperatureResource>,
+    _print_console_line: EventWriter<PrintConsoleLine>,
+    _blink_state: ResMut<BlinkState>,
 ) {
     for command in pending_commands.commands.drain(..) {
         info!("Executing queued command: {}", command);

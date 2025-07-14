@@ -3,7 +3,7 @@ use camera_controllers::{CameraController, CameraControllerPlugin};
 use bevy_console::{AddConsoleCommand, ConsoleCommand, reply, ConsoleOpen, PrintConsoleLine, ConsoleSet};
 use rumqttc::{Client, MqttOptions, QoS, Incoming, Event, Outgoing};
 use serde_json::json;
-use std::sync::mpsc::{self, Receiver};
+use std::sync::mpsc;
 use std::sync::Mutex;
 use std::thread;
 use std::collections::HashSet;
@@ -25,7 +25,6 @@ use console::*;
 use devices::*;
 use environment::*;
 use mqtt::*;
-use script::*;
 
 // Define handle_blink_command function for console
 fn handle_blink_command(
@@ -64,16 +63,7 @@ struct Args {
 
 
 
-#[derive(Component)]
-struct LogoCube;
-
 // ConsoleUi component is no longer needed with bevy_console
-
-#[derive(Component)]
-struct Thermometer;
-
-#[derive(Resource)]
-struct ThermometerMaterial(pub Handle<StandardMaterial>);
 
 /// Spawn a background thread to subscribe to the temperature topic and feed readings into the channel.
 fn spawn_mqtt_subscriber(mut commands: Commands) {
@@ -417,8 +407,6 @@ fn draw_cursor(
     );
 }
 
-#[derive(Component)]
-struct Ground;
 
 fn handle_mqtt_command(
     mut log: ConsoleCommand<MqttCommand>,

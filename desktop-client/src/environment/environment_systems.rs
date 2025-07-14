@@ -1,5 +1,5 @@
 use bevy::prelude::*;
-use bevy::pbr::{MeshMaterial3d, PointLight};
+use bevy::pbr::MeshMaterial3d;
 
 use super::environment_types::*;
 use crate::mqtt::TemperatureResource;

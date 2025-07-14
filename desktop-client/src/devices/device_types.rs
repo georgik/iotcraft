@@ -13,7 +13,9 @@ pub struct DeviceAnnouncementReceiver(pub Mutex<Receiver<String>>);
 
 #[derive(Component)]
 pub struct DeviceEntity {
+    #[allow(dead_code)]
     pub device_id: String,
+    #[allow(dead_code)]
     pub device_type: String,
 }
 

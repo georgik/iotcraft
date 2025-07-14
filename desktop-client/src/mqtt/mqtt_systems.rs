@@ -4,7 +4,6 @@ use std::thread;
 use std::time::Duration;
 use std::sync::Mutex;
 use rumqttc::{Client, MqttOptions, QoS, Event, Incoming};
-use log::info;
 
 use super::mqtt_types::*;
 use crate::devices::DeviceAnnouncementReceiver;
