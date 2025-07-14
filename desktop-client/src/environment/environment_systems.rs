@@ -35,21 +35,6 @@ fn setup(
         Ground,
     ));
 
-    // cube with lamp texture
-    let cube_mesh = meshes.add(Cuboid::new(1.0, 1.0, 1.0));
-    let lamp_texture: Handle<Image> = asset_server.load("textures/lamp.png");
-    let lamp_material = materials.add(StandardMaterial {
-        base_color_texture: Some(lamp_texture),
-        base_color: Color::srgb(0.2, 0.2, 0.2),
-        ..default()
-    });
-    commands.spawn((
-        Mesh3d(cube_mesh),
-        MeshMaterial3d(lamp_material),
-        Transform::from_translation(Vec3::new(0.0, 0.5, 0.0)),
-        BlinkCube,
-        Visibility::default(),
-    ));
 
     // block with Espressif logo texture
     let block_mesh = meshes.add(Cuboid::new(1.0, 1.0, 1.0));

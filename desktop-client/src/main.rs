@@ -61,76 +61,8 @@ struct Args {
     script: Option<String>,
 }
 
-// Console commands for bevy_console
-#[derive(Parser, ConsoleCommand)]
-#[command(name = "blink")]
-struct BlinkCommand {
-    /// Action to perform: start or stop
-    action: String,
-}
 
-#[derive(Parser, ConsoleCommand)]
-#[command(name = "mqtt")]
-struct MqttCommand {
-    /// MQTT action: status or reconnect
-    action: String,
-}
 
-#[derive(Parser, ConsoleCommand)]
-#[command(name = "load")]
-struct LoadCommand {
-    /// Script file to load and execute
-    filename: String,
-}
-
-#[derive(Parser, ConsoleCommand)]
-#[command(name = "spawn")]
-struct SpawnCommand {
-    /// Device ID
-    device_id: String,
-    /// X coordinate
-    x: f32,
-    /// Y coordinate
-    y: f32,
-    /// Z coordinate
-    z: f32,
-}
-
-#[derive(Resource)]
-struct DevicesTracker {
-    spawned_devices: HashSet<String>,
-}
-
-#[derive(Resource)]
-struct DeviceAnnouncementReceiver(Mutex<Receiver<String>>);
-
-#[derive(Component)]
-struct DeviceEntity {
-    device_id: String,
-    device_type: String,
-}
-
-#[derive(Resource)]
-struct BlinkState {
-    blinking: bool,
-    timer: Timer,
-    light_state: bool,
-    last_sent: bool,
-}
-
-impl Default for BlinkState {
-    fn default() -> Self {
-        Self {
-            blinking: false,
-            light_state: false,
-            timer: Timer::from_seconds(1.0, TimerMode::Repeating),
-            last_sent: false,
-        }
-    }
-}
-
-#[derive(Component)]
-struct BlinkCube;
 
 #[derive(Component)]
 struct LogoCube;
@@ -412,6 +344,8 @@ fn main() {
         .add_plugins(DefaultPlugins)
         .add_plugins(CameraControllerPlugin)
         .add_plugins(ConsolePlugin)
+        .add_plugins(DevicePlugin)
+        .add_plugins(EnvironmentPlugin)
         .insert_resource(ConsoleConfiguration {
             keys: vec![KeyCode::F12],
             left_pos: 200.0,
@@ -426,15 +360,12 @@ fn main() {
         .add_console_command::<LoadCommand, _>(handle_load_command)
         .insert_resource(BlinkState::default())
         .insert_resource(TemperatureResource::default())
-        .add_systems(Startup, setup)
         .add_systems(Update, draw_cursor)
         .add_systems(Startup, spawn_mqtt_subscriber)
-        .add_systems(Update, blinking_system)
         .add_systems(Update, (blink_publisher_system, rotate_logo_system))
-        .add_systems(Update, (update_thermometer_material, update_temperature, update_thermometer_scale))
+        .add_systems(Update, update_temperature)
         .add_systems(Update, manage_camera_controller)
         .add_systems(Update, handle_console_escape.after(ConsoleSet::Commands))
-        .add_systems(Update, listen_for_device_announcements)
         .add_systems(Update, handle_console_t_key.after(ConsoleSet::Commands))
         .insert_resource(script_executor)
         .insert_resource(PendingCommands { commands: Vec::new() })
@@ -488,88 +419,6 @@ fn draw_cursor(
 
 #[derive(Component)]
 struct Ground;
-
-fn setup(
-    mut commands: Commands,
-    asset_server: Res<AssetServer>,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-) {
-    // grass texture for ground
-    let grass_texture: Handle<Image> = asset_server.load("textures/grass.png");
-    let grass_material_handle = materials.add(StandardMaterial {
-        base_color_texture: Some(grass_texture),
-        ..default()
-    });
-
-    // ground plane with grass texture
-    commands.spawn((
-        Mesh3d(meshes.add(Plane3d::default().mesh().size(20.0, 20.0))),
-        MeshMaterial3d(grass_material_handle.clone()),
-        Ground,
-    ));
-
-    // cube with lamp texture
-    let cube_mesh = meshes.add(Cuboid::new(1.0, 1.0, 1.0));
-    let lamp_texture: Handle<Image> = asset_server.load("textures/lamp.png");
-    let lamp_material = materials.add(StandardMaterial {
-        base_color_texture: Some(lamp_texture),
-        base_color: Color::srgb(0.2, 0.2, 0.2),
-        ..default()
-    });
-    commands.spawn((
-        Mesh3d(cube_mesh),
-        MeshMaterial3d(lamp_material),
-        Transform::from_translation(Vec3::new(0.0, 0.5, 0.0)),
-        BlinkCube,
-        Visibility::default(),
-    ));
-
-    // block with Espressif logo texture
-    let block_mesh = meshes.add(Cuboid::new(1.0, 1.0, 1.0));
-    let esp_logo_texture: Handle<Image> = asset_server.load("textures/espressif.png");
-    let esp_logo_material = materials.add(StandardMaterial {
-        base_color_texture: Some(esp_logo_texture),
-        base_color: Color::WHITE,
-        ..default()
-    });
-    commands.spawn((
-        Mesh3d(block_mesh),
-        MeshMaterial3d(esp_logo_material),
-        Transform::from_translation(Vec3::new(3.0, 6.5, 2.0)),
-        Visibility::default(),
-        LogoCube,
-    ));
-
-    // thermometer 3D indicator
-    let thermo_mesh = meshes.add(Cuboid::new(0.2, 5.0, 0.2));
-    let thermo_handle = materials.add(StandardMaterial {
-        base_color: Color::srgb(0.2, 0.2, 0.2),
-        ..default()
-    });
-    commands.spawn((
-        Mesh3d(thermo_mesh),
-        MeshMaterial3d(thermo_handle.clone()),
-        Transform::from_translation(Vec3::new(-3.0, 2.5, 2.0)),
-        Thermometer,
-    ));
-    commands.insert_resource(ThermometerMaterial(thermo_handle));
-
-    // bevy_console handles the console UI now
-
-    // light
-    commands.spawn((
-        DirectionalLight::default(),
-        Transform::from_translation(Vec3::ONE).looking_at(Vec3::ZERO, Vec3::Y),
-    ));
-
-    // camera
-    commands.spawn((
-        Camera3d::default(),
-        Transform::from_xyz(15.0, 5.0, 15.0).looking_at(Vec3::ZERO, Vec3::Y),
-        CameraController::default(),
-    ));
-}
 
 fn handle_mqtt_command(
     mut log: ConsoleCommand<MqttCommand>,
@@ -628,7 +477,7 @@ fn handle_spawn_command(
             ..default()
         });
         
-        commands.spawn((
+        let mut entity_commands = commands.spawn((
             Mesh3d(cube_mesh),
             MeshMaterial3d(lamp_material),
             Transform::from_translation(Vec3::new(x, y, z)),
@@ -639,6 +488,9 @@ fn handle_spawn_command(
             Visibility::default(),
         ));
         
+        // Add BlinkCube component for lamp devices so they can blink
+        entity_commands.insert(BlinkCube);
+        
         // Track the spawned device
         devices_tracker.spawned_devices.insert(device_id.clone());
         
@@ -647,34 +499,6 @@ fn handle_spawn_command(
     }
 }
 
-fn blinking_system(
-    time: Res<Time>,
-    mut blink_state: ResMut<BlinkState>,
-    query: Query<&MeshMaterial3d<StandardMaterial>, With<BlinkCube>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-) {
-    if blink_state.blinking {
-        blink_state.timer.tick(time.delta());
-        if blink_state.timer.just_finished() {
-            for mesh_material in &query {
-                // Deref gives us &Handle<StandardMaterial>
-                let handle = mesh_material.clone();
-                if let Some(mat) = materials.get_mut(&handle) {
-                    // toggle between dimmed and bright lamp each second
-                    if mat.base_color == Color::WHITE {
-                        blink_state.light_state = false;
-                        // dim the lamp
-                        mat.base_color = Color::srgb(0.2, 0.2, 0.2);
-                    } else {
-                        blink_state.light_state = true;
-                        // full brightness
-                        mat.base_color = Color::WHITE;
-                    }
-                }
-            }
-        }
-    }
-}
 fn blink_publisher_system(mut blink_state: ResMut<BlinkState>) {
     if blink_state.light_state != blink_state.last_sent {
         let payload = if blink_state.light_state { "ON" } else { "OFF" };
@@ -719,34 +543,6 @@ fn update_temperature(
     }
 }
 
-fn update_thermometer_material(
-    temp: Res<TemperatureResource>,
-    thermo: Res<ThermometerMaterial>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-) {
-    if let Some(mat) = materials.get_mut(&thermo.0) {
-        if temp.value.is_some() {
-            // reading received: red
-            mat.base_color = Color::srgb(1.0, 0.0, 0.0);
-        } else {
-            // no reading yet: gray
-            mat.base_color = Color::srgb(0.2, 0.2, 0.2);
-        }
-    }
-}
-
-fn update_thermometer_scale(
-    temp: Res<TemperatureResource>,
-    mut query: Query<&mut Transform, With<Thermometer>>,
-) {
-    if let Some(value) = temp.value {
-        for mut transform in &mut query {
-            // Scale Y axis proportional to temperature value, clamped to a reasonable range
-            let scale_y = (value / 100.0).clamp(0.1, 2.0);
-            transform.scale = Vec3::new(1.0, scale_y, 1.0);
-        }
-    }
-}
 
 // System to manage camera controller state based on console state
 fn manage_camera_controller(
@@ -780,62 +576,4 @@ fn handle_console_t_key(
     }
 }
 
-// System to listen for device announcements via MQTT
-fn listen_for_device_announcements(
-    receiver: Res<DeviceAnnouncementReceiver>,
-    mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-    asset_server: Res<AssetServer>,
-    mut devices_tracker: ResMut<DevicesTracker>,
-) {
-    if let Ok(rx) = receiver.0.lock() {
-        while let Ok(announcement) = rx.try_recv() {
-            // Parse the JSON announcement
-            if let Ok(device_info) = serde_json::from_str::<serde_json::Value>(&announcement) {
-                if let (Some(device_id), Some(location)) = (
-                    device_info.get("device_id").and_then(|v| v.as_str()),
-                    device_info.get("location")
-                ) {
-                    if let (Some(x), Some(y), Some(z)) = (
-                        location.get("x").and_then(|v| v.as_f64()),
-                        location.get("y").and_then(|v| v.as_f64()),
-                        location.get("z").and_then(|v| v.as_f64())
-                    ) {
-                        // Check if device is already spawned
-                        if !devices_tracker.spawned_devices.contains(device_id) {
-                            // Create device entity
-                            let cube_mesh = meshes.add(Cuboid::new(1.0, 1.0, 1.0));
-                            let lamp_texture: Handle<Image> = asset_server.load("textures/lamp.png");
-                            let lamp_material = materials.add(StandardMaterial {
-                                base_color_texture: Some(lamp_texture),
-                                base_color: Color::srgb(0.2, 0.2, 0.2),
-                                ..default()
-                            });
-                            
-                            commands.spawn((
-                                Mesh3d(cube_mesh),
-                                MeshMaterial3d(lamp_material),
-                                Transform::from_translation(Vec3::new(x as f32, y as f32, z as f32)),
-                                DeviceEntity {
-                                    device_id: device_id.to_string(),
-                                    device_type: device_info.get("device_type")
-                                        .and_then(|v| v.as_str())
-                                        .unwrap_or("unknown")
-                                        .to_string(),
-                                },
-                                Visibility::default(),
-                            ));
-                            
-                            // Track the spawned device
-                            devices_tracker.spawned_devices.insert(device_id.to_string());
-                            
-                            info!("Device {} spawned at ({}, {}, {}) via MQTT", device_id, x, y, z);
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
 

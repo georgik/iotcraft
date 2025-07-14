@@ -5,13 +5,13 @@ use serde_json;
 use log::info;
 
 use super::device_types::*;
+use crate::console::BlinkCube;
 
 pub struct DevicePlugin;
 
 impl Plugin for DevicePlugin {
     fn build(&self, app: &mut App) {
-        app.insert_resource(DevicesTracker { spawned_devices: HashSet::new() })
-            .add_systems(Update, listen_for_device_announcements);
+        app.add_systems(Update, listen_for_device_announcements);
     }
 }
 
@@ -21,6 +21,7 @@ pub fn listen_for_device_announcements(
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut tracker: ResMut<DevicesTracker>,
+    asset_server: Res<AssetServer>,
 ) {
     if let Ok(rx) = device_receiver.0.lock() {
         if let Ok(device_json) = rx.try_recv() {
@@ -41,10 +42,14 @@ pub fn listen_for_device_announcements(
                         
                         // Choose material based on device type
                         let material = match device_type {
-                            "lamp" => materials.add(StandardMaterial {
-                                base_color: Color::srgb(1.0, 0.8, 0.2),
-                                ..default()
-                            }),
+                            "lamp" => {
+                                let lamp_texture: Handle<Image> = asset_server.load("textures/lamp.png");
+                                materials.add(StandardMaterial {
+                                    base_color_texture: Some(lamp_texture),
+                                    base_color: Color::srgb(0.2, 0.2, 0.2),
+                                    ..default()
+                                })
+                            },
                             "sensor" => materials.add(StandardMaterial {
                                 base_color: Color::srgb(0.2, 0.8, 1.0),
                                 ..default()
@@ -56,8 +61,8 @@ pub fn listen_for_device_announcements(
                         };
                         
                         // Spawn the device entity
-                        commands.spawn((
-                            Mesh3d(meshes.add(Cuboid::new(0.8, 0.8, 0.8))),
+                        let mut entity_commands = commands.spawn((
+                            Mesh3d(meshes.add(Cuboid::new(1.0, 1.0, 1.0))),
                             MeshMaterial3d(material),
                             Transform::from_translation(Vec3::new(x, y, z)),
                             DeviceEntity {
@@ -65,6 +70,11 @@ pub fn listen_for_device_announcements(
                                 device_type: device_type.to_string(),
                             },
                         ));
+                        
+                        // Add BlinkCube component for lamp devices so they can blink
+                        if device_type == "lamp" {
+                            entity_commands.insert(BlinkCube);
+                        }
                         
                         info!("Spawned device: {} of type {} at ({}, {}, {})", device_id, device_type, x, y, z);
                     }
