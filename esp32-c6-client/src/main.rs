@@ -49,6 +49,13 @@ use rust_mqtt::{
     packet::v5::publish_packet::QualityOfService, utils::rng_generator::CountingRng,
 };
 
+// Storage and serialization imports
+use embedded_storage::{ReadStorage, Storage};
+use esp_bootloader_esp_idf::partitions;
+use esp_storage::FlashStorage;
+use serde::{Deserialize, Serialize};
+use serde_json_core;
+
 // Define a static channel with a capacity of 1 for `HardwareEvent`s.
 static CHANNEL: Channel<CriticalSectionRawMutex, HardwareEvent, 1> = Channel::new();
 use core::sync::atomic::{AtomicBool, Ordering};
@@ -57,7 +64,10 @@ static IS_BUSY: AtomicBool = AtomicBool::new(false);
 macro_rules! mk_static {
     ($t:ty, $val:expr) => {{
         static STATIC_CELL: static_cell::StaticCell<$t> = static_cell::StaticCell::new();
-        STATIC_CELL.init($val)
+        #[allow(unsafe_code)]
+        unsafe {
+            STATIC_CELL.init_with(|| $val)
+        }
     }};
 }
 
@@ -65,8 +75,168 @@ const SSID: &str = env!("SSID");
 const PASSWORD: &str = env!("PASSWORD");
 const SERVER_IP: &str = env!("SERVER_IP");
 
+// Storage constants for storage partition
+const DEVICE_PROPERTIES_OFFSET: u32 = 0x0; // Offset within storage partition
+const DEVICE_PROPERTIES_SIZE: usize = 256; // Max JSON size
+const STORAGE_MAGIC: u32 = 0x44455650; // "DEVP" magic number
+
+// Simple storage header
+#[repr(C)]
+struct StorageHeader {
+    magic: u32,
+    data_len: u32,
+}
+
+// Device properties structure for persistent storage
+#[derive(Serialize, Deserialize, Debug, Clone)]
+struct DeviceProperties {
+    x: f32,
+    y: f32,
+    z: f32,
+    // Future properties can be added here
+}
+
+impl Default for DeviceProperties {
+    fn default() -> Self {
+        Self {
+            x: 1.0,
+            y: 0.5,
+            z: 2.0,
+        }
+    }
+}
+
+// Position update structure for MQTT messages
+#[derive(Deserialize, Debug)]
+struct PositionUpdate {
+    x: f32,
+    y: f32,
+    z: f32,
+}
+
 use embassy_futures::yield_now;
 use esp_wifi::config::PowerSaveMode;
+
+// Storage functions using proper storage partition access
+fn load_device_properties() -> DeviceProperties {
+    let mut flash = FlashStorage::new();
+
+    // Read partition table
+    let mut pt_mem = [0u8; partitions::PARTITION_TABLE_MAX_LEN];
+    let pt = match partitions::read_partition_table(&mut flash, &mut pt_mem) {
+        Ok(pt) => pt,
+        Err(_) => {
+            error!("Failed to read partition table");
+            return DeviceProperties::default();
+        }
+    };
+
+    // Find storage partition
+    let storage_partition = match pt.find_partition(partitions::PartitionType::Data(
+        partitions::DataPartitionSubType::Spiffs,
+    )) {
+        Ok(Some(partition)) => partition,
+        _ => {
+            error!("Storage partition not found");
+            return DeviceProperties::default();
+        }
+    };
+
+    let mut storage = storage_partition.as_embedded_storage(&mut flash);
+    let mut buffer = [0u8; core::mem::size_of::<StorageHeader>() + DEVICE_PROPERTIES_SIZE];
+
+    // Try to read from storage partition at the fixed offset
+    if storage.read(DEVICE_PROPERTIES_OFFSET, &mut buffer).is_ok() {
+        // Check magic number
+        let header = unsafe { &*(buffer.as_ptr() as *const StorageHeader) };
+        if header.magic == STORAGE_MAGIC && header.data_len <= DEVICE_PROPERTIES_SIZE as u32 {
+            let data_start = core::mem::size_of::<StorageHeader>();
+            let data_end = data_start + header.data_len as usize;
+
+            if data_end <= buffer.len() {
+                match serde_json_core::from_slice::<DeviceProperties>(&buffer[data_start..data_end])
+                {
+                    Ok((props, _)) => {
+                        info!("Loaded device properties from storage: {:?}", props);
+                        return props;
+                    }
+                    Err(e) => {
+                        error!("Failed to deserialize device properties: {:?}", e);
+                    }
+                }
+            }
+        }
+    }
+
+    info!("Using default device properties");
+    DeviceProperties::default()
+}
+
+fn save_device_properties(props: &DeviceProperties) -> Result<(), &'static str> {
+    let mut flash = FlashStorage::new();
+
+    // Read partition table
+    let mut pt_mem = [0u8; partitions::PARTITION_TABLE_MAX_LEN];
+    let pt = match partitions::read_partition_table(&mut flash, &mut pt_mem) {
+        Ok(pt) => pt,
+        Err(_) => return Err("Failed to read partition table"),
+    };
+
+    // Find storage partition
+    let storage_partition = match pt.find_partition(partitions::PartitionType::Data(
+        partitions::DataPartitionSubType::Spiffs,
+    )) {
+        Ok(Some(partition)) => partition,
+        _ => return Err("Storage partition not found"),
+    };
+
+    let mut storage = storage_partition.as_embedded_storage(&mut flash);
+    let mut json_buffer = [0u8; DEVICE_PROPERTIES_SIZE];
+
+    // Serialize to JSON
+    let json_len = match serde_json_core::to_slice(props, &mut json_buffer) {
+        Ok(len) => len,
+        Err(_) => return Err("Failed to serialize device properties"),
+    };
+
+    // Create storage buffer with header
+    let mut storage_buffer = [0u8; core::mem::size_of::<StorageHeader>() + DEVICE_PROPERTIES_SIZE];
+    let header = StorageHeader {
+        magic: STORAGE_MAGIC,
+        data_len: json_len as u32,
+    };
+
+    // Copy header
+    let header_bytes = unsafe {
+        core::slice::from_raw_parts(
+            &header as *const _ as *const u8,
+            core::mem::size_of::<StorageHeader>(),
+        )
+    };
+    storage_buffer[..core::mem::size_of::<StorageHeader>()].copy_from_slice(header_bytes);
+
+    // Copy JSON data
+    let data_start = core::mem::size_of::<StorageHeader>();
+    storage_buffer[data_start..data_start + json_len].copy_from_slice(&json_buffer[..json_len]);
+
+    // Write to storage partition
+    match storage.write(
+        DEVICE_PROPERTIES_OFFSET,
+        &storage_buffer[..data_start + json_len],
+    ) {
+        Ok(()) => {
+            info!(
+                "Device properties saved to storage successfully: {:?}",
+                props
+            );
+            Ok(())
+        }
+        Err(_) => {
+            error!("Failed to write device properties to flash");
+            Err("Failed to write to flash")
+        }
+    }
+}
 
 #[panic_handler]
 fn panic(panic_info: &core::panic::PanicInfo) -> ! {
@@ -305,9 +475,13 @@ async fn hardware_task_runner(
 }
 
 async fn mqtt_task(mut socket: TcpSocket<'static>, device_id: &'static heapless::String<64>) {
+    // Load device properties from storage
+    let mut device_props = load_device_properties();
+    info!("Loaded device properties: {:?}", device_props);
+
     // allocate buffers for the client
-    let mut recv_buffer = [0u8; 256];
-    let mut write_buffer = [0u8; 256];
+    let mut recv_buffer = [0u8; 512];
+    let mut write_buffer = [0u8; 512];
     let recv_buffer_len = recv_buffer.len();
     let write_buffer_len = write_buffer.len();
     // configure the MQTT client
@@ -317,7 +491,7 @@ async fn mqtt_task(mut socket: TcpSocket<'static>, device_id: &'static heapless:
     );
     config.add_max_subscribe_qos(QualityOfService::QoS1);
     config.add_client_id(device_id.as_str());
-    config.max_packet_size = 100;
+    config.max_packet_size = 200;
 
     info!("MQTT connecting to broker at {}:1884", SERVER_IP);
 
@@ -337,20 +511,35 @@ async fn mqtt_task(mut socket: TcpSocket<'static>, device_id: &'static heapless:
             Timer::after(Duration::from_secs(5)).await;
             continue;
         }
-        // subscribe to lamp topic with retry on failure
-        let subscribe_topic = alloc::format!("home/{}/light", device_id.as_str());
-        if let Err(err) = client.subscribe_to_topic(&subscribe_topic).await {
-            error!("MQTT subscribe error: {:?}", err);
+
+        // subscribe to lamp control topic
+        let light_topic = alloc::format!("home/{}/light", device_id.as_str());
+        if let Err(err) = client.subscribe_to_topic(&light_topic).await {
+            error!("MQTT subscribe to light topic error: {:?}", err);
             Timer::after(Duration::from_secs(5)).await;
             continue;
         }
+        info!("Subscribed to light topic: {}", light_topic);
+
+        // subscribe to position/set topic
+        let position_topic = alloc::format!("home/{}/position/set", device_id.as_str());
+        if let Err(err) = client.subscribe_to_topic(&position_topic).await {
+            error!("MQTT subscribe to position topic error: {:?}", err);
+            Timer::after(Duration::from_secs(5)).await;
+            continue;
+        }
+        info!("Subscribed to position topic: {}", position_topic);
+
         break;
     }
 
-    // Send device announcement message with MAC-based device ID
+    // Send device announcement message with persisted coordinates
     let announcement = alloc::format!(
-        r#"{{"device_id":"{}","device_type":"lamp","state":"online","location":{{"x":1.0,"y":0.5,"z":2.0}}}}"#,
-        device_id.as_str()
+        r#"{{"device_id":"{}","device_type":"lamp","state":"online","location":{{"x":{},"y":{},"z":{}}}}}"#,
+        device_id.as_str(),
+        device_props.x,
+        device_props.y,
+        device_props.z
     );
     if let Err(err) = client
         .send_message(
@@ -363,21 +552,78 @@ async fn mqtt_task(mut socket: TcpSocket<'static>, device_id: &'static heapless:
     {
         error!("Failed to send device announcement: {:?}", err);
     } else {
-        info!("Device announcement sent successfully");
+        info!(
+            "Device announcement sent successfully with position: x={}, y={}, z={}",
+            device_props.x, device_props.y, device_props.z
+        );
     }
 
     // process incoming messages
     loop {
-        if let Ok((_, payload)) = client.receive_message().await {
+        if let Ok((topic, payload)) = client.receive_message().await {
+            let topic_str = alloc::string::String::from_utf8_lossy(topic.as_bytes()).to_string();
             let payload_str = alloc::string::String::from_utf8_lossy(payload).to_string();
-            match payload_str.as_str() {
-                "ON" => {
-                    let _ = CHANNEL.sender().try_send(HardwareEvent::TurnOnLed);
+
+            info!(
+                "Received MQTT message on topic '{}': {}",
+                topic_str, payload_str
+            );
+
+            // Check if it's a light control message
+            if topic_str.ends_with("/light") {
+                match payload_str.as_str() {
+                    "ON" => {
+                        let _ = CHANNEL.sender().try_send(HardwareEvent::TurnOnLed);
+                    }
+                    "OFF" => {
+                        let _ = CHANNEL.sender().try_send(HardwareEvent::TurnOffLed);
+                    }
+                    _ => {}
                 }
-                "OFF" => {
-                    let _ = CHANNEL.sender().try_send(HardwareEvent::TurnOffLed);
+            }
+            // Check if it's a position update message
+            else if topic_str.ends_with("/position/set") {
+                info!("Processing position update: {}", payload_str);
+
+                // Parse JSON position update
+                let mut json_buffer = [0u8; 256];
+                if payload_str.len() <= json_buffer.len() {
+                    json_buffer[..payload_str.len()].copy_from_slice(payload_str.as_bytes());
+
+                    match serde_json_core::from_slice::<PositionUpdate>(
+                        &json_buffer[..payload_str.len()],
+                    ) {
+                        Ok((position_update, _)) => {
+                            info!("Parsed position update: {:?}", position_update);
+
+                            // Update device properties
+                            device_props.x = position_update.x;
+                            device_props.y = position_update.y;
+                            device_props.z = position_update.z;
+
+                            // Save to persistent storage
+                            match save_device_properties(&device_props) {
+                                Ok(()) => {
+                                    info!(
+                                        "Position updated and saved: x={}, y={}, z={}",
+                                        device_props.x, device_props.y, device_props.z
+                                    );
+                                }
+                                Err(e) => {
+                                    error!("Failed to save position update: {}", e);
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            error!("Failed to parse position update JSON: {:?}", e);
+                        }
+                    }
+                } else {
+                    error!(
+                        "Position update payload too large: {} bytes",
+                        payload_str.len()
+                    );
                 }
-                _ => {}
             }
         }
     }

@@ -43,6 +43,13 @@ rust-mqtt = { version = "0.3.0", default-features = false }
 #embedded-mqtt = { version = "0.8.0", default-features = false }
 log = "0.4.27"
 
+# Storage and serialization
+esp-storage = { version = "0.4.0", features = ["esp32c6"] }
+esp-bootloader-esp-idf = { git = "https://github.com/esp-rs/esp-hal.git", tag = "esp-hal-v1.0.0-beta.1" }
+embedded-storage = "0.3.1"
+serde = { version = "1.0", default-features = false, features = ["derive"] }
+serde-json-core = "0.6.0"
+
 [features]
 #default = [ "esp32-s3-headless" ]
 #default = [ "esp32-s3-box" ]

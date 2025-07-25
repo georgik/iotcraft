@@ -11,7 +11,7 @@ runner = "espflash flash --monitor"
 # ESP32-C6
 [target.riscv32imac-unknown-none-elf]
 #runner = "probe-rs run --chip=esp32c6"
-runner = "espflash flash --monitor"
+runner = "espflash flash --monitor --partition-table partitions.csv"
 
 [env]
 DEFMT_LOG="info"
