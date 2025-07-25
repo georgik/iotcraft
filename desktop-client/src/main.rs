@@ -9,10 +9,10 @@ use log::{error, info};
 use rumqttc::{Client, Event, MqttOptions, Outgoing, QoS};
 use serde_json::json;
 use std::fs;
-use std::thread;
 use std::time::Duration;
 
 mod camera_controllers;
+mod config;
 mod console;
 mod devices;
 mod environment;
@@ -21,6 +21,7 @@ mod mqtt;
 mod script;
 
 // Re-export types for easier access
+use config::MqttConfig;
 use console::*;
 use devices::*;
 use environment::*;
@@ -178,6 +179,7 @@ fn execute_pending_commands(
     mut print_console_line: EventWriter<PrintConsoleLine>,
     mut blink_state: ResMut<BlinkState>,
     temperature: Res<TemperatureResource>,
+    mqtt_config: Res<MqttConfig>,
 ) {
     for command in pending_commands.commands.drain(..) {
         info!("Executing queued command: {}", command);
@@ -259,8 +261,11 @@ fn execute_pending_commands(
                                 .to_string();
 
                                 // Create a temporary client for simulation
-                                let mut mqtt_options =
-                                    MqttOptions::new("spawn-client", "localhost", 1883);
+                                let mut mqtt_options = MqttOptions::new(
+                                    "spawn-client",
+                                    &mqtt_config.host,
+                                    mqtt_config.port,
+                                );
                                 mqtt_options.set_keep_alive(Duration::from_secs(5));
                                 let (client, mut connection) = Client::new(mqtt_options, 10);
 
@@ -310,8 +315,13 @@ fn main() {
         script_executor.execute_startup = true;
     }
 
+    // Load MQTT configuration from environment variables
+    let mqtt_config = MqttConfig::from_env();
+    info!("Using MQTT broker: {}", mqtt_config.broker_address());
+
     App::new()
         .insert_resource(ClearColor(Color::srgb(0.53, 0.81, 0.92)))
+        .insert_resource(mqtt_config)
         .add_plugins(DefaultPlugins)
         .add_plugins(CameraControllerPlugin)
         .add_plugins(ConsolePlugin)
@@ -493,6 +503,7 @@ fn handle_spawn_command(
 fn blink_publisher_system(
     mut blink_state: ResMut<BlinkState>,
     device_query: Query<&DeviceEntity, With<BlinkCube>>,
+    mqtt_config: Res<MqttConfig>,
 ) {
     if blink_state.light_state != blink_state.last_sent {
         let payload = if blink_state.light_state { "ON" } else { "OFF" };
@@ -502,6 +513,8 @@ fn blink_publisher_system(
             if device.device_type == "lamp" {
                 let device_id = device.device_id.clone();
                 let payload_str = payload.to_string();
+                let mqtt_host = mqtt_config.host.clone();
+                let mqtt_port = mqtt_config.port;
 
                 // Send MQTT message in a separate thread to avoid blocking
                 std::thread::spawn(move || {
@@ -509,7 +522,7 @@ fn blink_publisher_system(
                         "MQTT: Connecting blink client to publish to device {}",
                         device_id
                     );
-                    let mut opts = MqttOptions::new("bevy_blink_client", "localhost", 1883);
+                    let mut opts = MqttOptions::new("bevy_blink_client", &mqtt_host, mqtt_port);
                     opts.set_keep_alive(Duration::from_secs(5));
                     let (client, mut connection) = Client::new(opts, 10);
 

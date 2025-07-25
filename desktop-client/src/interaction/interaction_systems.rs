@@ -6,6 +6,7 @@ use rumqttc::{Client, Event, MqttOptions, Outgoing, QoS};
 use std::time::Duration;
 
 use super::interaction_types::*;
+use crate::config::MqttConfig;
 use crate::devices::DeviceEntity;
 use crate::environment::Ground;
 
@@ -183,6 +184,7 @@ fn handle_lamp_toggle_events(
     mut lamp_query: Query<&mut LampState>,
     device_query: Query<(Entity, &DeviceEntity)>,
     mut commands: Commands,
+    mqtt_config: Res<MqttConfig>,
 ) {
     for event in lamp_toggle_events.read() {
         info!("Toggling lamp {} to {}", event.device_id, event.new_state);
@@ -211,13 +213,16 @@ fn handle_lamp_toggle_events(
             // Send MQTT message in a separate thread to avoid blocking
             let device_id = event.device_id.clone();
             let new_state = event.new_state;
+            let mqtt_host = mqtt_config.host.clone();
+            let mqtt_port = mqtt_config.port;
 
             std::thread::spawn(move || {
                 info!(
                     "MQTT: Connecting player interaction client to publish to device {}",
                     device_id
                 );
-                let mut mqtt_options = MqttOptions::new("player-interaction", "localhost", 1883);
+                let mut mqtt_options =
+                    MqttOptions::new("player-interaction", &mqtt_host, mqtt_port);
                 mqtt_options.set_keep_alive(Duration::from_secs(5));
 
                 let (client, mut connection) = Client::new(mqtt_options, 10);

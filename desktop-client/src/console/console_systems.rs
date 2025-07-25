@@ -7,6 +7,7 @@ use std::fs;
 use std::time::Duration;
 
 use super::console_types::*;
+use crate::config::MqttConfig;
 use crate::devices::{DeviceEntity, device_positioning::DevicePositionUpdateEvent};
 use crate::mqtt::TemperatureResource;
 use crate::script::{ScriptExecutor, execute_script};
@@ -79,7 +80,7 @@ pub fn handle_mqtt_command(
     }
 }
 
-pub fn handle_spawn_command(mut log: ConsoleCommand<SpawnCommand>) {
+pub fn handle_spawn_command(mut log: ConsoleCommand<SpawnCommand>, mqtt_config: Res<MqttConfig>) {
     if let Some(Ok(SpawnCommand { device_id, x, y, z })) = log.take() {
         info!("Console command: spawn {}", device_id);
         let payload = json!({
@@ -91,7 +92,8 @@ pub fn handle_spawn_command(mut log: ConsoleCommand<SpawnCommand>) {
         .to_string();
 
         // Create a temporary client for simulation
-        let mut mqtt_options = MqttOptions::new("spawn-client", "127.0.0.1", 1883);
+        let mut mqtt_options =
+            MqttOptions::new("spawn-client", &mqtt_config.host, mqtt_config.port);
         mqtt_options.set_keep_alive(Duration::from_secs(5));
         let (client, mut connection) = Client::new(mqtt_options, 10);
 

@@ -6,6 +6,7 @@ use serde_json::json;
 use std::time::Duration;
 
 use super::device_types::*;
+use crate::config::MqttConfig;
 use crate::environment::Ground;
 
 /// Component to mark a device as being dragged
@@ -121,14 +122,10 @@ fn handle_device_drag_input(
         }
     }
 
-    // Handle releasing drag
+    // Handle releasing drag - position updates will be sent by handle_device_dragging system
     if mouse_input.just_released(MouseButton::Right) || keyboard_input.just_pressed(KeyCode::Escape)
     {
-        // Stop dragging all devices
-        for entity in dragged_query.iter() {
-            commands.entity(entity).remove::<BeingDragged>();
-        }
-        drag_state.dragging_entity = None;
+        // The cleanup will be handled by handle_device_dragging after sending position updates
         info!("Stopped dragging devices");
     }
 }
@@ -140,7 +137,8 @@ fn handle_device_dragging(
     mut dragged_query: Query<(&mut Transform, &BeingDragged, &DeviceEntity)>,
     mut position_update_events: EventWriter<DevicePositionUpdateEvent>,
     mouse_input: Res<ButtonInput<MouseButton>>,
-    drag_state: Res<DragState>,
+    keyboard_input: Res<ButtonInput<KeyCode>>,
+    mut drag_state: ResMut<DragState>,
     mut commands: Commands,
     console_open: Res<ConsoleOpen>,
 ) {
@@ -176,17 +174,26 @@ fn handle_device_dragging(
                 device_id: device.device_id.clone(),
                 new_position,
             });
-
-            // Remove dragging component
-            if let Some(entity) = drag_state.dragging_entity {
-                commands.entity(entity).remove::<BeingDragged>();
-            }
         }
+    }
+
+    // Clean up dragging state after processing all dragged entities
+    if mouse_input.just_released(MouseButton::Right) || keyboard_input.just_pressed(KeyCode::Escape)
+    {
+        // Remove BeingDragged component from the dragged entity
+        if let Some(entity) = drag_state.dragging_entity {
+            commands.entity(entity).remove::<BeingDragged>();
+        }
+        // Reset drag state
+        drag_state.dragging_entity = None;
     }
 }
 
 /// System to handle position update events and send MQTT messages
-fn handle_position_update_events(mut position_events: EventReader<DevicePositionUpdateEvent>) {
+fn handle_position_update_events(
+    mut position_events: EventReader<DevicePositionUpdateEvent>,
+    mqtt_config: Res<MqttConfig>,
+) {
     for event in position_events.read() {
         info!(
             "Updating position for device {} to {:?}",
@@ -197,9 +204,12 @@ fn handle_position_update_events(mut position_events: EventReader<DevicePosition
         let device_id = event.device_id.clone();
         let position = event.new_position;
 
+        let mqtt_host = mqtt_config.host.clone();
+        let mqtt_port = mqtt_config.port;
+
         std::thread::spawn(move || {
             info!("MQTT: Sending position update for device {}", device_id);
-            let mut opts = MqttOptions::new("position-updater", "localhost", 1883);
+            let mut opts = MqttOptions::new("position-updater", &mqtt_host, mqtt_port);
             opts.set_keep_alive(Duration::from_secs(5));
             let (client, mut connection) = Client::new(opts, 10);
 
