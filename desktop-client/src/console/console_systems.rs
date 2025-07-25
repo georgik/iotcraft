@@ -7,6 +7,7 @@ use std::fs;
 use std::time::Duration;
 
 use super::console_types::*;
+use crate::devices::{DeviceEntity, device_positioning::DevicePositionUpdateEvent};
 use crate::mqtt::TemperatureResource;
 use crate::script::{ScriptExecutor, execute_script};
 
@@ -18,7 +19,8 @@ impl Plugin for ConsolePlugin {
             .add_systems(Update, handle_blink_command)
             .add_systems(Update, handle_mqtt_command)
             .add_systems(Update, handle_spawn_command)
-            .add_systems(Update, handle_load_command);
+            .add_systems(Update, handle_load_command)
+            .add_systems(Update, handle_move_command);
     }
 }
 
@@ -135,6 +137,46 @@ pub fn handle_load_command(
             Err(e) => {
                 reply!(log, "Error loading script {}: {}", filename, e);
             }
+        }
+    }
+}
+
+pub fn handle_move_command(
+    mut log: ConsoleCommand<MoveCommand>,
+    mut device_query: Query<(&mut Transform, &DeviceEntity)>,
+    mut position_events: EventWriter<DevicePositionUpdateEvent>,
+) {
+    if let Some(Ok(MoveCommand { device_id, x, y, z })) = log.take() {
+        info!("Console command: move {} {} {} {}", device_id, x, y, z);
+
+        let new_position = Vec3::new(x, y, z);
+        let mut device_found = false;
+
+        // Find and update the device position
+        for (mut transform, device) in device_query.iter_mut() {
+            if device.device_id == device_id {
+                transform.translation = new_position;
+                device_found = true;
+
+                // Send position update event
+                position_events.write(DevicePositionUpdateEvent {
+                    device_id: device_id.clone(),
+                    new_position,
+                });
+
+                break;
+            }
+        }
+
+        if device_found {
+            reply!(log, "Moved device {} to ({}, {}, {})", device_id, x, y, z);
+            info!(
+                "Device {} moved to ({}, {}, {}) via console",
+                device_id, x, y, z
+            );
+        } else {
+            reply!(log, "Device {} not found", device_id);
+            info!("Device {} not found for move command", device_id);
         }
     }
 }

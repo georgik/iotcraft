@@ -37,6 +37,19 @@ pub struct LoadCommand {
     pub filename: String,
 }
 
+#[derive(Parser, ConsoleCommand)]
+#[command(name = "move")]
+pub struct MoveCommand {
+    /// Device ID to move
+    pub device_id: String,
+    /// X coordinate
+    pub x: f32,
+    /// Y coordinate
+    pub y: f32,
+    /// Z coordinate
+    pub z: f32,
+}
+
 #[derive(Resource)]
 pub struct BlinkState {
     pub blinking: bool,

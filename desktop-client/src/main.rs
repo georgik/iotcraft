@@ -316,6 +316,7 @@ fn main() {
         .add_plugins(CameraControllerPlugin)
         .add_plugins(ConsolePlugin)
         .add_plugins(DevicePlugin)
+        .add_plugins(DevicePositioningPlugin)
         .add_plugins(EnvironmentPlugin)
         .add_plugins(MyInteractionPlugin)
         .add_plugins(MqttPlugin)
@@ -331,9 +332,17 @@ fn main() {
         .add_console_command::<MqttCommand, _>(handle_mqtt_command)
         .add_console_command::<SpawnCommand, _>(handle_spawn_command)
         .add_console_command::<LoadCommand, _>(handle_load_command)
+        .add_console_command::<MoveCommand, _>(crate::console::console_systems::handle_move_command)
         .insert_resource(BlinkState::default())
         // .add_systems(Update, draw_cursor) // Disabled: InteractionPlugin handles cursor drawing
-        .add_systems(Update, (blink_publisher_system, rotate_logo_system))
+        .add_systems(
+            Update,
+            (
+                blink_publisher_system,
+                rotate_logo_system,
+                crate::devices::device_positioning::draw_drag_feedback,
+            ),
+        )
         .add_systems(Update, manage_camera_controller)
         .add_systems(Update, handle_console_escape.after(ConsoleSet::Commands))
         .add_systems(Update, handle_console_t_key.after(ConsoleSet::Commands))
