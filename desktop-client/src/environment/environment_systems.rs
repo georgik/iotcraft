@@ -1,17 +1,24 @@
-use bevy::prelude::*;
 use bevy::pbr::MeshMaterial3d;
+use bevy::prelude::*;
 
 use super::environment_types::*;
-use crate::mqtt::TemperatureResource;
-use crate::console::BlinkCube;
 use crate::camera_controllers::CameraController;
+use crate::console::BlinkCube;
+use crate::mqtt::TemperatureResource;
 
 pub struct EnvironmentPlugin;
 
 impl Plugin for EnvironmentPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, setup)
-            .add_systems(Update, (blinking_system, rotate_logo_system, update_thermometer_material, update_thermometer_scale));
+        app.add_systems(Startup, setup).add_systems(
+            Update,
+            (
+                blinking_system,
+                rotate_logo_system,
+                update_thermometer_material,
+                update_thermometer_scale,
+            ),
+        );
     }
 }
 
@@ -34,7 +41,6 @@ fn setup(
         MeshMaterial3d(grass_material_handle.clone()),
         Ground,
     ));
-
 
     // block with Espressif logo texture
     let block_mesh = meshes.add(Cuboid::new(1.0, 1.0, 1.0));
@@ -105,10 +111,7 @@ fn blinking_system(
     }
 }
 
-fn rotate_logo_system(
-    time: Res<Time>,
-    mut query: Query<&mut Transform, With<LogoCube>>,
-) {
+fn rotate_logo_system(time: Res<Time>, mut query: Query<&mut Transform, With<LogoCube>>) {
     for mut transform in &mut query {
         transform.rotate_y(time.delta_secs() * 0.5);
         transform.rotate_x(time.delta_secs() * 0.5);

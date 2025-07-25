@@ -30,9 +30,9 @@ IoTCraft is a multi-component Rust project showcasing MQTT-controlled IoT device
 
 - **esp32-c6-client**  
   An embedded **no_std** application for the ESP32-C6 using Embassy and ESP HAL.  
-  - Connects to Wi-Fi, drives MQTT subscription for lamp control (topic `home/cube/light`),  
-    toggles an LED.
-  - Reads the on-board temperature sensor via I2C and publishes readings (`home/sensor/temperature`).
+  - Connects to Wi-Fi, announces itself via MQTT (`devices/announce` topic) with a unique MAC-based device ID
+  - Subscribes to device-specific lamp control topic (`home/{device_id}/light`) and toggles an LED
+  - Reads the on-board temperature sensor via I2C and publishes readings (`home/sensor/temperature`)
 
 - **esp32-c3-devkit-rust-1**  
   An embedded **no_std** application for the ESP32-C3-DevKit-RS board using Embassy.  
@@ -98,6 +98,43 @@ cd esp32-c3-devkit-rust-1
 cargo build --release
 wokwi-cli
 ```
+
+## Device Registration System
+
+The IoTCraft system now supports dynamic device registration:
+
+1. **ESP32 devices** automatically announce themselves when they connect to Wi-Fi
+2. **Desktop client** listens for device announcements and automatically spawns 3D representations
+3. **Interactive control** allows clicking on devices in the 3D world to control them
+4. **Dynamic topics** use device-specific MQTT topics (`home/{device_id}/light`)
+
+### Device Announcement Format
+
+Devices announce themselves using this JSON format on the `devices/announce` topic:
+```json
+{
+  "device_id": "esp32c6_aabbcc112233",
+  "device_type": "lamp", 
+  "state": "online",
+  "location": { "x": 1.0, "y": 0.5, "z": 2.0 }
+}
+```
+
+### MQTT Topics
+
+- `devices/announce` - Device registration announcements
+- `home/{device_id}/light` - Individual device lamp control  
+- `home/sensor/temperature` - Temperature sensor readings
+
+### Testing with Real Devices
+
+To test with an ESP32-C6 device:
+
+1. Flash the ESP32-C6 client code
+2. Start the MQTT server and desktop client  
+3. The ESP32 will automatically appear in the 3D world when it connects
+4. Click on the device cube to toggle its LED on/off
+5. Use the "blink" console command to make all registered devices blink
 
 ## Development
 

@@ -1,15 +1,17 @@
+use super::{script_helpers::*, script_types::*};
+use crate::console::BlinkState;
 use bevy::prelude::*;
 use bevy_console::PrintConsoleLine;
 use log::info;
-use super::{script_types::*, script_helpers::*};
-use crate::console::BlinkState;
 
 pub struct ScriptPlugin;
 
 impl Plugin for ScriptPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(ScriptExecutor::default())
-            .insert_resource(PendingCommands { commands: Vec::new() })
+            .insert_resource(PendingCommands {
+                commands: Vec::new(),
+            })
             .add_systems(Update, script_execution_system)
             .add_systems(Update, execute_pending_commands);
     }
@@ -32,7 +34,9 @@ pub fn script_execution_system(
         script_executor.execute_startup = false;
     }
 
-    if !script_executor.commands.is_empty() && script_executor.current_index < script_executor.commands.len() {
+    if !script_executor.commands.is_empty()
+        && script_executor.current_index < script_executor.commands.len()
+    {
         script_executor.delay_timer.tick(time.delta());
 
         if script_executor.delay_timer.just_finished() {
@@ -61,4 +65,3 @@ pub fn execute_pending_commands(
         // Additional command execution logic here.
     }
 }
-

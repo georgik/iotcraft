@@ -1,7 +1,7 @@
+use bevy::prelude::*;
 use std::collections::HashSet;
 use std::sync::Mutex;
 use std::sync::mpsc::Receiver;
-use bevy::prelude::*;
 
 #[derive(Resource)]
 pub struct DevicesTracker {
@@ -18,4 +18,3 @@ pub struct DeviceEntity {
     #[allow(dead_code)]
     pub device_type: String,
 }
-

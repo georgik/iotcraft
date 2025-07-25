@@ -1,52 +1,52 @@
 #![no_std]
 #![no_main]
 extern crate alloc;
-use esp_wifi::wifi::WifiDevice;
-use esp_hal::gpio::Level;
-use esp_hal::gpio::Output;
+use crate::alloc::string::ToString;
+use alloc::vec::Vec;
+use core::net::Ipv4Addr;
+use embedded_hal::delay::DelayNs;
 use esp_hal::dma::DmaPriority;
 use esp_hal::dma::Owner::Dma;
+use esp_hal::gpio::Level;
+use esp_hal::gpio::Output;
 use esp_hal::spi::master::Spi;
 use esp_hal::timer::systimer::SystemTimer;
+use esp_wifi::wifi::WifiDevice;
 use heapless::String;
-use core::net::Ipv4Addr;
-use log::{info, error};
-use embedded_hal::delay::DelayNs;
-use alloc::vec::Vec;
-use crate::alloc::string::ToString;
+use log::{error, info};
 
 use embassy_executor::Spawner;
-use embassy_net::{tcp::TcpSocket, Runner, StackResources, Stack};
+use embassy_net::{Runner, Stack, StackResources, tcp::TcpSocket};
 use embassy_time::{Duration, Instant, Timer};
 use embedded_io_async::Write;
 use esp_alloc as _;
 use esp_alloc::HeapStats;
 // use esp_backtrace as _;
-use esp_hal::{clock::CpuClock, rng::Rng, timer::timg::TimerGroup, delay::Delay,};
+use esp_hal::{clock::CpuClock, delay::Delay, rng::Rng, timer::timg::TimerGroup};
 use esp_println::{print, println};
 use esp_wifi::{
-    init,
+    EspWifiController, init,
     wifi::{ClientConfiguration, Configuration, WifiController, WifiEvent, WifiState},
-    EspWifiController,
 };
 
 use esp_hal::rmt::Rmt;
-use esp_hal_smartled::{smart_led_buffer, SmartLedsAdapter};
+use esp_hal_smartled::{SmartLedsAdapter, smart_led_buffer};
 
-use smart_leds::{brightness, gamma, hsv::{hsv2rgb, Hsv}, SmartLedsWrite, RGB8};
+use smart_leds::{
+    RGB8, SmartLedsWrite, brightness, gamma,
+    hsv::{Hsv, hsv2rgb},
+};
 
+use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::blocking_mutex::raw::NoopRawMutex;
 use embassy_sync::channel::Channel;
 use esp_hal::rmt::TxChannel;
-use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 // use rumqttc::{MqttOptions, Client, QoS};
 // use rumqttc::{Event, Outgoing};
 
 use rust_mqtt::{
-    client::client::MqttClient,
-    client::client_config::ClientConfig,
-    packet::v5::publish_packet::QualityOfService,
-    utils::rng_generator::CountingRng,
+    client::client::MqttClient, client::client_config::ClientConfig,
+    packet::v5::publish_packet::QualityOfService, utils::rng_generator::CountingRng,
 };
 
 // Define a static channel with a capacity of 1 for `HardwareEvent`s.
@@ -65,7 +65,6 @@ const SSID: &str = env!("SSID");
 const PASSWORD: &str = env!("PASSWORD");
 const SERVER_IP: &str = env!("SERVER_IP");
 
-
 use embassy_futures::yield_now;
 use esp_wifi::config::PowerSaveMode;
 
@@ -82,7 +81,6 @@ fn panic(panic_info: &core::panic::PanicInfo) -> ! {
 //
 // }
 
-
 #[esp_hal_embassy::main]
 async fn main(spawner: Spawner) {
     print!("System starting up...");
@@ -91,12 +89,11 @@ async fn main(spawner: Spawner) {
     println!(" ok");
 
     esp_println::logger::init_logger_from_env();
-    
+
     const memory_size: usize = 200 * 1024;
     print!("Initializing allocator with {} bytes...", memory_size);
     esp_alloc::heap_allocator!(size: memory_size);
     println!(" ok");
-
 
     let mut rng = Rng::new(peripherals.RNG);
 
@@ -112,7 +109,6 @@ async fn main(spawner: Spawner) {
         .expect("Failed to initialize WIFI controller");
     let wifi_device = interfaces.sta;
 
-
     let led_pin = peripherals.GPIO8;
     let freq = esp_hal::time::Rate::from_mhz(80);
     let rmt = Rmt::new(peripherals.RMT, freq).unwrap();
@@ -125,9 +121,7 @@ async fn main(spawner: Spawner) {
     led.write(brightness(gamma(core::iter::once(color)), 10))
         .unwrap();
 
-
     info!("SPI ready");
-
 
     // heap_stats();
 
@@ -138,6 +132,16 @@ async fn main(spawner: Spawner) {
     let config = embassy_net::Config::dhcpv4(Default::default());
     let seed = (rng.random() as u64) << 32 | rng.random() as u64;
 
+    // Create a unique device ID using a simple approach
+    // In a real deployment, you could use hardware serial number or MAC address
+    // For now, we'll use a random suffix based on the RNG
+    let device_suffix = rng.random() as u32;
+    let device_id =
+        heapless::String::<64>::try_from(alloc::format!("esp32-c6-{:08x}", device_suffix).as_str())
+            .unwrap();
+
+    info!("Device ID: {}", device_id.as_str());
+
     let (stack_local, runner) = embassy_net::new(
         wifi_device,
         config,
@@ -146,6 +150,7 @@ async fn main(spawner: Spawner) {
     );
     // promote stack to 'static for tasks
     let stack = mk_static!(Stack<'static>, stack_local);
+    let device_id_static = mk_static!(heapless::String<64>, device_id);
 
     spawner
         .spawn(hardware_task_runner(led, CHANNEL.receiver()))
@@ -155,13 +160,11 @@ async fn main(spawner: Spawner) {
     spawner.spawn(net_task(runner)).ok();
     spawner.spawn(tick_task()).ok();
     // spawn a task to wait for network and launch MQTT
-    spawner.spawn(mqtt_launcher(stack)).ok();
-
+    spawner.spawn(mqtt_launcher(stack, device_id_static)).ok();
 }
 
-
 #[embassy_executor::task]
-async fn mqtt_launcher(stack: &'static Stack<'static>) {
+async fn mqtt_launcher(stack: &'static Stack<'static>, device_id: &'static heapless::String<64>) {
     info!("Waiting for network connection...");
     loop {
         if stack.is_link_up() {
@@ -182,14 +185,12 @@ async fn mqtt_launcher(stack: &'static Stack<'static>) {
             socket.connect(remote_endpoint).await.unwrap();
             info!("Connected to MQTT Socket at {}", remote_endpoint.0);
             // hand off to mqtt_task
-            mqtt_task(socket).await;
+            mqtt_task(socket, device_id).await;
             break;
         }
         Timer::after(Duration::from_millis(500)).await;
     }
 }
-
-
 
 #[embassy_executor::task]
 async fn connection(mut controller: WifiController<'static>) {
@@ -232,8 +233,6 @@ async fn connection(mut controller: WifiController<'static>) {
     }
 }
 
-
-
 #[embassy_executor::task]
 async fn tick_task() {
     loop {
@@ -254,10 +253,8 @@ async fn tick_task() {
 enum HardwareEvent {
     ToggleLed,
     TurnOnLed,
-    TurnOffLed
-    // Future events can be added here (e.g., ButtonPressed, DisplayUpdate, etc.)
+    TurnOffLed, // Future events can be added here (e.g., ButtonPressed, DisplayUpdate, etc.)
 }
-
 
 #[embassy_executor::task]
 async fn hardware_task_runner(
@@ -293,18 +290,21 @@ async fn hardware_task_runner(
             HardwareEvent::TurnOnLed => {
                 println!("Turn on led");
                 toggle_state = 0;
-                let color = RGB8 { r: 255, g: 255, b: 0 };
+                let color = RGB8 {
+                    r: 255,
+                    g: 255,
+                    b: 0,
+                };
 
                 led.write(brightness(gamma(core::iter::once(color)), 10))
                     .unwrap();
             }
-
         }
         yield_now().await;
     }
 }
 
-async fn mqtt_task(mut socket: TcpSocket<'static>) {
+async fn mqtt_task(mut socket: TcpSocket<'static>, device_id: &'static heapless::String<64>) {
     // allocate buffers for the client
     let mut recv_buffer = [0u8; 256];
     let mut write_buffer = [0u8; 256];
@@ -316,7 +316,7 @@ async fn mqtt_task(mut socket: TcpSocket<'static>) {
         CountingRng(20000),
     );
     config.add_max_subscribe_qos(QualityOfService::QoS1);
-    config.add_client_id("esp32-client");
+    config.add_client_id(device_id.as_str());
     config.max_packet_size = 100;
 
     info!("MQTT connecting to broker at {}:1884", SERVER_IP);
@@ -338,7 +338,8 @@ async fn mqtt_task(mut socket: TcpSocket<'static>) {
             continue;
         }
         // subscribe to lamp topic with retry on failure
-        if let Err(err) = client.subscribe_to_topic("home/cube/light").await {
+        let subscribe_topic = alloc::format!("home/{}/light", device_id.as_str());
+        if let Err(err) = client.subscribe_to_topic(&subscribe_topic).await {
             error!("MQTT subscribe error: {:?}", err);
             Timer::after(Duration::from_secs(5)).await;
             continue;
@@ -346,9 +347,20 @@ async fn mqtt_task(mut socket: TcpSocket<'static>) {
         break;
     }
 
-    // Send device announcement message
-    let announcement = r#"{"device_id":"esp32-c6-client","device_type":"lamp","state":"online","location":{"x":1.0,"y":0.5,"z":2.0}}"#;
-    if let Err(err) = client.send_message("devices/announce", announcement.as_bytes(), QualityOfService::QoS1, false).await {
+    // Send device announcement message with MAC-based device ID
+    let announcement = alloc::format!(
+        r#"{{"device_id":"{}","device_type":"lamp","state":"online","location":{{"x":1.0,"y":0.5,"z":2.0}}}}"#,
+        device_id.as_str()
+    );
+    if let Err(err) = client
+        .send_message(
+            "devices/announce",
+            announcement.as_bytes(),
+            QualityOfService::QoS1,
+            false,
+        )
+        .await
+    {
         error!("Failed to send device announcement: {:?}", err);
     } else {
         info!("Device announcement sent successfully");

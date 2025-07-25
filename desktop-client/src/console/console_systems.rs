@@ -1,14 +1,14 @@
 use bevy::prelude::*;
 use bevy_console::{ConsoleCommand, reply};
 use log::info;
+use rumqttc::{Client, Event, MqttOptions, Outgoing, QoS};
+use serde_json::json;
 use std::fs;
 use std::time::Duration;
-use serde_json::json;
-use rumqttc::{Client, MqttOptions, QoS, Event, Outgoing};
 
 use super::console_types::*;
-use crate::script::{ScriptExecutor, execute_script};
 use crate::mqtt::TemperatureResource;
+use crate::script::{ScriptExecutor, execute_script};
 
 pub struct ConsolePlugin;
 
@@ -77,9 +77,7 @@ pub fn handle_mqtt_command(
     }
 }
 
-pub fn handle_spawn_command(
-    mut log: ConsoleCommand<SpawnCommand>,
-) {
+pub fn handle_spawn_command(mut log: ConsoleCommand<SpawnCommand>) {
     if let Some(Ok(SpawnCommand { device_id, x, y, z })) = log.take() {
         info!("Console command: spawn {}", device_id);
         let payload = json!({
@@ -94,9 +92,14 @@ pub fn handle_spawn_command(
         let mut mqtt_options = MqttOptions::new("spawn-client", "127.0.0.1", 1883);
         mqtt_options.set_keep_alive(Duration::from_secs(5));
         let (client, mut connection) = Client::new(mqtt_options, 10);
-        
+
         client
-            .publish("devices/announce", QoS::AtMostOnce, false, payload.as_bytes())
+            .publish(
+                "devices/announce",
+                QoS::AtMostOnce,
+                false,
+                payload.as_bytes(),
+            )
             .unwrap();
 
         // Drive the event loop to ensure the message is sent
@@ -121,7 +124,12 @@ pub fn handle_load_command(
                 let commands = execute_script(&content);
                 script_executor.commands = commands;
                 script_executor.current_index = 0;
-                reply!(log, "Loaded {} commands from {}", script_executor.commands.len(), filename);
+                reply!(
+                    log,
+                    "Loaded {} commands from {}",
+                    script_executor.commands.len(),
+                    filename
+                );
                 info!("Loaded script file: {}", filename);
             }
             Err(e) => {

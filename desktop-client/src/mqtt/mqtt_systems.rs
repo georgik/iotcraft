@@ -1,9 +1,9 @@
 use bevy::prelude::*;
+use rumqttc::{Client, Event, Incoming, MqttOptions, QoS};
+use std::sync::Mutex;
 use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
-use std::sync::Mutex;
-use rumqttc::{Client, MqttOptions, QoS, Event, Incoming};
 
 use super::mqtt_types::*;
 use crate::devices::DeviceAnnouncementReceiver;
@@ -22,17 +22,34 @@ impl Plugin for MqttPlugin {
 pub fn spawn_mqtt_subscriber(mut commands: Commands) {
     let (tx, rx) = mpsc::channel::<f32>();
     thread::spawn(move || {
-        let mut mqttoptions = MqttOptions::new("desktop-subscriber", "127.0.0.1", 1883);
+        info!("MQTT: Starting temperature subscriber on port 1883");
+        let mut mqttoptions = MqttOptions::new("desktop-subscriber", "localhost", 1883);
         mqttoptions.set_keep_alive(Duration::from_secs(5));
         let (client, mut connection) = Client::new(mqttoptions, 10);
-        client.subscribe("home/sensor/temperature", QoS::AtMostOnce).unwrap();
+
+        match client.subscribe("home/sensor/temperature", QoS::AtMostOnce) {
+            Ok(_) => info!("MQTT: Successfully subscribed to home/sensor/temperature"),
+            Err(e) => error!("MQTT: Failed to subscribe to temperature topic: {}", e),
+        }
+
         for notification in connection.iter() {
-            if let Ok(Event::Incoming(Incoming::Publish(p))) = notification {
-                if let Ok(s) = String::from_utf8(p.payload.to_vec()) {
-                    if let Ok(val) = s.parse::<f32>() {
-                        let _ = tx.send(val);
+            match notification {
+                Ok(Event::Incoming(Incoming::Publish(p))) => {
+                    info!("MQTT: Received temperature message on topic: {}", p.topic);
+                    if let Ok(s) = String::from_utf8(p.payload.to_vec()) {
+                        if let Ok(val) = s.parse::<f32>() {
+                            let _ = tx.send(val);
+                        }
                     }
                 }
+                Ok(Event::Incoming(Incoming::ConnAck(_))) => {
+                    info!("MQTT: Temperature subscriber connected successfully");
+                }
+                Err(e) => {
+                    error!("MQTT: Temperature subscriber error: {}", e);
+                    break;
+                }
+                _ => {}
             }
         }
     });
@@ -41,19 +58,39 @@ pub fn spawn_mqtt_subscriber(mut commands: Commands) {
     // Create device announcement channel
     let (device_tx, device_rx) = mpsc::channel::<String>();
     commands.insert_resource(DeviceAnnouncementReceiver(Mutex::new(device_rx)));
-    
+
     // Subscribe to device announcements
     thread::spawn(move || {
-        let mut mqttoptions = MqttOptions::new("device-subscriber", "127.0.0.1", 1883);
+        info!("MQTT: Starting device announcements subscriber on port 1883");
+        let mut mqttoptions = MqttOptions::new("device-subscriber", "localhost", 1883);
         mqttoptions.set_keep_alive(Duration::from_secs(5));
         let (client, mut connection) = Client::new(mqttoptions, 10);
-        client.subscribe("devices/announce", QoS::AtMostOnce).unwrap();
-        
+
+        match client.subscribe("devices/announce", QoS::AtMostOnce) {
+            Ok(_) => info!("MQTT: Successfully subscribed to devices/announce"),
+            Err(e) => error!("MQTT: Failed to subscribe to devices/announce: {}", e),
+        }
+
         for notification in connection.iter() {
-            if let Ok(Event::Incoming(Incoming::Publish(p))) = notification {
-                if let Ok(s) = String::from_utf8(p.payload.to_vec()) {
-                    let _ = device_tx.send(s);
+            match notification {
+                Ok(Event::Incoming(Incoming::Publish(p))) => {
+                    info!(
+                        "MQTT: Received device announcement on topic: {} with payload: {}",
+                        p.topic,
+                        String::from_utf8_lossy(&p.payload)
+                    );
+                    if let Ok(s) = String::from_utf8(p.payload.to_vec()) {
+                        let _ = device_tx.send(s);
+                    }
                 }
+                Ok(Event::Incoming(Incoming::ConnAck(_))) => {
+                    info!("MQTT: Device announcements subscriber connected successfully");
+                }
+                Err(e) => {
+                    error!("MQTT: Device announcements subscriber error: {}", e);
+                    break;
+                }
+                _ => {}
             }
         }
     });

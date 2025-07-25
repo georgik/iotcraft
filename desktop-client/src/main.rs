@@ -1,22 +1,22 @@
 use bevy::prelude::*;
+use bevy_console::{
+    AddConsoleCommand, ConsoleCommand, ConsoleOpen, ConsoleSet, PrintConsoleLine, reply,
+};
+use bevy_console::{ConsoleConfiguration, ConsolePlugin};
 use camera_controllers::{CameraController, CameraControllerPlugin};
-use bevy_console::{AddConsoleCommand, ConsoleCommand, reply, ConsoleOpen, PrintConsoleLine, ConsoleSet};
-use rumqttc::{Client, MqttOptions, QoS, Incoming, Event, Outgoing};
-use serde_json::json;
-use std::sync::mpsc;
-use std::sync::Mutex;
-use std::thread;
-use std::collections::HashSet;
-use std::time::Duration;
-use std::fs;
-use bevy_console::{ConsolePlugin, ConsoleConfiguration};
 use clap::Parser;
-use log::{info, error};
+use log::{error, info};
+use rumqttc::{Client, Event, MqttOptions, Outgoing, QoS};
+use serde_json::json;
+use std::fs;
+use std::thread;
+use std::time::Duration;
 
 mod camera_controllers;
 mod console;
 mod devices;
 mod environment;
+mod interaction;
 mod mqtt;
 mod script;
 
@@ -24,7 +24,8 @@ mod script;
 use console::*;
 use devices::*;
 use environment::*;
-use mqtt::*;
+use interaction::{Interactable, InteractionPlugin as MyInteractionPlugin, InteractionType};
+use mqtt::{MqttPlugin, *};
 
 // Define handle_blink_command function for console
 fn handle_blink_command(
@@ -58,53 +59,6 @@ struct Args {
     /// Script file to execute on startup
     #[arg(short, long)]
     script: Option<String>,
-}
-
-
-
-
-// ConsoleUi component is no longer needed with bevy_console
-
-/// Spawn a background thread to subscribe to the temperature topic and feed readings into the channel.
-fn spawn_mqtt_subscriber(mut commands: Commands) {
-    let (tx, rx) = mpsc::channel::<f32>();
-    thread::spawn(move || {
-        let mut mqttoptions = MqttOptions::new("desktop-subscriber", "127.0.0.1", 1883);
-        mqttoptions.set_keep_alive(Duration::from_secs(5));
-        let (client, mut connection) = Client::new(mqttoptions, 10);
-        client.subscribe("home/sensor/temperature", QoS::AtMostOnce).unwrap();
-        for notification in connection.iter() {
-            if let Ok(Event::Incoming(Incoming::Publish(p))) = notification {
-                if let Ok(s) = String::from_utf8(p.payload.to_vec()) {
-                    if let Ok(val) = s.parse::<f32>() {
-                        let _ = tx.send(val);
-                    }
-                }
-            }
-        }
-    });
-    commands.insert_resource(TemperatureReceiver(Mutex::new(rx)));
-
-    // Create device announcement channel
-    let (device_tx, device_rx) = mpsc::channel::<String>();
-    commands.insert_resource(DeviceAnnouncementReceiver(Mutex::new(device_rx)));
-    commands.insert_resource(DevicesTracker { spawned_devices: HashSet::new() });
-    
-    // Subscribe to device announcements
-    thread::spawn(move || {
-        let mut mqttoptions = MqttOptions::new("device-subscriber", "127.0.0.1", 1883);
-        mqttoptions.set_keep_alive(Duration::from_secs(5));
-        let (client, mut connection) = Client::new(mqttoptions, 10);
-        client.subscribe("devices/announce", QoS::AtMostOnce).unwrap();
-        
-        for notification in connection.iter() {
-            if let Ok(Event::Incoming(Incoming::Publish(p))) = notification {
-                if let Ok(s) = String::from_utf8(p.payload.to_vec()) {
-                    let _ = device_tx.send(s);
-                }
-            }
-        }
-    });
 }
 
 // Script execution system
@@ -154,7 +108,12 @@ fn handle_load_command(
                 let commands = execute_script(&content);
                 script_executor.commands = commands;
                 script_executor.current_index = 0;
-                reply!(log, "Loaded {} commands from {}", script_executor.commands.len(), filename);
+                reply!(
+                    log,
+                    "Loaded {} commands from {}",
+                    script_executor.commands.len(),
+                    filename
+                );
                 info!("Loaded script file: {}", filename);
             }
             Err(e) => {
@@ -186,22 +145,24 @@ fn script_execution_system(
         }
         script_executor.execute_startup = false;
     }
-    
+
     // Execute commands from script
-    if !script_executor.commands.is_empty() && script_executor.current_index < script_executor.commands.len() {
+    if !script_executor.commands.is_empty()
+        && script_executor.current_index < script_executor.commands.len()
+    {
         script_executor.delay_timer.tick(time.delta());
-        
+
         if script_executor.delay_timer.just_finished() {
             let command = &script_executor.commands[script_executor.current_index];
-            
+
             // Log the command execution
             info!("Executing script command: {}", command);
-            
+
             // Queue the command for execution
             pending_commands.commands.push(command.clone());
-            
+
             script_executor.current_index += 1;
-            
+
             // Check if we've finished executing all commands
             if script_executor.current_index >= script_executor.commands.len() {
                 script_executor.commands.clear();
@@ -234,16 +195,20 @@ fn execute_pending_commands(
                     match action {
                         "start" => {
                             blink_state.blinking = true;
-                            print_console_line.write(PrintConsoleLine::new("Blink started".to_string()));
+                            print_console_line
+                                .write(PrintConsoleLine::new("Blink started".to_string()));
                             info!("Blink started via script");
                         }
                         "stop" => {
                             blink_state.blinking = false;
-                            print_console_line.write(PrintConsoleLine::new("Blink stopped".to_string()));
+                            print_console_line
+                                .write(PrintConsoleLine::new("Blink stopped".to_string()));
                             info!("Blink stopped via script");
                         }
                         _ => {
-                            print_console_line.write(PrintConsoleLine::new("Usage: blink [start|stop]".to_string()));
+                            print_console_line.write(PrintConsoleLine::new(
+                                "Usage: blink [start|stop]".to_string(),
+                            ));
                         }
                     }
                 }
@@ -270,7 +235,9 @@ fn execute_pending_commands(
                             print_console_line.write(PrintConsoleLine::new(temp_msg));
                         }
                         _ => {
-                            print_console_line.write(PrintConsoleLine::new("Usage: mqtt [status|temp]".to_string()));
+                            print_console_line.write(PrintConsoleLine::new(
+                                "Usage: mqtt [status|temp]".to_string(),
+                            ));
                         }
                     }
                 }
@@ -281,39 +248,53 @@ fn execute_pending_commands(
                         if let Ok(y) = parts[3].parse::<f32>() {
                             if let Ok(z) = parts[4].parse::<f32>() {
                                 let device_id = parts[1].to_string();
-                                
+
                                 // Create spawn command payload
                                 let payload = json!({
                                     "device_id": device_id,
                                     "device_type": "lamp",
                                     "state": "online",
                                     "location": { "x": x, "y": y, "z": z }
-                                }).to_string();
+                                })
+                                .to_string();
 
                                 // Create a temporary client for simulation
-                                let mut mqtt_options = MqttOptions::new("spawn-client", "127.0.0.1", 1883);
+                                let mut mqtt_options =
+                                    MqttOptions::new("spawn-client", "localhost", 1883);
                                 mqtt_options.set_keep_alive(Duration::from_secs(5));
                                 let (client, mut connection) = Client::new(mqtt_options, 10);
-                                
+
                                 client
-                                    .publish("devices/announce", QoS::AtMostOnce, false, payload.as_bytes())
+                                    .publish(
+                                        "devices/announce",
+                                        QoS::AtMostOnce,
+                                        false,
+                                        payload.as_bytes(),
+                                    )
                                     .unwrap();
 
                                 // Drive the event loop to ensure the message is sent
                                 for notification in connection.iter() {
-                                    if let Ok(Event::Outgoing(Outgoing::Publish(_))) = notification {
+                                    if let Ok(Event::Outgoing(Outgoing::Publish(_))) = notification
+                                    {
                                         break;
                                     }
                                 }
-                                
-                                print_console_line.write(PrintConsoleLine::new(format!("Spawn command sent for device {}", device_id)));
+
+                                print_console_line.write(PrintConsoleLine::new(format!(
+                                    "Spawn command sent for device {}",
+                                    device_id
+                                )));
                             }
                         }
                     }
                 }
             }
             _ => {
-                print_console_line.write(PrintConsoleLine::new(format!("Unknown command: {}", command)));
+                print_console_line.write(PrintConsoleLine::new(format!(
+                    "Unknown command: {}",
+                    command
+                )));
             }
         }
     }
@@ -336,6 +317,8 @@ fn main() {
         .add_plugins(ConsolePlugin)
         .add_plugins(DevicePlugin)
         .add_plugins(EnvironmentPlugin)
+        .add_plugins(MyInteractionPlugin)
+        .add_plugins(MqttPlugin)
         .insert_resource(ConsoleConfiguration {
             keys: vec![KeyCode::F12],
             left_pos: 200.0,
@@ -349,16 +332,15 @@ fn main() {
         .add_console_command::<SpawnCommand, _>(handle_spawn_command)
         .add_console_command::<LoadCommand, _>(handle_load_command)
         .insert_resource(BlinkState::default())
-        .insert_resource(TemperatureResource::default())
-        .add_systems(Update, draw_cursor)
-        .add_systems(Startup, spawn_mqtt_subscriber)
+        // .add_systems(Update, draw_cursor) // Disabled: InteractionPlugin handles cursor drawing
         .add_systems(Update, (blink_publisher_system, rotate_logo_system))
-        .add_systems(Update, update_temperature)
         .add_systems(Update, manage_camera_controller)
         .add_systems(Update, handle_console_escape.after(ConsoleSet::Commands))
         .add_systems(Update, handle_console_t_key.after(ConsoleSet::Commands))
         .insert_resource(script_executor)
-        .insert_resource(PendingCommands { commands: Vec::new() })
+        .insert_resource(PendingCommands {
+            commands: Vec::new(),
+        })
         .add_systems(Update, script_execution_system)
         .add_systems(Update, execute_pending_commands)
         .run();
@@ -371,7 +353,9 @@ fn draw_cursor(
     mut gizmos: Gizmos,
     console_open: Res<ConsoleOpen>,
 ) {
-    if console_open.open { return; }
+    if console_open.open {
+        return;
+    }
 
     let Ok(windows) = windows.single() else {
         return;
@@ -406,7 +390,6 @@ fn draw_cursor(
         Color::WHITE,
     );
 }
-
 
 fn handle_mqtt_command(
     mut log: ConsoleCommand<MqttCommand>,
@@ -449,13 +432,13 @@ fn handle_spawn_command(
 ) {
     if let Some(Ok(SpawnCommand { device_id, x, y, z })) = log.take() {
         info!("Console command: spawn {} {} {} {}", device_id, x, y, z);
-        
+
         // Check if device is already spawned
         if devices_tracker.spawned_devices.contains(&device_id) {
             reply!(log, "Device {} already spawned", device_id);
             return;
         }
-        
+
         // Create device entity
         let cube_mesh = meshes.add(Cuboid::new(1.0, 1.0, 1.0));
         let lamp_texture: Handle<Image> = asset_server.load("textures/lamp.png");
@@ -464,7 +447,7 @@ fn handle_spawn_command(
             base_color: Color::srgb(0.2, 0.2, 0.2),
             ..default()
         });
-        
+
         let mut entity_commands = commands.spawn((
             Mesh3d(cube_mesh),
             MeshMaterial3d(lamp_material),
@@ -475,62 +458,89 @@ fn handle_spawn_command(
             },
             Visibility::default(),
         ));
-        
+
         // Add BlinkCube component for lamp devices so they can blink
         entity_commands.insert(BlinkCube);
-        
+
+        // Add Interactable component so players can interact with lamps
+        entity_commands.insert(Interactable {
+            interaction_type: InteractionType::ToggleLamp,
+        });
+
+        // Add LampState component to track lamp state
+        entity_commands.insert(crate::interaction::LampState {
+            is_on: false,
+            device_id: device_id.clone(),
+        });
+
         // Track the spawned device
         devices_tracker.spawned_devices.insert(device_id.clone());
-        
+
         reply!(log, "Device {} spawned at ({}, {}, {})", device_id, x, y, z);
         info!("Device {} spawned via console", device_id);
     }
 }
 
-fn blink_publisher_system(mut blink_state: ResMut<BlinkState>) {
+fn blink_publisher_system(
+    mut blink_state: ResMut<BlinkState>,
+    device_query: Query<&DeviceEntity, With<BlinkCube>>,
+) {
     if blink_state.light_state != blink_state.last_sent {
         let payload = if blink_state.light_state { "ON" } else { "OFF" };
-        // sync MQTT client
-        let mut opts = MqttOptions::new("bevy_client", "127.0.0.1", 1883);
-        opts.set_keep_alive(Duration::from_secs(5));
-        let (client, mut connection) = Client::new(opts, 10);
-        client
-            .publish("home/cube/light", QoS::AtMostOnce, false, payload.as_bytes())
-            .unwrap();
-        // drive until publish is sent
-        for notification in connection.iter() {
-            if let Ok(Event::Outgoing(Outgoing::Publish(_))) = notification {
-                break;
+
+        // Send blink command to all registered lamp devices
+        for device in device_query.iter() {
+            if device.device_type == "lamp" {
+                let device_id = device.device_id.clone();
+                let payload_str = payload.to_string();
+
+                // Send MQTT message in a separate thread to avoid blocking
+                std::thread::spawn(move || {
+                    info!(
+                        "MQTT: Connecting blink client to publish to device {}",
+                        device_id
+                    );
+                    let mut opts = MqttOptions::new("bevy_blink_client", "localhost", 1883);
+                    opts.set_keep_alive(Duration::from_secs(5));
+                    let (client, mut connection) = Client::new(opts, 10);
+
+                    let topic = format!("home/{}/light", device_id);
+                    info!(
+                        "MQTT: Publishing blink command '{}' to topic '{}'",
+                        payload_str, topic
+                    );
+                    match client.publish(&topic, QoS::AtMostOnce, false, payload_str.as_bytes()) {
+                        Ok(_) => {
+                            // Drive until publish is sent
+                            for notification in connection.iter() {
+                                if let Ok(Event::Outgoing(Outgoing::Publish(_))) = notification {
+                                    info!(
+                                        "MQTT: Blink command sent successfully: {} to {}",
+                                        payload_str, topic
+                                    );
+                                    break;
+                                }
+                            }
+                        }
+                        Err(e) => error!("MQTT: Failed to publish blink command: {}", e),
+                    }
+                });
             }
         }
-        // give broker time
+
+        // Give broker time
         std::thread::sleep(Duration::from_millis(100));
         blink_state.last_sent = blink_state.light_state;
     }
 }
 
-fn rotate_logo_system(
-    time: Res<Time>,
-    mut query: Query<&mut Transform, With<LogoCube>>,
-) {
+fn rotate_logo_system(time: Res<Time>, mut query: Query<&mut Transform, With<LogoCube>>) {
     for mut transform in &mut query {
         // rotate slowly around the Y axis
         transform.rotate_y(time.delta_secs() * 0.5);
         transform.rotate_x(time.delta_secs() * 0.5);
     }
 }
-
-fn update_temperature(
-    mut temp_res: ResMut<TemperatureResource>,
-    receiver: Res<TemperatureReceiver>,
-) {
-    if let Ok(rx) = receiver.0.lock() {
-        if let Ok(val) = rx.try_recv() {
-            temp_res.value = Some(val);
-        }
-    }
-}
-
 
 // System to manage camera controller state based on console state
 fn manage_camera_controller(
@@ -563,5 +573,3 @@ fn handle_console_t_key(
         console_open.open = true;
     }
 }
-
-

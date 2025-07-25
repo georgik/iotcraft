@@ -1,6 +1,6 @@
 use bevy::prelude::*;
-use std::sync::mpsc::Receiver;
 use std::sync::Mutex;
+use std::sync::mpsc::Receiver;
 
 #[derive(Resource)]
 pub struct TemperatureResource {
