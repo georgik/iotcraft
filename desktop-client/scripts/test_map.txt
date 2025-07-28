@@ -1,0 +1,26 @@
+# IoTcraft Map Test Script
+# This script demonstrates block placement and map save/load functionality
+
+# Place some grass blocks to create a simple structure
+place grass 5 1 0
+place grass 6 1 0
+place grass 7 1 0
+place grass 5 1 1
+place grass 6 1 1
+place grass 7 1 1
+
+# Add some dirt blocks underneath
+place dirt 5 0 0
+place dirt 6 0 0
+place dirt 7 0 0
+place dirt 5 0 1
+place dirt 6 0 1
+place dirt 7 0 1
+
+# Create a small tower with stone blocks
+place stone 6 2 0
+place stone 6 3 0
+place stone 6 4 0
+
+# Save the current map
+save_map test_structure.json

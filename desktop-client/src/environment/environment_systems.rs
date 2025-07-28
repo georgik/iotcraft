@@ -54,7 +54,11 @@ fn setup_environment(
         commands.spawn((
             Mesh3d(voxel_mesh.clone()),
             MeshMaterial3d(material),
-            Transform::from_translation(Vec3::new(position.x as f32, position.y as f32, position.z as f32)),
+            Transform::from_translation(Vec3::new(
+                position.x as f32,
+                position.y as f32,
+                position.z as f32,
+            )),
             VoxelBlock {
                 block_type: *block_type,
                 position: *position,

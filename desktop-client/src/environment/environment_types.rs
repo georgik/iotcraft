@@ -1,4 +1,5 @@
 use bevy::prelude::*;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 /// Standard size for all cubes in the world (voxels, devices, etc.)
@@ -24,7 +25,7 @@ pub struct VoxelBlock {
 }
 
 /// Types of blocks available in the voxel world
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum BlockType {
     Grass,
     Dirt,
@@ -52,17 +53,17 @@ impl VoxelWorld {
     pub fn set_block(&mut self, position: IVec3, block_type: BlockType) {
         self.blocks.insert(position, block_type);
     }
-    
+
     /// Remove a block at the given position
     pub fn remove_block(&mut self, position: &IVec3) -> Option<BlockType> {
         self.blocks.remove(position)
     }
-    
+
     /// Get block type at position
     pub fn get_block(&self, position: &IVec3) -> Option<BlockType> {
         self.blocks.get(position).copied()
     }
-    
+
     /// Generate a flat grass terrain
     pub fn generate_flat_terrain(&mut self, size: i32, height: i32) {
         for x in -size..=size {
@@ -71,4 +72,54 @@ impl VoxelWorld {
             }
         }
     }
+
+    /// Save the voxel world to a JSON file
+    pub fn save_to_file(&self, filename: &str) -> Result<(), Box<dyn std::error::Error>> {
+        let map_data = VoxelMapData {
+            blocks: self
+                .blocks
+                .iter()
+                .map(|(pos, block_type)| VoxelBlockData {
+                    x: pos.x,
+                    y: pos.y,
+                    z: pos.z,
+                    block_type: *block_type,
+                })
+                .collect(),
+        };
+
+        let json = serde_json::to_string_pretty(&map_data)?;
+        std::fs::write(filename, json)?;
+        Ok(())
+    }
+
+    /// Load the voxel world from a JSON file
+    pub fn load_from_file(&mut self, filename: &str) -> Result<(), Box<dyn std::error::Error>> {
+        let content = std::fs::read_to_string(filename)?;
+        let map_data: VoxelMapData = serde_json::from_str(&content)?;
+
+        self.blocks.clear();
+        for block_data in map_data.blocks {
+            self.blocks.insert(
+                IVec3::new(block_data.x, block_data.y, block_data.z),
+                block_data.block_type,
+            );
+        }
+        Ok(())
+    }
+}
+
+/// Serializable representation of a voxel block
+#[derive(Serialize, Deserialize)]
+struct VoxelBlockData {
+    x: i32,
+    y: i32,
+    z: i32,
+    block_type: BlockType,
+}
+
+/// Serializable representation of the entire voxel map
+#[derive(Serialize, Deserialize)]
+struct VoxelMapData {
+    blocks: Vec<VoxelBlockData>,
 }

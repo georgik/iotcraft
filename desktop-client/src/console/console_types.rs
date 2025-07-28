@@ -74,6 +74,20 @@ pub struct RemoveBlockCommand {
     pub z: i32,
 }
 
+#[derive(Parser, ConsoleCommand)]
+#[command(name = "save_map")]
+pub struct SaveMapCommand {
+    /// Filename to save the map to
+    pub filename: String,
+}
+
+#[derive(Parser, ConsoleCommand)]
+#[command(name = "load_map")]
+pub struct LoadMapCommand {
+    /// Filename to load the map from
+    pub filename: String,
+}
+
 #[derive(Resource)]
 pub struct BlinkState {
     pub blinking: bool,

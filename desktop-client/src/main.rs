@@ -182,7 +182,13 @@ fn handle_place_block_command(
     mut materials: ResMut<Assets<StandardMaterial>>,
     asset_server: Res<AssetServer>,
 ) {
-    if let Some(Ok(PlaceBlockCommand { block_type, x, y, z })) = log.take() {
+    if let Some(Ok(PlaceBlockCommand {
+        block_type,
+        x,
+        y,
+        z,
+    })) = log.take()
+    {
         let block_type = match block_type.as_str() {
             "grass" => BlockType::Grass,
             "dirt" => BlockType::Dirt,
@@ -244,6 +250,97 @@ fn handle_remove_block_command(
     }
 }
 
+fn handle_save_map_command(mut log: ConsoleCommand<SaveMapCommand>, voxel_world: Res<VoxelWorld>) {
+    if let Some(Ok(SaveMapCommand { filename })) = log.take() {
+        match voxel_world.save_to_file(&filename) {
+            Ok(_) => {
+                reply!(
+                    log,
+                    "Map saved to '{}' with {} blocks",
+                    filename,
+                    voxel_world.blocks.len()
+                );
+                info!(
+                    "Map saved to '{}' with {} blocks",
+                    filename,
+                    voxel_world.blocks.len()
+                );
+            }
+            Err(e) => {
+                reply!(log, "Failed to save map: {}", e);
+                error!("Failed to save map to '{}': {}", filename, e);
+            }
+        }
+    }
+}
+
+fn handle_load_map_command(
+    mut log: ConsoleCommand<LoadMapCommand>,
+    mut voxel_world: ResMut<VoxelWorld>,
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    asset_server: Res<AssetServer>,
+    existing_blocks_query: Query<Entity, With<VoxelBlock>>,
+) {
+    if let Some(Ok(LoadMapCommand { filename })) = log.take() {
+        // First, despawn all existing voxel blocks
+        for entity in existing_blocks_query.iter() {
+            commands.entity(entity).despawn();
+        }
+
+        // Load the map from file
+        match voxel_world.load_from_file(&filename) {
+            Ok(_) => {
+                // Spawn all blocks from the loaded map
+                let cube_mesh = meshes.add(Cuboid::new(CUBE_SIZE, CUBE_SIZE, CUBE_SIZE));
+
+                for (position, block_type) in voxel_world.blocks.iter() {
+                    let texture_path = match block_type {
+                        BlockType::Grass => "textures/grass.png",
+                        BlockType::Dirt => "textures/dirt.png",
+                        BlockType::Stone => "textures/stone.png",
+                    };
+                    let texture: Handle<Image> = asset_server.load(texture_path);
+                    let material = materials.add(StandardMaterial {
+                        base_color_texture: Some(texture),
+                        ..default()
+                    });
+
+                    commands.spawn((
+                        Mesh3d(cube_mesh.clone()),
+                        MeshMaterial3d(material),
+                        Transform::from_translation(Vec3::new(
+                            position.x as f32,
+                            position.y as f32,
+                            position.z as f32,
+                        )),
+                        VoxelBlock {
+                            block_type: *block_type,
+                            position: *position,
+                        },
+                    ));
+                }
+
+                reply!(
+                    log,
+                    "Map loaded from '{}' with {} blocks",
+                    filename,
+                    voxel_world.blocks.len()
+                );
+                info!(
+                    "Map loaded from '{}' with {} blocks",
+                    filename,
+                    voxel_world.blocks.len()
+                );
+            }
+            Err(e) => {
+                reply!(log, "Failed to load map: {}", e);
+                error!("Failed to load map from '{}': {}", filename, e);
+            }
+        }
+    }
+}
 
 fn execute_pending_commands(
     mut pending_commands: ResMut<PendingCommands>,
@@ -384,7 +481,8 @@ fn execute_pending_commands(
                                     "stone" => BlockType::Stone,
                                     _ => {
                                         print_console_line.write(PrintConsoleLine::new(format!(
-                                            "Invalid block type: {}", block_type_str
+                                            "Invalid block type: {}",
+                                            block_type_str
                                         )));
                                         continue;
                                     }
@@ -393,7 +491,8 @@ fn execute_pending_commands(
                                 voxel_world.set_block(IVec3::new(x, y, z), block_type);
 
                                 // Spawn the block
-                                let cube_mesh = meshes.add(Cuboid::new(CUBE_SIZE, CUBE_SIZE, CUBE_SIZE));
+                                let cube_mesh =
+                                    meshes.add(Cuboid::new(CUBE_SIZE, CUBE_SIZE, CUBE_SIZE));
                                 let texture_path = match block_type {
                                     BlockType::Grass => "textures/grass.png",
                                     BlockType::Dirt => "textures/dirt.png",
@@ -408,7 +507,9 @@ fn execute_pending_commands(
                                 commands.spawn((
                                     Mesh3d(cube_mesh),
                                     MeshMaterial3d(material),
-                                    Transform::from_translation(Vec3::new(x as f32, y as f32, z as f32)),
+                                    Transform::from_translation(Vec3::new(
+                                        x as f32, y as f32, z as f32,
+                                    )),
                                     VoxelBlock {
                                         block_type,
                                         position: IVec3::new(x, y, z),
@@ -416,7 +517,8 @@ fn execute_pending_commands(
                                 ));
 
                                 print_console_line.write(PrintConsoleLine::new(format!(
-                                    "Placed {} block at ({}, {}, {})", block_type_str, x, y, z
+                                    "Placed {} block at ({}, {}, {})",
+                                    block_type_str, x, y, z
                                 )));
                             }
                         }
@@ -437,11 +539,13 @@ fn execute_pending_commands(
                                         }
                                     }
                                     print_console_line.write(PrintConsoleLine::new(format!(
-                                        "Removed block at ({}, {}, {})", x, y, z
+                                        "Removed block at ({}, {}, {})",
+                                        x, y, z
                                     )));
                                 } else {
                                     print_console_line.write(PrintConsoleLine::new(format!(
-                                        "No block found at ({}, {}, {})", x, y, z
+                                        "No block found at ({}, {}, {})",
+                                        x, y, z
                                     )));
                                 }
                             }
@@ -499,6 +603,8 @@ fn main() {
         .add_console_command::<MoveCommand, _>(crate::console::console_systems::handle_move_command)
         .add_console_command::<PlaceBlockCommand, _>(handle_place_block_command)
         .add_console_command::<RemoveBlockCommand, _>(handle_remove_block_command)
+        .add_console_command::<SaveMapCommand, _>(handle_save_map_command)
+        .add_console_command::<LoadMapCommand, _>(handle_load_map_command)
         .insert_resource(BlinkState::default())
         // .add_systems(Update, draw_cursor) // Disabled: InteractionPlugin handles cursor drawing
         .add_systems(
