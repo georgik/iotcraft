@@ -158,14 +158,18 @@ fn update_ghost_block_preview(
         return;
     };
 
-    // Define maximum interaction distance
-    let max_distance = 5.0;
+    // Define interaction distance range - start from a minimum distance to avoid placing too close
+    let min_distance = 2.0; // Minimum distance from camera
+    let max_distance = 8.0; // Maximum reach distance
+    let step_size = 0.1; // Fine-grained raycast steps
+
     ghost_state.position = None;
     ghost_state.can_place = false;
 
-    // Perform raycast into the voxel world
-    for distance in 1..=(max_distance as i32) {
-        let check_position = (ray.origin + ray.direction * distance as f32).as_ivec3();
+    // Perform precise raycast into the voxel world
+    let mut current_distance = min_distance;
+    while current_distance <= max_distance {
+        let check_position = (ray.origin + ray.direction * current_distance).as_ivec3();
 
         if voxel_world.is_block_at(check_position) {
             let placement_position = check_position + IVec3::new(0, 1, 0);
@@ -176,6 +180,7 @@ fn update_ghost_block_preview(
             }
             break;
         }
+        current_distance += step_size;
     }
 }
 
@@ -298,17 +303,21 @@ fn handle_interaction_input(
                 return;
             };
 
-            // Determine the maximum interaction distance
-            let max_distance = 5.0;
+            // Use the same improved raycasting as ghost block preview
+            let min_distance = 2.0; // Minimum distance from camera
+            let max_distance = 8.0; // Maximum reach distance
+            let step_size = 0.1; // Fine-grained raycast steps
 
-            // Perform raycast into the voxel world
+            // Perform precise raycast into the voxel world
             let mut hit = None;
-            for distance in 1..=(max_distance as i32) {
-                let check_position = (ray.origin + ray.direction * distance as f32).as_ivec3();
+            let mut current_distance = min_distance;
+            while current_distance <= max_distance {
+                let check_position = (ray.origin + ray.direction * current_distance).as_ivec3();
                 if voxel_world.is_block_at(check_position) {
                     hit = Some(check_position);
                     break;
                 }
+                current_distance += step_size;
             }
 
             if let Some(hit_position) = hit {
