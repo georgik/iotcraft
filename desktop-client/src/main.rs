@@ -174,12 +174,89 @@ fn script_execution_system(
     }
 }
 
+fn handle_place_block_command(
+    mut log: ConsoleCommand<PlaceBlockCommand>,
+    mut voxel_world: ResMut<VoxelWorld>,
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    asset_server: Res<AssetServer>,
+) {
+    if let Some(Ok(PlaceBlockCommand { block_type, x, y, z })) = log.take() {
+        let block_type = match block_type.as_str() {
+            "grass" => BlockType::Grass,
+            "dirt" => BlockType::Dirt,
+            "stone" => BlockType::Stone,
+            _ => {
+                reply!(log, "Invalid block type: {}", block_type);
+                return;
+            }
+        };
+
+        voxel_world.set_block(IVec3::new(x, y, z), block_type);
+
+        // Spawn the block
+        let cube_mesh = meshes.add(Cuboid::new(CUBE_SIZE, CUBE_SIZE, CUBE_SIZE));
+        let texture_path = match block_type {
+            BlockType::Grass => "textures/grass.png",
+            BlockType::Dirt => "textures/dirt.png",
+            BlockType::Stone => "textures/stone.png",
+        };
+        let texture: Handle<Image> = asset_server.load(texture_path);
+        let material = materials.add(StandardMaterial {
+            base_color_texture: Some(texture),
+            ..default()
+        });
+
+        commands.spawn((
+            Mesh3d(cube_mesh),
+            MeshMaterial3d(material),
+            Transform::from_translation(Vec3::new(x as f32, y as f32, z as f32)),
+            VoxelBlock {
+                block_type,
+                position: IVec3::new(x, y, z),
+            },
+        ));
+
+        reply!(log, "Placed block at ({}, {}, {})", x, y, z);
+    }
+}
+
+fn handle_remove_block_command(
+    mut log: ConsoleCommand<RemoveBlockCommand>,
+    mut voxel_world: ResMut<VoxelWorld>,
+    mut commands: Commands,
+    query: Query<(Entity, &VoxelBlock)>,
+) {
+    if let Some(Ok(RemoveBlockCommand { x, y, z })) = log.take() {
+        let position = IVec3::new(x, y, z);
+        if voxel_world.remove_block(&position).is_some() {
+            // Remove the block entity
+            for (entity, block) in query.iter() {
+                if block.position == position {
+                    commands.entity(entity).despawn();
+                }
+            }
+            reply!(log, "Removed block at ({}, {}, {})", x, y, z);
+        } else {
+            reply!(log, "No block found at ({}, {}, {})", x, y, z);
+        }
+    }
+}
+
+
 fn execute_pending_commands(
     mut pending_commands: ResMut<PendingCommands>,
     mut print_console_line: EventWriter<PrintConsoleLine>,
     mut blink_state: ResMut<BlinkState>,
     temperature: Res<TemperatureResource>,
     mqtt_config: Res<MqttConfig>,
+    mut voxel_world: ResMut<VoxelWorld>,
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    asset_server: Res<AssetServer>,
+    query: Query<(Entity, &VoxelBlock)>,
 ) {
     for command in pending_commands.commands.drain(..) {
         info!("Executing queued command: {}", command);
@@ -295,6 +372,83 @@ fn execute_pending_commands(
                     }
                 }
             }
+            "place" => {
+                if parts.len() == 5 {
+                    if let Ok(x) = parts[2].parse::<i32>() {
+                        if let Ok(y) = parts[3].parse::<i32>() {
+                            if let Ok(z) = parts[4].parse::<i32>() {
+                                let block_type_str = parts[1];
+                                let block_type = match block_type_str {
+                                    "grass" => BlockType::Grass,
+                                    "dirt" => BlockType::Dirt,
+                                    "stone" => BlockType::Stone,
+                                    _ => {
+                                        print_console_line.write(PrintConsoleLine::new(format!(
+                                            "Invalid block type: {}", block_type_str
+                                        )));
+                                        continue;
+                                    }
+                                };
+
+                                voxel_world.set_block(IVec3::new(x, y, z), block_type);
+
+                                // Spawn the block
+                                let cube_mesh = meshes.add(Cuboid::new(CUBE_SIZE, CUBE_SIZE, CUBE_SIZE));
+                                let texture_path = match block_type {
+                                    BlockType::Grass => "textures/grass.png",
+                                    BlockType::Dirt => "textures/dirt.png",
+                                    BlockType::Stone => "textures/stone.png",
+                                };
+                                let texture: Handle<Image> = asset_server.load(texture_path);
+                                let material = materials.add(StandardMaterial {
+                                    base_color_texture: Some(texture),
+                                    ..default()
+                                });
+
+                                commands.spawn((
+                                    Mesh3d(cube_mesh),
+                                    MeshMaterial3d(material),
+                                    Transform::from_translation(Vec3::new(x as f32, y as f32, z as f32)),
+                                    VoxelBlock {
+                                        block_type,
+                                        position: IVec3::new(x, y, z),
+                                    },
+                                ));
+
+                                print_console_line.write(PrintConsoleLine::new(format!(
+                                    "Placed {} block at ({}, {}, {})", block_type_str, x, y, z
+                                )));
+                            }
+                        }
+                    }
+                }
+            }
+            "remove" => {
+                if parts.len() == 4 {
+                    if let Ok(x) = parts[1].parse::<i32>() {
+                        if let Ok(y) = parts[2].parse::<i32>() {
+                            if let Ok(z) = parts[3].parse::<i32>() {
+                                let position = IVec3::new(x, y, z);
+                                if voxel_world.remove_block(&position).is_some() {
+                                    // Remove the block entity
+                                    for (entity, block) in query.iter() {
+                                        if block.position == position {
+                                            commands.entity(entity).despawn();
+                                        }
+                                    }
+                                    print_console_line.write(PrintConsoleLine::new(format!(
+                                        "Removed block at ({}, {}, {})", x, y, z
+                                    )));
+                                } else {
+                                    print_console_line.write(PrintConsoleLine::new(format!(
+                                        "No block found at ({}, {}, {})", x, y, z
+                                    )));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
             _ => {
                 print_console_line.write(PrintConsoleLine::new(format!(
                     "Unknown command: {}",
@@ -343,6 +497,8 @@ fn main() {
         .add_console_command::<SpawnCommand, _>(handle_spawn_command)
         .add_console_command::<LoadCommand, _>(handle_load_command)
         .add_console_command::<MoveCommand, _>(crate::console::console_systems::handle_move_command)
+        .add_console_command::<PlaceBlockCommand, _>(handle_place_block_command)
+        .add_console_command::<RemoveBlockCommand, _>(handle_remove_block_command)
         .insert_resource(BlinkState::default())
         // .add_systems(Update, draw_cursor) // Disabled: InteractionPlugin handles cursor drawing
         .add_systems(

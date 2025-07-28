@@ -50,6 +50,30 @@ pub struct MoveCommand {
     pub z: f32,
 }
 
+#[derive(Parser, ConsoleCommand)]
+#[command(name = "place")]
+pub struct PlaceBlockCommand {
+    /// Block type: grass, dirt, or stone
+    pub block_type: String,
+    /// X coordinate
+    pub x: i32,
+    /// Y coordinate
+    pub y: i32,
+    /// Z coordinate
+    pub z: i32,
+}
+
+#[derive(Parser, ConsoleCommand)]
+#[command(name = "remove")]
+pub struct RemoveBlockCommand {
+    /// X coordinate
+    pub x: i32,
+    /// Y coordinate
+    pub y: i32,
+    /// Z coordinate
+    pub z: i32,
+}
+
 #[derive(Resource)]
 pub struct BlinkState {
     pub blinking: bool,
