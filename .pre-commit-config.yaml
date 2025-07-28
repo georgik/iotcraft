@@ -1,0 +1,9 @@
+repos:
+  - repo: local
+    hooks:
+      - id: cargo-fmt
+        name: cargo fmt
+        entry: bash -c 'cd desktop-client && cargo fmt --all -- --color always'
+        language: system
+        files: desktop-client/.*\.rs$
+        pass_filenames: false

@@ -25,7 +25,7 @@ pub struct VoxelBlock {
 }
 
 /// Types of blocks available in the voxel world
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum BlockType {
     Grass,
     Dirt,
@@ -65,6 +65,11 @@ impl VoxelWorld {
     /// Get block type at position
     pub fn get_block(&self, position: &IVec3) -> Option<BlockType> {
         self.blocks.get(position).copied()
+    }
+
+    /// Check if there's a block at the given position
+    pub fn is_block_at(&self, position: IVec3) -> bool {
+        self.blocks.contains_key(&position)
     }
 
     /// Generate a flat grass terrain

@@ -147,6 +147,16 @@ fn run_camera_controller(
         controller.yaw = yaw;
         controller.pitch = pitch;
         controller.initialized = true;
+
+        // Enable mouse look by default WITHOUT cursor grabbing
+        *toggle_cursor_grab = true;
+
+        // Keep cursor completely free - no grabbing or confinement
+        for mut window in &mut windows {
+            window.cursor_options.grab_mode = CursorGrabMode::None;
+            window.cursor_options.visible = true;
+        }
+
         info!("{}", *controller);
     }
     if !controller.enabled {
@@ -199,7 +209,7 @@ fn run_camera_controller(
     }
     let cursor_grab = *mouse_cursor_grab || *toggle_cursor_grab;
 
-    // Handle cursor grab
+    // Handle cursor grab - only when explicitly requested
     if cursor_grab_change {
         if cursor_grab {
             for mut window in &mut windows {
@@ -218,8 +228,8 @@ fn run_camera_controller(
         }
     }
 
-    // Handle mouse input - Apply rotation BEFORE movement calculation
-    if accumulated_mouse_motion.delta != Vec2::ZERO && cursor_grab {
+    // Handle mouse input - Apply rotation when cursor is grabbed OR when toggle is enabled (always-on mode)
+    if accumulated_mouse_motion.delta != Vec2::ZERO && (*toggle_cursor_grab || *mouse_cursor_grab) {
         // Apply look update
         controller.pitch = (controller.pitch
             - accumulated_mouse_motion.delta.y * RADIANS_PER_DOT * controller.sensitivity)

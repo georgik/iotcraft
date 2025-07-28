@@ -17,8 +17,10 @@ mod console;
 mod devices;
 mod environment;
 mod interaction;
+mod inventory;
 mod mqtt;
 mod script;
+mod ui;
 
 // Re-export types for easier access
 use config::MqttConfig;
@@ -26,7 +28,9 @@ use console::*;
 use devices::*;
 use environment::*;
 use interaction::{Interactable, InteractionPlugin as MyInteractionPlugin, InteractionType};
+use inventory::{InventoryPlugin, PlayerInventory, handle_give_command};
 use mqtt::{MqttPlugin, *};
+use ui::InventoryUiPlugin;
 
 // Define handle_blink_command function for console
 fn handle_blink_command(
@@ -766,6 +770,8 @@ fn main() {
         .add_plugins(EnvironmentPlugin)
         .add_plugins(MyInteractionPlugin)
         .add_plugins(MqttPlugin)
+        .add_plugins(InventoryPlugin)
+        .add_plugins(InventoryUiPlugin)
         .insert_resource(ConsoleConfiguration {
             keys: vec![KeyCode::F12],
             left_pos: 200.0,
@@ -784,6 +790,7 @@ fn main() {
         .add_console_command::<WallCommand, _>(handle_wall_command)
         .add_console_command::<SaveMapCommand, _>(handle_save_map_command)
         .add_console_command::<LoadMapCommand, _>(handle_load_map_command)
+        .add_console_command::<GiveCommand, _>(handle_give_command)
         .insert_resource(BlinkState::default())
         // .add_systems(Update, draw_cursor) // Disabled: InteractionPlugin handles cursor drawing
         .add_systems(
@@ -803,6 +810,7 @@ fn main() {
         })
         .add_systems(Update, script_execution_system)
         .add_systems(Update, execute_pending_commands)
+        .add_systems(Update, handle_inventory_input)
         .run();
 }
 
@@ -1038,5 +1046,64 @@ fn handle_console_t_key(
     // Only open console with 't' when it's currently closed
     if keyboard_input.just_pressed(KeyCode::KeyT) && !console_open.open {
         console_open.open = true;
+    }
+}
+
+// System to handle inventory slot selection with number keys and mouse wheel
+fn handle_inventory_input(
+    keyboard_input: Res<ButtonInput<KeyCode>>,
+    mut inventory: ResMut<PlayerInventory>,
+    accumulated_mouse_scroll: Res<bevy::input::mouse::AccumulatedMouseScroll>,
+    console_open: Res<ConsoleOpen>,
+) {
+    // Don't handle input when console is open
+    if console_open.open {
+        return;
+    }
+
+    // Handle mouse wheel for inventory slot switching
+    if accumulated_mouse_scroll.delta.y != 0.0 {
+        let current_slot = inventory.selected_slot;
+        let new_slot = if accumulated_mouse_scroll.delta.y > 0.0 {
+            // Scroll up - previous slot (wraps around)
+            if current_slot == 0 {
+                8
+            } else {
+                current_slot - 1
+            }
+        } else {
+            // Scroll down - next slot (wraps around)
+            if current_slot == 8 {
+                0
+            } else {
+                current_slot + 1
+            }
+        };
+
+        if new_slot != current_slot {
+            inventory.select_slot(new_slot);
+            info!("Selected inventory slot {}", new_slot + 1);
+        }
+    }
+
+    // Handle number keys 1-9 for slot selection
+    let key_mappings = [
+        (KeyCode::Digit1, 0),
+        (KeyCode::Digit2, 1),
+        (KeyCode::Digit3, 2),
+        (KeyCode::Digit4, 3),
+        (KeyCode::Digit5, 4),
+        (KeyCode::Digit6, 5),
+        (KeyCode::Digit7, 6),
+        (KeyCode::Digit8, 7),
+        (KeyCode::Digit9, 8),
+    ];
+
+    for (key, slot) in key_mappings {
+        if keyboard_input.just_pressed(key) {
+            inventory.select_slot(slot);
+            info!("Selected inventory slot {}", slot + 1);
+            break;
+        }
     }
 }

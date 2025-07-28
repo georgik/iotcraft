@@ -107,6 +107,16 @@ pub struct LoadMapCommand {
     pub filename: String,
 }
 
+#[derive(Parser, ConsoleCommand)]
+#[command(name = "give")]
+pub struct GiveCommand {
+    /// Item type to give (grass, dirt, stone, quartz_block, glass_pane, cyan_terracotta)
+    pub item_type: String,
+    /// Number of items to give (default: 64)
+    #[arg(default_value_t = 64)]
+    pub count: u32,
+}
+
 #[derive(Resource)]
 pub struct BlinkState {
     pub blinking: bool,

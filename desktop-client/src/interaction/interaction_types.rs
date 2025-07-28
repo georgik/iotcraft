@@ -23,10 +23,17 @@ pub struct LampState {
     pub device_id: String,
 }
 
-/// Resource to track the currently hovered interactable entity
+/// Resource tracking which entity is currently being hovered over
 #[derive(Resource, Default)]
 pub struct HoveredEntity {
     pub entity: Option<Entity>,
+}
+
+/// Resource tracking ghost block preview state
+#[derive(Resource, Default)]
+pub struct GhostBlockState {
+    pub position: Option<IVec3>,
+    pub can_place: bool,
 }
 
 /// Event sent when a player interacts with a block

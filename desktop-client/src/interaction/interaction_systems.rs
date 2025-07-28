@@ -9,6 +9,8 @@ use super::interaction_types::*;
 use crate::config::MqttConfig;
 use crate::devices::DeviceEntity;
 use crate::environment::Ground;
+use crate::environment::{VoxelBlock, VoxelWorld};
+use crate::inventory::{ItemType, PlaceBlockEvent, PlayerInventory};
 
 pub struct InteractionPlugin;
 
@@ -17,16 +19,19 @@ impl Plugin for InteractionPlugin {
         app.add_event::<InteractionEvent>()
             .add_event::<LampToggleEvent>()
             .insert_resource(HoveredEntity::default())
+            .insert_resource(GhostBlockState::default())
             .add_systems(Startup, setup_lamp_materials)
             .add_systems(
                 Update,
                 (
                     raycast_interaction_system,
+                    update_ghost_block_preview,
                     handle_interaction_input,
                     handle_interaction_events,
                     handle_lamp_toggle_events,
                     update_lamp_visuals,
                     draw_interaction_cursor,
+                    draw_crosshair,
                 )
                     .chain(),
             );
@@ -124,13 +129,140 @@ fn raycast_interaction_system(
     hovered_entity.entity = closest_entity;
 }
 
-/// System that handles mouse click input for interactions
+/// Updates the ghost block preview
+fn update_ghost_block_preview(
+    camera_query: Single<(&Camera, &GlobalTransform)>,
+    windows: Query<&Window>,
+    voxel_world: Res<VoxelWorld>,
+    mut ghost_state: ResMut<GhostBlockState>,
+    console_open: Res<ConsoleOpen>,
+) {
+    if console_open.open {
+        ghost_state.position = None;
+        return;
+    }
+
+    let Ok(window) = windows.single() else {
+        ghost_state.position = None;
+        return;
+    };
+
+    let (camera, camera_transform) = *camera_query;
+    let Some(cursor_position) = window.cursor_position() else {
+        ghost_state.position = None;
+        return;
+    };
+
+    let Ok(ray) = camera.viewport_to_world(camera_transform, cursor_position) else {
+        ghost_state.position = None;
+        return;
+    };
+
+    // Define maximum interaction distance
+    let max_distance = 5.0;
+    ghost_state.position = None;
+    ghost_state.can_place = false;
+
+    // Perform raycast into the voxel world
+    for distance in 1..=(max_distance as i32) {
+        let check_position = (ray.origin + ray.direction * distance as f32).as_ivec3();
+
+        if voxel_world.is_block_at(check_position) {
+            let placement_position = check_position + IVec3::new(0, 1, 0);
+
+            if !voxel_world.is_block_at(placement_position) {
+                ghost_state.position = Some(placement_position);
+                ghost_state.can_place = true;
+            }
+            break;
+        }
+    }
+}
+
+/// Draw a crosshair at the center of the screen and ghost block preview
+fn draw_crosshair(
+    mut gizmos: Gizmos,
+    console_open: Res<ConsoleOpen>,
+    ghost_state: Res<GhostBlockState>,
+    inventory: Res<PlayerInventory>,
+    windows: Query<&Window>,
+) {
+    if console_open.open {
+        return;
+    }
+
+    // Get window to determine screen center
+    let Ok(window) = windows.single() else {
+        return;
+    };
+
+    let screen_center = Vec2::new(window.width() / 2.0, window.height() / 2.0);
+    let crosshair_size = 10.0;
+
+    // Draw crosshair at screen center
+    gizmos.line_2d(
+        screen_center + Vec2::new(-crosshair_size, 0.0),
+        screen_center + Vec2::new(crosshair_size, 0.0),
+        Color::WHITE,
+    );
+    gizmos.line_2d(
+        screen_center + Vec2::new(0.0, -crosshair_size),
+        screen_center + Vec2::new(0.0, crosshair_size),
+        Color::WHITE,
+    );
+
+    // Draw ghost block if we have inventory item and valid placement position
+    if let Some(selected_item) = inventory.get_selected_item() {
+        if let Some(ghost_pos) = ghost_state.position {
+            if ghost_state.can_place {
+                let position = ghost_pos.as_vec3();
+                let color = Color::srgba(0.2, 1.0, 0.2, 0.5); // Semi-transparent green
+
+                // Draw wireframe cube
+                let half_size = 0.5;
+                let corners = [
+                    position + Vec3::new(-half_size, -half_size, -half_size),
+                    position + Vec3::new(half_size, -half_size, -half_size),
+                    position + Vec3::new(half_size, half_size, -half_size),
+                    position + Vec3::new(-half_size, half_size, -half_size),
+                    position + Vec3::new(-half_size, -half_size, half_size),
+                    position + Vec3::new(half_size, -half_size, half_size),
+                    position + Vec3::new(half_size, half_size, half_size),
+                    position + Vec3::new(-half_size, half_size, half_size),
+                ];
+
+                // Bottom face
+                gizmos.line(corners[0], corners[1], color);
+                gizmos.line(corners[1], corners[2], color);
+                gizmos.line(corners[2], corners[3], color);
+                gizmos.line(corners[3], corners[0], color);
+
+                // Top face
+                gizmos.line(corners[4], corners[5], color);
+                gizmos.line(corners[5], corners[6], color);
+                gizmos.line(corners[6], corners[7], color);
+                gizmos.line(corners[7], corners[4], color);
+
+                // Vertical edges
+                gizmos.line(corners[0], corners[4], color);
+                gizmos.line(corners[1], corners[5], color);
+                gizmos.line(corners[2], corners[6], color);
+                gizmos.line(corners[3], corners[7], color);
+            }
+        }
+    }
+}
 fn handle_interaction_input(
     mouse_input: Res<ButtonInput<MouseButton>>,
     hovered_entity: Res<HoveredEntity>,
     interactable_query: Query<&Interactable>,
     mut interaction_events: EventWriter<InteractionEvent>,
+    mut place_block_events: EventWriter<PlaceBlockEvent>,
+    inventory: ResMut<PlayerInventory>,
+    camera_query: Single<(&Camera, &GlobalTransform)>,
+    windows: Query<&Window>,
     console_open: Res<ConsoleOpen>,
+    voxel_world: Res<VoxelWorld>,
 ) {
     // Don't interact when console is open
     if console_open.open {
@@ -145,6 +277,55 @@ fn handle_interaction_input(
                     interaction_type: interactable.interaction_type.clone(),
                 });
                 info!("Player interacted with entity {:?}", entity);
+            }
+        }
+    }
+
+    // Handle right-click for placing blocks from inventory
+    if mouse_input.just_pressed(MouseButton::Right) {
+        if let Some(selected_item) = inventory.get_selected_item() {
+            let ItemType::Block(block_type) = selected_item.item_type;
+
+            // Perform raycasting to find the target block for placement
+            let Ok(window) = windows.single() else {
+                return;
+            };
+            let (camera, camera_transform) = *camera_query;
+            let Some(cursor_position) = window.cursor_position() else {
+                return;
+            };
+            let Ok(ray) = camera.viewport_to_world(camera_transform, cursor_position) else {
+                return;
+            };
+
+            // Determine the maximum interaction distance
+            let max_distance = 5.0;
+
+            // Perform raycast into the voxel world
+            let mut hit = None;
+            for distance in 1..=(max_distance as i32) {
+                let check_position = (ray.origin + ray.direction * distance as f32).as_ivec3();
+                if voxel_world.is_block_at(check_position) {
+                    hit = Some(check_position);
+                    break;
+                }
+            }
+
+            if let Some(hit_position) = hit {
+                // Calculate the position to place the block
+                // For simplicity, we're placing it directly above the hit block
+                let placement_position = hit_position + IVec3::new(0, 1, 0);
+
+                // Ensure the space is empty
+                if !voxel_world.is_block_at(placement_position) {
+                    // Write a place block event
+                    place_block_events.write(PlaceBlockEvent {
+                        position: placement_position,
+                        block_type,
+                    });
+
+                    info!("Placed {:?} at {:?}", block_type, placement_position);
+                }
             }
         }
     }
