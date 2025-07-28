@@ -30,6 +30,9 @@ pub enum BlockType {
     Grass,
     Dirt,
     Stone,
+    QuartzBlock,
+    GlassPane,
+    CyanTerracotta,
 }
 
 /// Resource to manage the voxel world state

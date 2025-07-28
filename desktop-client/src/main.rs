@@ -193,6 +193,9 @@ fn handle_place_block_command(
             "grass" => BlockType::Grass,
             "dirt" => BlockType::Dirt,
             "stone" => BlockType::Stone,
+            "quartz_block" => BlockType::QuartzBlock,
+            "glass_pane" => BlockType::GlassPane,
+            "cyan_terracotta" => BlockType::CyanTerracotta,
             _ => {
                 reply!(log, "Invalid block type: {}", block_type);
                 return;
@@ -207,6 +210,9 @@ fn handle_place_block_command(
             BlockType::Grass => "textures/grass.webp",
             BlockType::Dirt => "textures/dirt.webp",
             BlockType::Stone => "textures/stone.webp",
+            BlockType::QuartzBlock => "textures/quartz_block.webp",
+            BlockType::GlassPane => "textures/glass_pane.webp",
+            BlockType::CyanTerracotta => "textures/cyan_terracotta.webp",
         };
         let texture: Handle<Image> = asset_server.load(texture_path);
         let material = materials.add(StandardMaterial {
@@ -225,6 +231,85 @@ fn handle_place_block_command(
         ));
 
         reply!(log, "Placed block at ({}, {}, {})", x, y, z);
+    }
+}
+
+fn handle_wall_command(
+    mut log: ConsoleCommand<WallCommand>,
+    mut voxel_world: ResMut<VoxelWorld>,
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    asset_server: Res<AssetServer>,
+) {
+    if let Some(Ok(WallCommand {
+        block_type,
+        x1,
+        y1,
+        z1,
+        x2,
+        y2,
+        z2,
+    })) = log.take()
+    {
+        let block_type_enum = match block_type.as_str() {
+            "grass" => BlockType::Grass,
+            "dirt" => BlockType::Dirt,
+            "stone" => BlockType::Stone,
+            "quartz_block" => BlockType::QuartzBlock,
+            "glass_pane" => BlockType::GlassPane,
+            "cyan_terracotta" => BlockType::CyanTerracotta,
+            _ => {
+                reply!(log, "Invalid block type: {}", block_type);
+                return;
+            }
+        };
+
+        let texture_path = match block_type_enum {
+            BlockType::Grass => "textures/grass.webp",
+            BlockType::Dirt => "textures/dirt.webp",
+            BlockType::Stone => "textures/stone.webp",
+            BlockType::QuartzBlock => "textures/quartz_block.webp",
+            BlockType::GlassPane => "textures/glass_pane.webp",
+            BlockType::CyanTerracotta => "textures/cyan_terracotta.webp",
+        };
+        let texture: Handle<Image> = asset_server.load(texture_path);
+        let material = materials.add(StandardMaterial {
+            base_color_texture: Some(texture),
+            ..default()
+        });
+
+        let cube_mesh = meshes.add(Cuboid::new(CUBE_SIZE, CUBE_SIZE, CUBE_SIZE));
+
+        for x in x1..=x2 {
+            for y in y1..=y2 {
+                for z in z1..=z2 {
+                    voxel_world.set_block(IVec3::new(x, y, z), block_type_enum);
+
+                    commands.spawn((
+                        Mesh3d(cube_mesh.clone()),
+                        MeshMaterial3d(material.clone()),
+                        Transform::from_translation(Vec3::new(x as f32, y as f32, z as f32)),
+                        VoxelBlock {
+                            block_type: block_type_enum,
+                            position: IVec3::new(x, y, z),
+                        },
+                    ));
+                }
+            }
+        }
+
+        reply!(
+            log,
+            "Created a wall of {} from ({}, {}, {}) to ({}, {}, {})",
+            block_type,
+            x1,
+            y1,
+            z1,
+            x2,
+            y2,
+            z2
+        );
     }
 }
 
@@ -300,6 +385,9 @@ fn handle_load_map_command(
                         BlockType::Grass => "textures/grass.webp",
                         BlockType::Dirt => "textures/dirt.webp",
                         BlockType::Stone => "textures/stone.webp",
+                        BlockType::QuartzBlock => "textures/quartz_block.webp",
+                        BlockType::GlassPane => "textures/glass_pane.webp",
+                        BlockType::CyanTerracotta => "textures/cyan_terracotta.webp",
                     };
                     let texture: Handle<Image> = asset_server.load(texture_path);
                     let material = materials.add(StandardMaterial {
@@ -479,6 +567,9 @@ fn execute_pending_commands(
                                     "grass" => BlockType::Grass,
                                     "dirt" => BlockType::Dirt,
                                     "stone" => BlockType::Stone,
+                                    "quartz_block" => BlockType::QuartzBlock,
+                                    "glass_pane" => BlockType::GlassPane,
+                                    "cyan_terracotta" => BlockType::CyanTerracotta,
                                     _ => {
                                         print_console_line.write(PrintConsoleLine::new(format!(
                                             "Invalid block type: {}",
@@ -497,6 +588,9 @@ fn execute_pending_commands(
                                     BlockType::Grass => "textures/grass.webp",
                                     BlockType::Dirt => "textures/dirt.webp",
                                     BlockType::Stone => "textures/stone.webp",
+                                    BlockType::QuartzBlock => "textures/quartz_block.webp",
+                                    BlockType::GlassPane => "textures/glass_pane.webp",
+                                    BlockType::CyanTerracotta => "textures/cyan_terracotta.webp",
                                 };
                                 let texture: Handle<Image> = asset_server.load(texture_path);
                                 let material = materials.add(StandardMaterial {
@@ -553,6 +647,90 @@ fn execute_pending_commands(
                     }
                 }
             }
+            "wall" => {
+                if parts.len() == 8 {
+                    if let Ok(x1) = parts[2].parse::<i32>() {
+                        if let Ok(y1) = parts[3].parse::<i32>() {
+                            if let Ok(z1) = parts[4].parse::<i32>() {
+                                if let Ok(x2) = parts[5].parse::<i32>() {
+                                    if let Ok(y2) = parts[6].parse::<i32>() {
+                                        if let Ok(z2) = parts[7].parse::<i32>() {
+                                            let block_type_str = parts[1];
+                                            let block_type_enum = match block_type_str {
+                                                "grass" => BlockType::Grass,
+                                                "dirt" => BlockType::Dirt,
+                                                "stone" => BlockType::Stone,
+                                                "quartz_block" => BlockType::QuartzBlock,
+                                                "glass_pane" => BlockType::GlassPane,
+                                                "cyan_terracotta" => BlockType::CyanTerracotta,
+                                                _ => {
+                                                    print_console_line.write(
+                                                        PrintConsoleLine::new(format!(
+                                                            "Invalid block type: {}",
+                                                            block_type_str
+                                                        )),
+                                                    );
+                                                    continue;
+                                                }
+                                            };
+
+                                            let texture_path = match block_type_enum {
+                                                BlockType::Grass => "textures/grass.webp",
+                                                BlockType::Dirt => "textures/dirt.webp",
+                                                BlockType::Stone => "textures/stone.webp",
+                                                BlockType::QuartzBlock => {
+                                                    "textures/quartz_block.webp"
+                                                }
+                                                BlockType::GlassPane => "textures/glass_pane.webp",
+                                                BlockType::CyanTerracotta => {
+                                                    "textures/cyan_terracotta.webp"
+                                                }
+                                            };
+                                            let texture: Handle<Image> =
+                                                asset_server.load(texture_path);
+                                            let material = materials.add(StandardMaterial {
+                                                base_color_texture: Some(texture),
+                                                ..default()
+                                            });
+
+                                            let cube_mesh = meshes
+                                                .add(Cuboid::new(CUBE_SIZE, CUBE_SIZE, CUBE_SIZE));
+
+                                            for x in x1..=x2 {
+                                                for y in y1..=y2 {
+                                                    for z in z1..=z2 {
+                                                        voxel_world.set_block(
+                                                            IVec3::new(x, y, z),
+                                                            block_type_enum,
+                                                        );
+
+                                                        commands.spawn((
+                                                            Mesh3d(cube_mesh.clone()),
+                                                            MeshMaterial3d(material.clone()),
+                                                            Transform::from_translation(Vec3::new(
+                                                                x as f32, y as f32, z as f32,
+                                                            )),
+                                                            VoxelBlock {
+                                                                block_type: block_type_enum,
+                                                                position: IVec3::new(x, y, z),
+                                                            },
+                                                        ));
+                                                    }
+                                                }
+                                            }
+
+                                            print_console_line.write(PrintConsoleLine::new(format!(
+                                                "Created a wall of {} from ({}, {}, {}) to ({}, {}, {})",
+                                                block_type_str, x1, y1, z1, x2, y2, z2
+                                            )));
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
             _ => {
                 print_console_line.write(PrintConsoleLine::new(format!(
                     "Unknown command: {}",
@@ -603,6 +781,7 @@ fn main() {
         .add_console_command::<MoveCommand, _>(crate::console::console_systems::handle_move_command)
         .add_console_command::<PlaceBlockCommand, _>(handle_place_block_command)
         .add_console_command::<RemoveBlockCommand, _>(handle_remove_block_command)
+        .add_console_command::<WallCommand, _>(handle_wall_command)
         .add_console_command::<SaveMapCommand, _>(handle_save_map_command)
         .add_console_command::<LoadMapCommand, _>(handle_load_map_command)
         .insert_resource(BlinkState::default())

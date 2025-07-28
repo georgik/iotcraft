@@ -10,7 +10,7 @@ IoTCraft Desktop Client provides a powerful console interface for interacting wi
 Places a block at the specified coordinates.
 
 **Parameters:**
-- `block_type`: Type of block to place (`grass`, `dirt`, `stone`)
+- `block_type`: Type of block to place (`grass`, `dirt`, `stone`, `quartz_block`, `glass_pane`, `cyan_terracotta`)
 - `x`, `y`, `z`: Integer coordinates where to place the block
 
 **Examples:**
@@ -31,6 +31,23 @@ Removes a block at the specified coordinates.
 remove 5 1 0
 remove 0 0 0
 ```
+
+#### `wall <block_type> <x1> <y1> <z1> <x2> <y2> <z2>`
+Creates a rectangular wall filled with the specified block type between two opposite corners.
+
+**Parameters:**
+- `block_type`: Type of block to use (`grass`, `dirt`, `stone`, `quartz_block`, `glass_pane`, `cyan_terracotta`)
+- `x1`, `y1`, `z1`: Integer coordinates of the first corner
+- `x2`, `y2`, `z2`: Integer coordinates of the opposite corner
+
+**Examples:**
+```
+wall stone 0 0 0 5 3 0     # Create a stone wall from (0,0,0) to (5,3,0)
+wall grass 10 1 5 12 1 8   # Create a grass platform
+wall quartz_block 0 0 0 0 5 0  # Create a vertical pillar
+```
+
+**Note:** The wall command fills all blocks in the 3D rectangular region between the two specified points. This is very efficient for creating large structures, floors, walls, and solid blocks.
 
 ### Map Management
 
@@ -150,8 +167,8 @@ Loads and executes a script file containing multiple commands.
 
 **Examples:**
 ```
-load build_castle.script
-load setup_world.script
+load build_castle.txt
+load setup_world.txt
 ```
 
 **Script File Format:**
@@ -187,10 +204,11 @@ While not console commands, these keyboard controls are essential for navigation
 ## Tips and Best Practices
 
 ### Building Structures
-1. Start with a foundation using `place dirt` commands
-2. Build walls using `place stone` or `place grass`
-3. Save your work frequently with `save_map`
-4. Use scripts for repetitive building tasks
+1. Start with a foundation using `place dirt` commands or `wall dirt` for large areas
+2. Build walls using `place stone` commands or `wall stone` for larger structures
+3. Use the `wall` command for efficient construction of floors, walls, and solid blocks
+4. Save your work frequently with `save_map`
+5. Use scripts for repetitive building tasks
 
 ### Managing Large Worlds
 1. Use descriptive filenames for saved maps
@@ -216,7 +234,7 @@ The console provides clear error messages for common issues:
 
 - **Invalid coordinates**: Check that x, y, z values are valid integers/floats
 - **File not found**: Ensure the filename exists and path is correct
-- **Unknown block type**: Use only `grass`, `dirt`, or `stone`
+- **Unknown block type**: Use only `grass`, `dirt`, `stone`, `quartz_block`, `glass_pane`, or `cyan_terracotta`
 - **Device not found**: Verify device ID is correct for move commands
 - **MQTT errors**: Check MQTT broker connection status
 

@@ -13,6 +13,7 @@
 place grass 0 1 0    # Place a grass block
 place dirt 0 0 0     # Place foundation
 place stone 0 2 0    # Place wall blocks
+wall stone 0 0 0 5 3 0  # Create a wall from (0,0,0) to (5,3,0)
 remove 0 1 0         # Remove a block
 ```
 
@@ -20,7 +21,7 @@ remove 0 1 0         # Remove a block
 ```bash
 save_map my_world.json     # Save current world
 load_map my_world.json     # Load saved world
-load build_script.script   # Run a building script
+load build_script.txt   # Run a building script
 ```
 
 ### Device Control
@@ -42,10 +43,13 @@ mqtt status                      # Check MQTT connection
 - **grass**: Green surface blocks
 - **dirt**: Brown foundation blocks  
 - **stone**: Gray structural blocks
+- **quartz_block**: White decorative blocks
+- **glass_pane**: Transparent glass blocks
+- **cyan_terracotta**: Blue-green ceramic blocks
 
 ## File Formats
 
-### Script Files (`.script`)
+### Script Files (`.txt`)
 ```bash
 # Comments start with #
 place grass 0 0 0
@@ -67,18 +71,19 @@ save_map structure.json
 
 ## Quick Building Tips
 
-1. **Start with foundation**: Use `dirt` blocks
-2. **Build walls**: Use `stone` blocks  
-3. **Add details**: Use `grass` for decoration
-4. **Save frequently**: Use `save_map` often
-5. **Use scripts**: Automate repetitive builds
+1. **Start with foundation**: Use `dirt` blocks or `wall dirt` for large areas
+2. **Build walls**: Use `stone` blocks or `wall stone` for faster construction
+3. **Use wall command**: Create large structures quickly with `wall` command
+4. **Add details**: Use `grass` for decoration
+5. **Save frequently**: Use `save_map` often
+6. **Use scripts**: Automate repetitive builds
 
 ## Common Workflows
 
 ### Building a Structure
 1. Plan coordinates and size
-2. Build foundation with `place dirt`
-3. Add walls with `place stone`
+2. Build foundation with `place dirt` or `wall dirt` for large areas
+3. Add walls with `place stone` or `wall stone` for efficiency
 4. Add roof and details
 5. Save with `save_map`
 
@@ -89,8 +94,8 @@ save_map structure.json
 
 ### Script Development
 1. Test commands manually in console
-2. Create `.script` file with commands
-3. Run with `load script_name.script`
+2. Create `.txt` file with commands
+3. Run with `load script_name.txt`
 4. Iterate and improve
 
 ## Troubleshooting
@@ -104,4 +109,4 @@ save_map structure.json
 
 - Read [Console Commands Reference](console-commands.md)
 - Learn about [Voxel System](voxel-system.md)  
-- Try the example script: `load docs/examples/simple_house.script`
+- Try the example script: `load docs/examples/simple_house.txt`

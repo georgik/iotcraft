@@ -4,25 +4,13 @@
 # First, clear any existing blocks around our build area
 # (You can run 'remove' commands manually if needed)
 
-# Build the foundation (4x4 dirt platform)
-place dirt 0 0 0
-place dirt 1 0 0
-place dirt 2 0 0
-place dirt 3 0 0
-place dirt 0 0 1
-place dirt 1 0 1
-place dirt 2 0 1
-place dirt 3 0 1
-place dirt 0 0 2
-place dirt 1 0 2
-place dirt 2 0 2
-place dirt 3 0 2
-place dirt 0 0 3
-place dirt 1 0 3
-place dirt 2 0 3
-place dirt 3 0 3
+# Build the foundation (4x4 dirt platform) - using wall command for efficiency
+wall dirt 0 0 0 3 0 3
 
 # Build the walls (stone blocks)
+# Note: You could also use 'wall stone 0 1 0 3 2 0' for the front wall,
+# then remove blocks for the door opening with 'remove 2 1 0'
+
 # Front wall (with door opening)
 place stone 0 1 0
 place stone 1 1 0
@@ -55,23 +43,8 @@ place stone 3 1 2
 place stone 3 2 1
 place stone 3 2 2
 
-# Build the roof (grass blocks for now)
-place grass 0 3 0
-place grass 1 3 0
-place grass 2 3 0
-place grass 3 3 0
-place grass 0 3 1
-place grass 1 3 1
-place grass 2 3 1
-place grass 3 3 1
-place grass 0 3 2
-place grass 1 3 2
-place grass 2 3 2
-place grass 3 3 2
-place grass 0 3 3
-place grass 1 3 3
-place grass 2 3 3
-place grass 3 3 3
+# Build the roof (grass blocks for now) - using wall command for efficiency
+wall dirt 0 3 0 3 3 3
 
 # Add a chimney
 place stone 1 3 3

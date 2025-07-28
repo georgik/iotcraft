@@ -75,6 +75,25 @@ pub struct RemoveBlockCommand {
 }
 
 #[derive(Parser, ConsoleCommand)]
+#[command(name = "wall")]
+pub struct WallCommand {
+    /// Block type: grass, dirt, or stone
+    pub block_type: String,
+    /// X1 coordinate
+    pub x1: i32,
+    /// Y1 coordinate
+    pub y1: i32,
+    /// Z1 coordinate
+    pub z1: i32,
+    /// X2 coordinate
+    pub x2: i32,
+    /// Y2 coordinate
+    pub y2: i32,
+    /// Z2 coordinate
+    pub z2: i32,
+}
+
+#[derive(Parser, ConsoleCommand)]
 #[command(name = "save_map")]
 pub struct SaveMapCommand {
     /// Filename to save the map to
