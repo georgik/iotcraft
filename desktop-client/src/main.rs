@@ -204,9 +204,9 @@ fn handle_place_block_command(
         // Spawn the block
         let cube_mesh = meshes.add(Cuboid::new(CUBE_SIZE, CUBE_SIZE, CUBE_SIZE));
         let texture_path = match block_type {
-            BlockType::Grass => "textures/grass.png",
-            BlockType::Dirt => "textures/dirt.png",
-            BlockType::Stone => "textures/stone.png",
+            BlockType::Grass => "textures/grass.webp",
+            BlockType::Dirt => "textures/dirt.webp",
+            BlockType::Stone => "textures/stone.webp",
         };
         let texture: Handle<Image> = asset_server.load(texture_path);
         let material = materials.add(StandardMaterial {
@@ -297,9 +297,9 @@ fn handle_load_map_command(
 
                 for (position, block_type) in voxel_world.blocks.iter() {
                     let texture_path = match block_type {
-                        BlockType::Grass => "textures/grass.png",
-                        BlockType::Dirt => "textures/dirt.png",
-                        BlockType::Stone => "textures/stone.png",
+                        BlockType::Grass => "textures/grass.webp",
+                        BlockType::Dirt => "textures/dirt.webp",
+                        BlockType::Stone => "textures/stone.webp",
                     };
                     let texture: Handle<Image> = asset_server.load(texture_path);
                     let material = materials.add(StandardMaterial {
@@ -494,9 +494,9 @@ fn execute_pending_commands(
                                 let cube_mesh =
                                     meshes.add(Cuboid::new(CUBE_SIZE, CUBE_SIZE, CUBE_SIZE));
                                 let texture_path = match block_type {
-                                    BlockType::Grass => "textures/grass.png",
-                                    BlockType::Dirt => "textures/dirt.png",
-                                    BlockType::Stone => "textures/stone.png",
+                                    BlockType::Grass => "textures/grass.webp",
+                                    BlockType::Dirt => "textures/dirt.webp",
+                                    BlockType::Stone => "textures/stone.webp",
                                 };
                                 let texture: Handle<Image> = asset_server.load(texture_path);
                                 let material = materials.add(StandardMaterial {
@@ -726,7 +726,7 @@ fn handle_spawn_command(
             crate::environment::CUBE_SIZE,
             crate::environment::CUBE_SIZE,
         ));
-        let lamp_texture: Handle<Image> = asset_server.load("textures/lamp.png");
+        let lamp_texture: Handle<Image> = asset_server.load("textures/lamp.webp");
         let lamp_material = materials.add(StandardMaterial {
             base_color_texture: Some(lamp_texture),
             base_color: Color::srgb(0.2, 0.2, 0.2),

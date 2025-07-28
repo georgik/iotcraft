@@ -33,7 +33,7 @@ fn setup_environment(
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
     // grass texture for ground
-    let grass_texture: Handle<Image> = asset_server.load("textures/grass.png");
+    let grass_texture: Handle<Image> = asset_server.load("textures/grass.webp");
     let grass_material_handle = materials.add(StandardMaterial {
         base_color_texture: Some(grass_texture),
         ..default()
@@ -68,7 +68,7 @@ fn setup_environment(
 
     // block with Espressif logo texture
     let block_mesh = meshes.add(Cuboid::new(CUBE_SIZE, CUBE_SIZE, CUBE_SIZE));
-    let esp_logo_texture: Handle<Image> = asset_server.load("textures/espressif.png");
+    let esp_logo_texture: Handle<Image> = asset_server.load("textures/espressif.webp");
     let esp_logo_material = materials.add(StandardMaterial {
         base_color_texture: Some(esp_logo_texture),
         base_color: Color::WHITE,

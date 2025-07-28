@@ -39,7 +39,7 @@ fn setup_lamp_materials(
     mut materials: ResMut<Assets<StandardMaterial>>,
     asset_server: Res<AssetServer>,
 ) {
-    let lamp_texture: Handle<Image> = asset_server.load("textures/lamp.png");
+    let lamp_texture: Handle<Image> = asset_server.load("textures/lamp.webp");
 
     let lamp_materials = LampMaterials {
         lamp_off: materials.add(StandardMaterial {

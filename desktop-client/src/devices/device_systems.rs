@@ -47,7 +47,7 @@ pub fn listen_for_device_announcements(
                         let material = match device_type {
                             "lamp" => {
                                 let lamp_texture: Handle<Image> =
-                                    asset_server.load("textures/lamp.png");
+                                    asset_server.load("textures/lamp.webp");
                                 materials.add(StandardMaterial {
                                     base_color_texture: Some(lamp_texture),
                                     base_color: Color::srgb(0.2, 0.2, 0.2),
