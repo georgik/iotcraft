@@ -459,7 +459,11 @@ fn handle_spawn_command(
         }
 
         // Create device entity
-        let cube_mesh = meshes.add(Cuboid::new(1.0, 1.0, 1.0));
+        let cube_mesh = meshes.add(Cuboid::new(
+            crate::environment::CUBE_SIZE,
+            crate::environment::CUBE_SIZE,
+            crate::environment::CUBE_SIZE,
+        ));
         let lamp_texture: Handle<Image> = asset_server.load("textures/lamp.png");
         let lamp_material = materials.add(StandardMaterial {
             base_color_texture: Some(lamp_texture),

@@ -10,21 +10,25 @@ pub struct EnvironmentPlugin;
 
 impl Plugin for EnvironmentPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, setup).add_systems(
-            Update,
-            (
-                blinking_system,
-                rotate_logo_system,
-                update_thermometer_material,
-                update_thermometer_scale,
-            ),
-        );
+        app.insert_resource(VoxelWorld::default())
+            .add_systems(Startup, setup_environment)
+            .add_systems(
+                Update,
+                (
+                    blinking_system,
+                    rotate_logo_system,
+                    update_thermometer_material,
+                    update_thermometer_scale,
+                ),
+            );
     }
 }
 
-fn setup(
+/// Setup the initial environment including voxel terrain
+fn setup_environment(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
+    mut voxel_world: ResMut<VoxelWorld>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
@@ -35,15 +39,31 @@ fn setup(
         ..default()
     });
 
-    // ground plane with grass texture
-    commands.spawn((
-        Mesh3d(meshes.add(Plane3d::default().mesh().size(20.0, 20.0))),
-        MeshMaterial3d(grass_material_handle.clone()),
-        Ground,
-    ));
+    // generate flat grass terrain using voxels
+    voxel_world.generate_flat_terrain(10, 0);
+
+    // cube mesh for voxel blocks
+    let voxel_mesh = meshes.add(Cuboid::new(CUBE_SIZE, CUBE_SIZE, CUBE_SIZE));
+
+    // spawn voxel blocks
+    for (position, block_type) in voxel_world.blocks.iter() {
+        let material = match block_type {
+            BlockType::Grass => grass_material_handle.clone(),
+            _ => grass_material_handle.clone(), // Placeholder for other materials
+        };
+        commands.spawn((
+            Mesh3d(voxel_mesh.clone()),
+            MeshMaterial3d(material),
+            Transform::from_translation(Vec3::new(position.x as f32, position.y as f32, position.z as f32)),
+            VoxelBlock {
+                block_type: *block_type,
+                position: *position,
+            },
+        ));
+    }
 
     // block with Espressif logo texture
-    let block_mesh = meshes.add(Cuboid::new(1.0, 1.0, 1.0));
+    let block_mesh = meshes.add(Cuboid::new(CUBE_SIZE, CUBE_SIZE, CUBE_SIZE));
     let esp_logo_texture: Handle<Image> = asset_server.load("textures/espressif.png");
     let esp_logo_material = materials.add(StandardMaterial {
         base_color_texture: Some(esp_logo_texture),
