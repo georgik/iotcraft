@@ -9,14 +9,16 @@ IoTCraft is a multi-component Rust project showcasing MQTT-controlled IoT device
 
 - **desktop-client**  
   A Rust **std** application built with Bevy. It renders a 3D scene containing:
+  - **Luanti-like voxel world** with individual 1x1x1 blocks
+  - **Block manipulation system** - place, remove, and manage different block types (grass, dirt, stone)
+  - **World persistence** - save and load entire voxel worlds to/from JSON files
+  - **Script system** - automate building with command scripts
   - Dynamic device spawning based on MQTT announcements
   - Interactive device control via mouse clicks (ON/OFF via MQTT)
   - Drag-and-drop device positioning with persistent storage
-  - Console commands for device management (`move`, `blink`, `spawn`)
-  - A textured grass ground and sky
-  - A rotating logo cube
-  - A thermometer indicator scaling with temperature readings
-  - WASD + mouse camera controls
+  - **Comprehensive console interface** for world and device management
+  - A rotating logo cube and thermometer indicator
+  - **Enhanced WASD + mouse camera controls** (fixed Luanti-like movement)
   - Comprehensive MQTT logging and diagnostics
 
 - **mqtt-server**  
@@ -145,7 +147,34 @@ To test with an ESP32-C6 device:
 4. Click on the device cube to toggle its LED on/off
 5. Use the "blink" console command to make all registered devices blink
 
-## New Features
+## Documentation
+
+- **[Quick Reference Guide](docs/quick-reference.md)** - Essential commands and workflows
+- **[Console Commands Reference](docs/console-commands.md)** - Complete guide to all console commands
+- **[Voxel System Documentation](docs/voxel-system.md)** - Detailed voxel world building guide
+- **[Example Scripts](docs/examples/)** - Sample building scripts
+
+## Key Features
+
+### 🧱 Luanti-like Voxel World
+
+**Block-Based Building:**
+- Individual 1x1x1 meter cubes replace the flat ground plane
+- Three block types: grass, dirt, and stone blocks
+- Place and remove blocks anywhere in 3D space
+- Perfect grid alignment for precise building
+
+**World Persistence:**
+- Save entire worlds to human-readable JSON files
+- Load saved worlds instantly
+- Share world files between users
+- Version control friendly format
+
+**Script-Based Building:**
+- Automate complex structures with script files
+- Commands execute sequentially with timing control
+- Comment support for documenting builds
+- Perfect for repetitive building tasks
 
 ### 🎯 Dynamic Device Positioning
 
@@ -156,9 +185,16 @@ To test with an ESP32-C6 device:
 - Supports real-time positioning of multiple devices
 
 **Console Commands:**
+- `place <block_type> <x> <y> <z>` - Place blocks in the voxel world
+- `remove <x> <y> <z>` - Remove blocks from the world
+- `save_map <filename>` - Save entire world to JSON file
+- `load_map <filename>` - Load world from JSON file
 - `move <device_id> <x> <y> <z>` - Move a device to specific coordinates
 - `blink` - Make all registered devices blink their LEDs
 - `spawn` - Manually spawn a device for testing
+- `load <script>` - Execute command scripts
+
+📖 **[Complete Console Commands Reference →](docs/console-commands.md)**
 
 ### 💾 Persistent Device Properties
 
