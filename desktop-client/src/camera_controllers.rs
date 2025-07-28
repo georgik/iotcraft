@@ -199,31 +199,6 @@ fn run_camera_controller(
     }
     let cursor_grab = *mouse_cursor_grab || *toggle_cursor_grab;
 
-    // Update velocity
-    if axis_input != Vec3::ZERO {
-        let max_speed = if key_input.pressed(controller.key_run) {
-            controller.run_speed
-        } else {
-            controller.walk_speed
-        };
-        controller.velocity = axis_input.normalize() * max_speed;
-    } else {
-        let friction = controller.friction.clamp(0.0, 1.0);
-        controller.velocity *= 1.0 - friction;
-        if controller.velocity.length_squared() < 1e-6 {
-            controller.velocity = Vec3::ZERO;
-        }
-    }
-
-    // Apply movement update
-    if controller.velocity != Vec3::ZERO {
-        let forward = *transform.forward();
-        let right = *transform.right();
-        transform.translation += controller.velocity.x * dt * right
-            + controller.velocity.y * dt * Vec3::Y
-            + controller.velocity.z * dt * forward;
-    }
-
     // Handle cursor grab
     if cursor_grab_change {
         if cursor_grab {
@@ -243,7 +218,7 @@ fn run_camera_controller(
         }
     }
 
-    // Handle mouse input
+    // Handle mouse input - Apply rotation BEFORE movement calculation
     if accumulated_mouse_motion.delta != Vec2::ZERO && cursor_grab {
         // Apply look update
         controller.pitch = (controller.pitch
@@ -252,5 +227,30 @@ fn run_camera_controller(
         controller.yaw -=
             accumulated_mouse_motion.delta.x * RADIANS_PER_DOT * controller.sensitivity;
         transform.rotation = Quat::from_euler(EulerRot::ZYX, 0.0, controller.yaw, controller.pitch);
+    }
+
+    // Update velocity
+    if axis_input != Vec3::ZERO {
+        let max_speed = if key_input.pressed(controller.key_run) {
+            controller.run_speed
+        } else {
+            controller.walk_speed
+        };
+        controller.velocity = axis_input.normalize() * max_speed;
+    } else {
+        let friction = controller.friction.clamp(0.0, 1.0);
+        controller.velocity *= 1.0 - friction;
+        if controller.velocity.length_squared() < 1e-6 {
+            controller.velocity = Vec3::ZERO;
+        }
+    }
+
+    // Apply movement update - Now uses updated rotation from mouse input
+    if controller.velocity != Vec3::ZERO {
+        let forward = *transform.forward();
+        let right = *transform.right();
+        transform.translation += controller.velocity.x * dt * right
+            + controller.velocity.y * dt * Vec3::Y
+            + controller.velocity.z * dt * forward;
     }
 }
