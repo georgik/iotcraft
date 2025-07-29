@@ -15,11 +15,26 @@ pub struct BeingDragged {
     pub offset: Vec3, // Offset from cursor position to object center
 }
 
+/// Drag mode enum to specify which plane to drag on
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum DragMode {
+    XY, // Drag on XY plane (horizontal)
+    XZ, // Drag on XZ plane (horizontal ground level)
+    YZ, // Drag on YZ plane (vertical wall)
+}
+
+impl Default for DragMode {
+    fn default() -> Self {
+        DragMode::XZ // Default to ground plane movement
+    }
+}
+
 /// Resource to track drag state
 #[derive(Resource, Default)]
 pub struct DragState {
     pub dragging_entity: Option<Entity>,
-    pub drag_plane_y: f32, // Y level to constrain dragging to
+    pub drag_mode: DragMode,
+    pub drag_plane_origin: Vec3, // Origin point for the drag plane
 }
 
 /// Events for position updates
@@ -33,24 +48,22 @@ pub struct DevicePositioningPlugin;
 
 impl Plugin for DevicePositioningPlugin {
     fn build(&self, app: &mut App) {
-        app.insert_resource(DragState {
-            dragging_entity: None,
-            drag_plane_y: 0.5,
-        })
-        .add_event::<DevicePositionUpdateEvent>()
-        .add_systems(
-            Update,
-            (
-                handle_device_drag_input,
-                handle_device_dragging,
-                handle_position_update_events,
-            )
-                .chain(),
-        );
+        app.insert_resource(DragState::default())
+            .add_event::<DevicePositionUpdateEvent>()
+            .add_systems(
+                Update,
+                (
+                    handle_device_drag_input,
+                    handle_device_dragging,
+                    handle_position_update_events,
+                    draw_drag_gizmos,
+                )
+                    .chain(),
+            );
     }
 }
 
-/// System to handle picking devices for dragging
+/// System to handle picking devices for dragging with gizmo axis selection
 fn handle_device_drag_input(
     mouse_input: Res<ButtonInput<MouseButton>>,
     keyboard_input: Res<ButtonInput<KeyCode>>,
@@ -60,7 +73,6 @@ fn handle_device_drag_input(
         (Entity, &GlobalTransform, &DeviceEntity),
         (With<DeviceEntity>, Without<BeingDragged>),
     >,
-    dragged_query: Query<Entity, With<BeingDragged>>,
     mut commands: Commands,
     mut drag_state: ResMut<DragState>,
     console_open: Res<ConsoleOpen>,
@@ -68,6 +80,18 @@ fn handle_device_drag_input(
     // Don't interact when console is open
     if console_open.open {
         return;
+    }
+
+    // Handle keyboard shortcuts for switching drag modes
+    if keyboard_input.just_pressed(KeyCode::KeyX) {
+        drag_state.drag_mode = DragMode::YZ; // X-axis constrained, move in YZ plane
+        info!("Drag mode: YZ plane (X-axis locked)");
+    } else if keyboard_input.just_pressed(KeyCode::KeyY) {
+        drag_state.drag_mode = DragMode::XZ; // Y-axis constrained, move in XZ plane
+        info!("Drag mode: XZ plane (Y-axis locked)");
+    } else if keyboard_input.just_pressed(KeyCode::KeyZ) {
+        drag_state.drag_mode = DragMode::XY; // Z-axis constrained, move in XY plane
+        info!("Drag mode: XY plane (Z-axis locked)");
     }
 
     // Handle right-click to start dragging (left-click is for lamp interaction)
@@ -111,21 +135,42 @@ fn handle_device_drag_input(
 
         // Start dragging the closest device
         if let Some((entity, device_position)) = closest_device {
-            // Calculate offset from cursor ray intersection with drag plane to device center
-            let drag_plane_intersection = ray.origin
-                + ray.direction * ((drag_state.drag_plane_y - ray.origin.y) / ray.direction.y);
-            let offset = device_position - drag_plane_intersection;
+            // Set drag plane origin to the device position
+            drag_state.drag_plane_origin = device_position;
+
+            // Calculate intersection based on current drag mode
+            let plane_intersection = match drag_state.drag_mode {
+                DragMode::XY => {
+                    // XY plane at device's Z position
+                    let t = (device_position.z - ray.origin.z) / ray.direction.z;
+                    ray.origin + ray.direction * t
+                }
+                DragMode::XZ => {
+                    // XZ plane at device's Y position
+                    let t = (device_position.y - ray.origin.y) / ray.direction.y;
+                    ray.origin + ray.direction * t
+                }
+                DragMode::YZ => {
+                    // YZ plane at device's X position
+                    let t = (device_position.x - ray.origin.x) / ray.direction.x;
+                    ray.origin + ray.direction * t
+                }
+            };
+
+            let offset = device_position - plane_intersection;
 
             commands.entity(entity).insert(BeingDragged { offset });
             drag_state.dragging_entity = Some(entity);
-            info!("Started dragging device at entity {:?}", entity);
+            info!(
+                "Started dragging device at entity {:?} in {:?} mode",
+                entity, drag_state.drag_mode
+            );
         }
     }
 
-    // Handle releasing drag - position updates will be sent by handle_device_dragging system
+    // Handle releasing drag
     if mouse_input.just_released(MouseButton::Right) || keyboard_input.just_pressed(KeyCode::Escape)
     {
-        // The cleanup will be handled by handle_device_dragging after sending position updates
         info!("Stopped dragging devices");
     }
 }
@@ -160,9 +205,24 @@ fn handle_device_dragging(
     };
 
     for (mut transform, being_dragged, device) in dragged_query.iter_mut() {
-        // Calculate intersection with the drag plane
-        let t = (drag_state.drag_plane_y - ray.origin.y) / ray.direction.y;
-        let intersection = ray.origin + ray.direction * t;
+        // Calculate intersection based on current drag mode
+        let intersection = match drag_state.drag_mode {
+            DragMode::XY => {
+                // XY plane at drag origin's Z position
+                let t = (drag_state.drag_plane_origin.z - ray.origin.z) / ray.direction.z;
+                ray.origin + ray.direction * t
+            }
+            DragMode::XZ => {
+                // XZ plane at drag origin's Y position
+                let t = (drag_state.drag_plane_origin.y - ray.origin.y) / ray.direction.y;
+                ray.origin + ray.direction * t
+            }
+            DragMode::YZ => {
+                // YZ plane at drag origin's X position
+                let t = (drag_state.drag_plane_origin.x - ray.origin.x) / ray.direction.x;
+                ray.origin + ray.direction * t
+            }
+        };
 
         // Apply the offset to get the new device position
         let new_position = intersection + being_dragged.offset;
@@ -244,7 +304,119 @@ fn handle_position_update_events(
     }
 }
 
-/// Visual feedback for draggable devices
+/// System to draw axis gizmos and drag mode indicators
+fn draw_drag_gizmos(
+    mut gizmos: Gizmos,
+    device_query: Query<&GlobalTransform, With<DeviceEntity>>,
+    dragged_query: Query<&GlobalTransform, (With<DeviceEntity>, With<BeingDragged>)>,
+    drag_state: Res<DragState>,
+    console_open: Res<ConsoleOpen>,
+) {
+    if console_open.open {
+        return;
+    }
+
+    // Draw subtle outline for all devices to show they're draggable
+    for transform in device_query.iter() {
+        let position = transform.translation();
+        gizmos.cuboid(
+            Transform::from_translation(position),
+            Color::srgba(0.5, 0.5, 1.0, 0.3), // Semi-transparent blue
+        );
+    }
+
+    // Draw bright outline and axis gizmos for devices being dragged
+    for transform in dragged_query.iter() {
+        let position = transform.translation();
+
+        // Draw bright outline
+        gizmos.cuboid(
+            Transform::from_translation(position),
+            Color::srgb(1.0, 1.0, 0.0), // Bright yellow
+        );
+
+        // Draw axis gizmos based on current drag mode
+        let axis_length = 1.5;
+
+        match drag_state.drag_mode {
+            DragMode::XY => {
+                // Highlight X and Y axes, dim Z axis
+                gizmos.line(
+                    position,
+                    position + Vec3::X * axis_length,
+                    Color::srgb(1.0, 0.0, 0.0),
+                ); // Red X
+                gizmos.line(
+                    position,
+                    position + Vec3::Y * axis_length,
+                    Color::srgb(0.0, 1.0, 0.0),
+                ); // Green Y
+                gizmos.line(
+                    position,
+                    position + Vec3::Z * axis_length,
+                    Color::srgba(0.0, 0.0, 1.0, 0.3),
+                ); // Dim Blue Z
+            }
+            DragMode::XZ => {
+                // Highlight X and Z axes, dim Y axis
+                gizmos.line(
+                    position,
+                    position + Vec3::X * axis_length,
+                    Color::srgb(1.0, 0.0, 0.0),
+                ); // Red X
+                gizmos.line(
+                    position,
+                    position + Vec3::Y * axis_length,
+                    Color::srgba(0.0, 1.0, 0.0, 0.3),
+                ); // Dim Green Y
+                gizmos.line(
+                    position,
+                    position + Vec3::Z * axis_length,
+                    Color::srgb(0.0, 0.0, 1.0),
+                ); // Blue Z
+            }
+            DragMode::YZ => {
+                // Highlight Y and Z axes, dim X axis
+                gizmos.line(
+                    position,
+                    position + Vec3::X * axis_length,
+                    Color::srgba(1.0, 0.0, 0.0, 0.3),
+                ); // Dim Red X
+                gizmos.line(
+                    position,
+                    position + Vec3::Y * axis_length,
+                    Color::srgb(0.0, 1.0, 0.0),
+                ); // Green Y
+                gizmos.line(
+                    position,
+                    position + Vec3::Z * axis_length,
+                    Color::srgb(0.0, 0.0, 1.0),
+                ); // Blue Z
+            }
+        }
+
+        // Draw axis labels
+        // Note: Text rendering in gizmos is limited, but we can use simple indicators
+        let label_offset = axis_length + 0.3;
+        gizmos.sphere(
+            Isometry3d::from_translation(position + Vec3::X * label_offset),
+            0.1,
+            Color::srgb(1.0, 0.0, 0.0),
+        );
+        gizmos.sphere(
+            Isometry3d::from_translation(position + Vec3::Y * label_offset),
+            0.1,
+            Color::srgb(0.0, 1.0, 0.0),
+        );
+        gizmos.sphere(
+            Isometry3d::from_translation(position + Vec3::Z * label_offset),
+            0.1,
+            Color::srgb(0.0, 0.0, 1.0),
+        );
+    }
+}
+
+/// Visual feedback for draggable devices (keeping for backward compatibility)
 pub fn draw_drag_feedback(
     mut gizmos: Gizmos,
     device_query: Query<&GlobalTransform, With<DeviceEntity>>,
