@@ -4,10 +4,8 @@ use log::{error, info};
 use rumqttc::{Client, Event, MqttOptions, Outgoing, QoS};
 use serde_json::json;
 use std::time::Duration;
-
 use super::device_types::*;
 use crate::config::MqttConfig;
-use crate::environment::Ground;
 
 /// Component to mark a device as being dragged
 #[derive(Component)]
@@ -44,22 +42,95 @@ pub struct DevicePositionUpdateEvent {
     pub new_position: Vec3,
 }
 
+/// Component to mark the device info UI panel
+#[derive(Component)]
+struct DeviceInfoPanel;
+
+/// Component for device info text elements
+#[derive(Component)]
+struct DeviceInfoText;
+
 pub struct DevicePositioningPlugin;
 
 impl Plugin for DevicePositioningPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(DragState::default())
             .add_event::<DevicePositionUpdateEvent>()
-            .add_systems(
-                Update,
-                (
-                    handle_device_drag_input,
-                    handle_device_dragging,
-                    handle_position_update_events,
-                    draw_drag_gizmos,
-                )
-                    .chain(),
-            );
+        .add_systems(
+            Update,
+            (
+                handle_device_drag_input,
+                handle_device_dragging,
+                handle_position_update_events,
+                draw_drag_gizmos,
+                update_device_info_ui,
+            )
+                .chain(),
+        )
+        .add_systems(Startup, setup_device_info_ui);
+    }
+}
+
+fn setup_device_info_ui(mut commands: Commands) {
+    commands
+        .spawn((
+            Node {
+                width: Val::Percent(100.0),
+                height: Val::Px(50.0),
+                flex_direction: FlexDirection::Row,
+                justify_content: JustifyContent::FlexStart,
+                align_items: AlignItems::Center,
+                position_type: PositionType::Absolute,
+                top: Val::Px(0.0),
+                left: Val::Px(0.0),
+                ..Default::default()
+            },
+            BackgroundColor(Color::srgba(0.1, 0.1, 0.1, 0.7)),
+            Visibility::Hidden, // Initially hidden
+            DeviceInfoPanel,
+        ))
+        .with_children(|parent| {
+            parent.spawn((
+                Text::new("Device Info: "),
+                TextFont {
+                    font_size: 20.0,
+                    ..Default::default()
+                },
+                TextColor(Color::WHITE),
+                DeviceInfoText,
+            ));
+        });
+}
+
+fn update_device_info_ui(
+    drag_state: Res<DragState>,
+    mut text_query: Query<&mut Text, With<DeviceInfoText>>,
+    mut panel_query: Query<&mut Visibility, (With<DeviceInfoPanel>, Without<DeviceInfoText>)>,
+    device_query: Query<(&DeviceEntity, &Transform), With<BeingDragged>>,
+) {
+    if let Some(entity) = drag_state.dragging_entity {
+        // Show the panel and update text when dragging
+        if let Ok(mut visibility) = panel_query.single_mut() {
+            *visibility = Visibility::Visible;
+        }
+        
+        if let Ok((device, transform)) = device_query.get(entity) {
+            if let Ok(mut text) = text_query.single_mut() {
+                **text = format!(
+                    "Device ID: {} | Position: ({:.2}, {:.2}, {:.2}) | Mode: {:?}",
+                    device.device_id,
+                    transform.translation.x,
+                    transform.translation.y,
+                    transform.translation.z,
+                    drag_state.drag_mode
+                );
+            }
+        }
+    } else {
+        // Hide the panel when not dragging
+        if let Ok(mut visibility) = panel_query.single_mut() {
+            *visibility = Visibility::Hidden;
+        }
     }
 }
 
