@@ -20,8 +20,13 @@ pub struct DeviceEntity {
 }
 
 /// Component to track door state
-#[derive(Component, Debug, Clone)]
+#[derive(Component, Clone, Debug)]
 pub struct DoorState {
     pub is_open: bool,
     pub device_id: String,
+}
+
+#[derive(Component, Clone, Debug)]
+pub struct OriginalPosition {
+    pub position: Vec3,
 }

@@ -14,8 +14,9 @@ IoTCraft is a multi-component Rust project showcasing MQTT-controlled IoT device
   - **World persistence** - save and load entire voxel worlds to/from JSON files
   - **Script system** - automate building with command scripts
   - Dynamic device spawning based on MQTT announcements
-  - Interactive device control via mouse clicks (ON/OFF via MQTT)
+  - Interactive device control via mouse clicks (lamps: ON/OFF, doors: open/close via MQTT)
   - Drag-and-drop device positioning with persistent storage
+  - **Door system** - 3D doors that rotate 90 degrees when opened/closed
   - **Comprehensive console interface** for world and device management
   - A rotating logo cube and thermometer indicator
   - **Enhanced WASD + mouse camera controls** (fixed Luanti-like movement)
@@ -130,6 +131,10 @@ Devices announce themselves using this JSON format on the `devices/announce` top
 }
 ```
 
+**Supported Device Types:**
+- `lamp` - Cubic devices that can be toggled ON/OFF (change color and emit light)
+- `door` - Tall, thin rectangular devices (0.2 x 2.0 x 1.0) that rotate 90° when opened/closed
+
 ### MQTT Topics
 
 - `devices/announce` - Device registration announcements
@@ -152,7 +157,7 @@ To test with an ESP32-C6 device:
 - **[Quick Reference Guide](docs/quick-reference.md)** - Essential commands and workflows
 - **[Console Commands Reference](docs/console-commands.md)** - Complete guide to all console commands
 - **[Voxel System Documentation](docs/voxel-system.md)** - Detailed voxel world building guide
-- **[Example Scripts](docs/examples/)** - Sample building scripts
+- **[Example Scripts](desktop-client/scripts/)** - Sample building scripts including door demos
 
 ## Key Features
 
@@ -191,7 +196,8 @@ To test with an ESP32-C6 device:
 - `load_map <filename>` - Load world from JSON file
 - `move <device_id> <x> <y> <z>` - Move a device to specific coordinates
 - `blink` - Make all registered devices blink their LEDs
-- `spawn` - Manually spawn a device for testing
+- `spawn <device_id> <x> <y> <z>` - Manually spawn a lamp device for testing
+- `spawn_door <device_id> <x> <y> <z>` - Manually spawn a door device for testing
 - `load <script>` - Execute command scripts
 
 📖 **[Complete Console Commands Reference →](docs/console-commands.md)**

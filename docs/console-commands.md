@@ -104,7 +104,7 @@ load_map castle_build.json
 ### Device Control
 
 #### `spawn <device_id> <x> <y> <z>`
-Manually spawns a device for testing purposes.
+Manually spawns a lamp device for testing purposes.
 
 **Parameters:**
 - `device_id`: Unique identifier for the device
@@ -115,6 +115,21 @@ Manually spawns a device for testing purposes.
 spawn test_lamp 3.0 1.0 2.0
 spawn debug_device 0.0 0.5 0.0
 ```
+
+#### `spawn_door <device_id> <x> <y> <z>`
+Manually spawns a door device for testing purposes.
+
+**Parameters:**
+- `device_id`: Unique identifier for the door device
+- `x`, `y`, `z`: Float coordinates where to spawn the door
+
+**Examples:**
+```
+spawn_door main_door 5.0 1.0 3.0
+spawn_door garage_door 10.0 1.0 0.0
+```
+
+**Note:** Doors are rendered as tall, thin rectangular objects (0.2 x 2.0 x 1.0 units) and rotate 90 degrees when opened/closed.
 
 #### `move <device_id> <x> <y> <z>`
 Moves an existing device to new coordinates.

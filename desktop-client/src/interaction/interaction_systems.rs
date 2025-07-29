@@ -7,7 +7,10 @@ use std::time::Duration;
 
 use super::interaction_types::*;
 use crate::config::MqttConfig;
-use crate::devices::{DeviceEntity, device_types::DoorState};
+use crate::devices::{
+    DeviceEntity,
+    device_types::{DoorState, OriginalPosition},
+};
 use crate::environment::Ground;
 use crate::environment::{VoxelBlock, VoxelWorld};
 use crate::inventory::{ItemType, PlaceBlockEvent, PlayerInventory};
@@ -533,18 +536,41 @@ fn handle_door_toggle_events(
 
 /// System that updates door visual appearance based on their state
 fn update_door_visuals(
-    mut door_query: Query<(&DoorState, &mut MeshMaterial3d<StandardMaterial>), Changed<DoorState>>,
-    door_materials: Res<DoorMaterials>,
+    mut door_query: Query<
+        (&DoorState, &mut Transform, &OriginalPosition),
+        (Changed<DoorState>, With<DeviceEntity>),
+    >,
+    device_query: Query<&DeviceEntity>,
 ) {
-    // Update materials for doors that changed state
-    for (door_state, mut material) in door_query.iter_mut() {
-        let new_material = if door_state.is_open {
-            door_materials.door_open.clone()
-        } else {
-            door_materials.door_closed.clone()
-        };
+    // Update rotation for doors that changed state
+    for (door_state, mut transform, original_pos) in door_query.iter_mut() {
+        // Calculate pivot point (right edge of door)
+        // Door is 0.2 units thick, so pivot is 0.1 units from center along X-axis (right edge)
+        let pivot_offset = Vec3::new(0.1, 0.0, 0.0);
 
-        material.0 = new_material;
+        if door_state.is_open {
+            // Rotate 90 degrees around Y-axis at the pivot point (right edge)
+            let rotation = Quat::from_rotation_y(std::f32::consts::FRAC_PI_2);
+            transform.rotation = rotation;
+
+            // Calculate new position: move pivot to origin, rotate, move back
+            let rotated_offset = rotation * pivot_offset;
+            transform.translation = original_pos.position - pivot_offset + rotated_offset;
+        } else {
+            // Door closed - reset to original position and rotation
+            transform.rotation = Quat::IDENTITY;
+            transform.translation = original_pos.position;
+        }
+
+        info!(
+            "Door {} rotated to {} degrees (pivoting around right edge)",
+            if door_state.is_open {
+                "opened"
+            } else {
+                "closed"
+            },
+            if door_state.is_open { 90 } else { 0 }
+        );
     }
 }
 

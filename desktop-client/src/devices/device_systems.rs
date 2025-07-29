@@ -107,6 +107,11 @@ pub fn listen_for_device_announcements(
                                 is_open: false,
                                 device_id: device_id.to_string(),
                             });
+                            entity_commands.insert(
+                                crate::devices::device_types::OriginalPosition {
+                                    position: Vec3::new(x, y, z),
+                                },
+                            );
                         }
 
                         info!(

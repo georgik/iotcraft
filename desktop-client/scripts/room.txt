@@ -1,0 +1,34 @@
+# Script to create a simple room with doors and lighting
+# Create a foundation with grass
+wall grass -5 0 -5 5 0 5
+
+# Create walls with stone blocks
+wall stone -5 1 -5 -5 3 5
+wall stone 5 1 -5 5 3 5
+wall stone -4 1 -5 4 1 -5
+wall stone -4 1 5 4 1 5
+
+# Create upper walls
+wall stone -4 2 -5 4 2 -5
+wall stone -4 3 -5 4 3 -5
+wall stone -4 2 5 4 2 5
+wall stone -4 3 5 4 3 5
+
+# Remove blocks to create door openings (2 blocks high)
+# Front door opening
+remove 0 1 -5
+remove 0 2 -5
+# Back door opening
+remove 0 1 5
+remove 0 2 5
+
+# Add doors
+spawn_door front_door 0.0 1.0 -5.0
+spawn_door back_door 0.0 1.0 5.0
+
+# Add lamps for lighting
+spawn room_lamp_1 -3.0 2.0 -3.0
+spawn room_lamp_2 3.0 2.0 3.0
+
+# Create a simple roof
+wall stone -5 4 -5 5 4 5

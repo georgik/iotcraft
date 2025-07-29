@@ -561,6 +561,57 @@ fn execute_pending_commands(
                     }
                 }
             }
+            "spawn_door" => {
+                if parts.len() == 5 {
+                    if let Ok(x) = parts[2].parse::<f32>() {
+                        if let Ok(y) = parts[3].parse::<f32>() {
+                            if let Ok(z) = parts[4].parse::<f32>() {
+                                let device_id = parts[1].to_string();
+
+                                // Create spawn door command payload
+                                let payload = json!({
+                                    "device_id": device_id,
+                                    "device_type": "door",
+                                    "state": "online",
+                                    "location": { "x": x, "y": y, "z": z }
+                                })
+                                .to_string();
+
+                                // Create a temporary client for simulation
+                                let mut mqtt_options = MqttOptions::new(
+                                    "spawn-door-client",
+                                    &mqtt_config.host,
+                                    mqtt_config.port,
+                                );
+                                mqtt_options.set_keep_alive(Duration::from_secs(5));
+                                let (client, mut connection) = Client::new(mqtt_options, 10);
+
+                                client
+                                    .publish(
+                                        "devices/announce",
+                                        QoS::AtMostOnce,
+                                        false,
+                                        payload.as_bytes(),
+                                    )
+                                    .unwrap();
+
+                                // Drive the event loop to ensure the message is sent
+                                for notification in connection.iter() {
+                                    if let Ok(Event::Outgoing(Outgoing::Publish(_))) = notification
+                                    {
+                                        break;
+                                    }
+                                }
+
+                                print_console_line.write(PrintConsoleLine::new(format!(
+                                    "Spawn door command sent for device {}",
+                                    device_id
+                                )));
+                            }
+                        }
+                    }
+                }
+            }
             "place" => {
                 if parts.len() == 5 {
                     if let Ok(x) = parts[2].parse::<i32>() {
