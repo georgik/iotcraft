@@ -20,6 +20,7 @@ impl Plugin for ConsolePlugin {
             .add_systems(Update, handle_blink_command)
             .add_systems(Update, handle_mqtt_command)
             .add_systems(Update, handle_spawn_command)
+            .add_systems(Update, handle_spawn_door_command)
             .add_systems(Update, handle_load_command)
             .add_systems(Update, handle_move_command);
     }
@@ -114,6 +115,46 @@ pub fn handle_spawn_command(mut log: ConsoleCommand<SpawnCommand>, mqtt_config: 
         }
 
         reply!(log, "Spawn command sent for device {}", device_id);
+    }
+}
+
+pub fn handle_spawn_door_command(
+    mut log: ConsoleCommand<SpawnDoorCommand>,
+    mqtt_config: Res<MqttConfig>,
+) {
+    if let Some(Ok(SpawnDoorCommand { device_id, x, y, z })) = log.take() {
+        info!("Console command: spawn_door {}", device_id);
+        let payload = json!({
+            "device_id": device_id,
+            "device_type": "door",
+            "state": "online",
+            "location": { "x": x, "y": y, "z": z }
+        })
+        .to_string();
+
+        // Create a temporary client for simulation
+        let mut mqtt_options =
+            MqttOptions::new("spawn-door-client", &mqtt_config.host, mqtt_config.port);
+        mqtt_options.set_keep_alive(Duration::from_secs(5));
+        let (client, mut connection) = Client::new(mqtt_options, 10);
+
+        client
+            .publish(
+                "devices/announce",
+                QoS::AtMostOnce,
+                false,
+                payload.as_bytes(),
+            )
+            .unwrap();
+
+        // Drive the event loop to ensure the message is sent
+        for notification in connection.iter() {
+            if let Ok(Event::Outgoing(Outgoing::Publish(_))) = notification {
+                break;
+            }
+        }
+
+        reply!(log, "Spawn door command sent for device {}", device_id);
     }
 }
 

@@ -18,3 +18,10 @@ pub struct DeviceEntity {
     #[allow(dead_code)]
     pub device_type: String,
 }
+
+/// Component to track door state
+#[derive(Component, Debug, Clone)]
+pub struct DoorState {
+    pub is_open: bool,
+    pub device_id: String,
+}

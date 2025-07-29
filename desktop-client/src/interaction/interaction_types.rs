@@ -11,9 +11,7 @@ pub struct Interactable {
 #[derive(Debug, Clone)]
 pub enum InteractionType {
     ToggleLamp,
-    // Future interaction types can be added here
-    // ToggleSwitch,
-    // ReadSensor,
+    ToggleDoor,
 }
 
 /// Component for lamp devices that can be toggled
@@ -21,6 +19,13 @@ pub enum InteractionType {
 pub struct LampState {
     pub is_on: bool,
     pub device_id: String,
+}
+
+/// Event sent when a door state should be changed
+#[derive(Event)]
+pub struct DoorToggleEvent {
+    pub device_id: String,
+    pub new_state: bool, // true for open, false for closed
 }
 
 /// Resource tracking which entity is currently being hovered over
@@ -67,5 +72,13 @@ pub struct PlayerHand;
 pub struct LampMaterials {
     pub lamp_off: Handle<StandardMaterial>,
     pub lamp_on: Handle<StandardMaterial>,
+    pub hovered: Handle<StandardMaterial>,
+}
+
+/// Material handles for door states
+#[derive(Resource)]
+pub struct DoorMaterials {
+    pub door_closed: Handle<StandardMaterial>,
+    pub door_open: Handle<StandardMaterial>,
     pub hovered: Handle<StandardMaterial>,
 }

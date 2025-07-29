@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use super::interaction_types::*;
 use crate::config::MqttConfig;
-use crate::devices::DeviceEntity;
+use crate::devices::{DeviceEntity, device_types::DoorState};
 use crate::environment::Ground;
 use crate::environment::{VoxelBlock, VoxelWorld};
 use crate::inventory::{ItemType, PlaceBlockEvent, PlayerInventory};
@@ -18,9 +18,10 @@ impl Plugin for InteractionPlugin {
     fn build(&self, app: &mut App) {
         app.add_event::<InteractionEvent>()
             .add_event::<LampToggleEvent>()
+            .add_event::<DoorToggleEvent>()
             .insert_resource(HoveredEntity::default())
             .insert_resource(GhostBlockState::default())
-            .add_systems(Startup, setup_lamp_materials)
+            .add_systems(Startup, (setup_lamp_materials, setup_door_materials))
             .add_systems(
                 Update,
                 (
@@ -29,7 +30,9 @@ impl Plugin for InteractionPlugin {
                     handle_interaction_input,
                     handle_interaction_events,
                     handle_lamp_toggle_events,
+                    handle_door_toggle_events,
                     update_lamp_visuals,
+                    update_door_visuals,
                     draw_interaction_cursor,
                     draw_crosshair,
                 )
@@ -67,6 +70,36 @@ fn setup_lamp_materials(
     };
 
     commands.insert_resource(lamp_materials);
+}
+
+/// Setup material resources for different door states
+fn setup_door_materials(
+    mut commands: Commands,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    asset_server: Res<AssetServer>,
+) {
+    let door_texture: Handle<Image> = asset_server.load("textures/door.webp");
+
+    let door_materials = DoorMaterials {
+        door_closed: materials.add(StandardMaterial {
+            base_color_texture: Some(door_texture.clone()),
+            base_color: Color::srgb(0.8, 0.6, 0.4), // Wood-like brown when closed
+            ..default()
+        }),
+        door_open: materials.add(StandardMaterial {
+            base_color_texture: Some(door_texture.clone()),
+            base_color: Color::srgb(0.6, 0.8, 0.4), // Greenish tint when open
+            ..default()
+        }),
+        hovered: materials.add(StandardMaterial {
+            base_color_texture: Some(door_texture),
+            base_color: Color::srgb(0.6, 0.8, 1.0), // Blue tint when hovered
+            emissive: LinearRgba::new(0.1, 0.2, 0.3, 1.0),
+            ..default()
+        }),
+    };
+
+    commands.insert_resource(door_materials);
 }
 
 /// System that performs raycasting to find interactable objects under the cursor
@@ -344,7 +377,9 @@ fn handle_interaction_input(
 fn handle_interaction_events(
     mut interaction_events: EventReader<InteractionEvent>,
     mut lamp_toggle_events: EventWriter<LampToggleEvent>,
+    mut door_toggle_events: EventWriter<DoorToggleEvent>,
     lamp_query: Query<&LampState>,
+    door_query: Query<&DoorState>,
     device_query: Query<&DeviceEntity>,
 ) {
     for event in interaction_events.read() {
@@ -359,6 +394,21 @@ fn handle_interaction_events(
                         .unwrap_or(false);
 
                     lamp_toggle_events.write(LampToggleEvent {
+                        device_id: device.device_id.clone(),
+                        new_state: !current_state,
+                    });
+                }
+            }
+            InteractionType::ToggleDoor => {
+                // Get the device info for this entity
+                if let Ok(device) = device_query.get(event.entity) {
+                    // Check current door state if available
+                    let current_state = door_query
+                        .get(event.entity)
+                        .map(|door| door.is_open)
+                        .unwrap_or(false);
+
+                    door_toggle_events.write(DoorToggleEvent {
                         device_id: device.device_id.clone(),
                         new_state: !current_state,
                     });
@@ -440,6 +490,61 @@ fn handle_lamp_toggle_events(
                 }
             });
         }
+    }
+}
+
+/// System that handles door toggle events
+fn handle_door_toggle_events(
+    mut door_toggle_events: EventReader<DoorToggleEvent>,
+    mut door_query: Query<&mut DoorState>,
+    device_query: Query<(Entity, &DeviceEntity)>,
+    mut commands: Commands,
+) {
+    for event in door_toggle_events.read() {
+        info!(
+            "Toggling door {} to {}",
+            event.device_id,
+            if event.new_state { "open" } else { "closed" }
+        );
+
+        // Find the entity with this device_id
+        let mut found_entity = None;
+        for (entity, device) in device_query.iter() {
+            if device.device_id == event.device_id {
+                found_entity = Some(entity);
+                break;
+            }
+        }
+
+        if let Some(entity) = found_entity {
+            // Update or add door state component
+            if let Ok(mut door_state) = door_query.get_mut(entity) {
+                door_state.is_open = event.new_state;
+            } else {
+                // Add door state component if it doesn't exist
+                commands.entity(entity).insert(DoorState {
+                    is_open: event.new_state,
+                    device_id: event.device_id.clone(),
+                });
+            }
+        }
+    }
+}
+
+/// System that updates door visual appearance based on their state
+fn update_door_visuals(
+    mut door_query: Query<(&DoorState, &mut MeshMaterial3d<StandardMaterial>), Changed<DoorState>>,
+    door_materials: Res<DoorMaterials>,
+) {
+    // Update materials for doors that changed state
+    for (door_state, mut material) in door_query.iter_mut() {
+        let new_material = if door_state.is_open {
+            door_materials.door_open.clone()
+        } else {
+            door_materials.door_closed.clone()
+        };
+
+        material.0 = new_material;
     }
 }
 

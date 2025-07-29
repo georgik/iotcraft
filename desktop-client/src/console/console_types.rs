@@ -31,6 +31,19 @@ pub struct SpawnCommand {
 }
 
 #[derive(Parser, ConsoleCommand)]
+#[command(name = "spawn_door")]
+pub struct SpawnDoorCommand {
+    /// Device ID
+    pub device_id: String,
+    /// X coordinate
+    pub x: f32,
+    /// Y coordinate
+    pub y: f32,
+    /// Z coordinate
+    pub z: f32,
+}
+
+#[derive(Parser, ConsoleCommand)]
 #[command(name = "load")]
 pub struct LoadCommand {
     /// Script file to load and execute

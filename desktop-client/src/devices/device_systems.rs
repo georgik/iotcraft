@@ -54,6 +54,15 @@ pub fn listen_for_device_announcements(
                                     ..default()
                                 })
                             }
+                            "door" => {
+                                let door_texture: Handle<Image> =
+                                    asset_server.load("textures/door.webp");
+                                materials.add(StandardMaterial {
+                                    base_color_texture: Some(door_texture),
+                                    base_color: Color::srgb(0.8, 0.6, 0.4), // Wood-like brown when closed
+                                    ..default()
+                                })
+                            }
                             "sensor" => materials.add(StandardMaterial {
                                 base_color: Color::srgb(0.2, 0.8, 1.0),
                                 ..default()
@@ -66,7 +75,11 @@ pub fn listen_for_device_announcements(
 
                         // Spawn the device entity
                         let mut entity_commands = commands.spawn((
-                            Mesh3d(meshes.add(Cuboid::new(1.0, 1.0, 1.0))),
+                            if device_type == "door" {
+                                Mesh3d(meshes.add(Cuboid::new(0.2, 2.0, 1.0)))
+                            } else {
+                                Mesh3d(meshes.add(Cuboid::new(1.0, 1.0, 1.0)))
+                            },
                             MeshMaterial3d(material),
                             Transform::from_translation(Vec3::new(x, y, z)),
                             DeviceEntity {
@@ -75,16 +88,23 @@ pub fn listen_for_device_announcements(
                             },
                         ));
 
-                        // Add BlinkCube component for lamp devices so they can blink
                         if device_type == "lamp" {
                             entity_commands.insert(BlinkCube);
-                            // Add Interactable component so players can interact with lamps
                             entity_commands.insert(Interactable {
                                 interaction_type: InteractionType::ToggleLamp,
                             });
-                            // Add LampState component to track lamp state
                             entity_commands.insert(crate::interaction::LampState {
                                 is_on: false,
+                                device_id: device_id.to_string(),
+                            });
+                        }
+
+                        if device_type == "door" {
+                            entity_commands.insert(Interactable {
+                                interaction_type: InteractionType::ToggleDoor,
+                            });
+                            entity_commands.insert(crate::devices::device_types::DoorState {
+                                is_open: false,
                                 device_id: device_id.to_string(),
                             });
                         }

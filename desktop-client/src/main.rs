@@ -783,6 +783,9 @@ fn main() {
         .add_console_command::<BlinkCommand, _>(handle_blink_command)
         .add_console_command::<MqttCommand, _>(handle_mqtt_command)
         .add_console_command::<SpawnCommand, _>(handle_spawn_command)
+        .add_console_command::<SpawnDoorCommand, _>(
+            crate::console::console_systems::handle_spawn_door_command,
+        )
         .add_console_command::<LoadCommand, _>(handle_load_command)
         .add_console_command::<MoveCommand, _>(crate::console::console_systems::handle_move_command)
         .add_console_command::<PlaceBlockCommand, _>(handle_place_block_command)

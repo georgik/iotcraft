@@ -1,11 +1,11 @@
+use super::device_types::*;
+use crate::config::MqttConfig;
 use bevy::prelude::*;
 use bevy_console::ConsoleOpen;
 use log::{error, info};
 use rumqttc::{Client, Event, MqttOptions, Outgoing, QoS};
 use serde_json::json;
 use std::time::Duration;
-use super::device_types::*;
-use crate::config::MqttConfig;
 
 /// Component to mark a device as being dragged
 #[derive(Component)]
@@ -56,18 +56,18 @@ impl Plugin for DevicePositioningPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(DragState::default())
             .add_event::<DevicePositionUpdateEvent>()
-        .add_systems(
-            Update,
-            (
-                handle_device_drag_input,
-                handle_device_dragging,
-                handle_position_update_events,
-                draw_drag_gizmos,
-                update_device_info_ui,
+            .add_systems(
+                Update,
+                (
+                    handle_device_drag_input,
+                    handle_device_dragging,
+                    handle_position_update_events,
+                    draw_drag_gizmos,
+                    update_device_info_ui,
+                )
+                    .chain(),
             )
-                .chain(),
-        )
-        .add_systems(Startup, setup_device_info_ui);
+            .add_systems(Startup, setup_device_info_ui);
     }
 }
 
@@ -113,7 +113,7 @@ fn update_device_info_ui(
         if let Ok(mut visibility) = panel_query.single_mut() {
             *visibility = Visibility::Visible;
         }
-        
+
         if let Ok((device, transform)) = device_query.get(entity) {
             if let Ok(mut text) = text_query.single_mut() {
                 **text = format!(
