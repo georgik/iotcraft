@@ -4,6 +4,7 @@ use std::fs;
 use std::path::Path;
 
 use super::world_types::*;
+use crate::PendingCommands;
 use crate::camera_controllers::CameraController;
 use crate::environment::VoxelWorld;
 
@@ -358,6 +359,7 @@ fn handle_create_world_events(
     mut voxel_world: ResMut<VoxelWorld>,
     mut commands: Commands,
     mut discovered_worlds: ResMut<DiscoveredWorlds>,
+    mut pending_commands: ResMut<PendingCommands>,
 ) {
     for event in create_events.read() {
         info!("Creating new world: {}", event.world_name);
@@ -417,11 +419,41 @@ fn handle_create_world_events(
             metadata,
         });
 
+        // Execute new world script if it exists
+        let new_world_script_path = "scripts/new_world.txt";
+        if std::path::Path::new(new_world_script_path).exists() {
+            match fs::read_to_string(new_world_script_path) {
+                Ok(content) => {
+                    let script_commands = content
+                        .lines()
+                        .map(|line| line.trim())
+                        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+                        .map(|line| line.to_string())
+                        .collect::<Vec<String>>();
+
+                    info!(
+                        "Executing new world script with {} commands for world {}",
+                        script_commands.len(),
+                        event.world_name
+                    );
+                    pending_commands.commands.extend(script_commands);
+                }
+                Err(e) => {
+                    error!("Failed to read new world script: {}", e);
+                }
+            }
+        } else {
+            info!(
+                "New world script not found at {}, world will be empty",
+                new_world_script_path
+            );
+        }
+
         info!("Successfully created new world: {}", event.world_name);
     }
 }
 
-/// Creates an empty world
+/// Creates an empty world and optionally executes a script
 fn create_empty_world(
     world_name: &str,
     description: &str,

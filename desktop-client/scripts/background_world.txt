@@ -1,0 +1,22 @@
+# Background World Script
+# Creates a scenic background for menu screens
+
+# Create a smaller grass base
+wall grass -15 0 -15 15 0 15
+
+# Create rolling hills
+wall dirt -10 1 -10 -5 2 -5
+wall grass -10 3 -10 -5 3 -5
+
+wall dirt 5 1 5 10 3 10
+wall grass 5 4 5 10 4 10
+
+# Add some variety blocks for visual interest
+place stone -8 1 8
+place quartz_block 8 1 -8
+place glass_pane 0 1 12
+place cyan_terracotta 12 1 0
+
+# Create a small tower for interest
+wall stone 0 1 0 0 5 0
+place quartz_block 0 6 0

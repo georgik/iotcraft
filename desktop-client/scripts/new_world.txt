@@ -1,0 +1,33 @@
+# New World Initialization Script
+# Creates a basic world with grass plains and hills
+
+# Create a large grass plain (50x50 area)
+wall grass -25 0 -25 25 0 25
+
+# Create some hills around the plain
+# Hill 1 - Southeast
+wall dirt 15 1 15 20 3 20
+wall grass 15 4 15 20 4 20
+
+# Hill 2 - Northwest
+wall dirt -20 1 -20 -15 4 -15
+wall grass -20 5 -20 -15 5 -15
+
+# Hill 3 - Northeast
+wall dirt 18 1 -18 22 2 -14
+wall grass 18 3 -18 22 3 -14
+
+# Hill 4 - Southwest
+wall dirt -22 1 18 -18 3 22
+wall grass -22 4 18 -18 4 22
+
+# Create a small structure in the center
+wall stone -2 1 -2 2 3 2
+wall stone -1 4 -1 1 4 1
+
+# Place some decorative blocks
+place quartz_block 0 5 0
+place glass_pane 10 1 10
+place glass_pane -10 1 -10
+place cyan_terracotta 5 1 -5
+place cyan_terracotta -5 1 5

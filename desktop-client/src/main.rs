@@ -31,7 +31,7 @@ use config::MqttConfig;
 use console::*;
 use devices::*;
 use environment::*;
-use interaction::{Interactable, InteractionPlugin as MyInteractionPlugin, InteractionType};
+use interaction::InteractionPlugin as MyInteractionPlugin;
 use inventory::{InventoryPlugin, PlayerInventory, handle_give_command};
 use mqtt::{MqttPlugin, *};
 use ui::{CrosshairPlugin, ErrorIndicatorPlugin, GameState, InventoryUiPlugin, MainMenuPlugin};
@@ -911,63 +911,42 @@ fn handle_mqtt_command(
     }
 }
 
-fn handle_spawn_command(
-    mut log: ConsoleCommand<SpawnCommand>,
-    mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-    asset_server: Res<AssetServer>,
-    mut devices_tracker: ResMut<DevicesTracker>,
-) {
+fn handle_spawn_command(mut log: ConsoleCommand<SpawnCommand>, mqtt_config: Res<MqttConfig>) {
     if let Some(Ok(SpawnCommand { device_id, x, y, z })) = log.take() {
         info!("Console command: spawn {} {} {} {}", device_id, x, y, z);
 
-        // Check if device is already spawned
-        if devices_tracker.spawned_devices.contains(&device_id) {
-            reply!(log, "Device {} already spawned", device_id);
-            return;
+        // Use the same MQTT announcement system as spawn_door for consistency
+        let payload = json!({
+            "device_id": device_id,
+            "device_type": "lamp",
+            "state": "online",
+            "location": { "x": x, "y": y, "z": z }
+        })
+        .to_string();
+
+        // Create a temporary client for simulation
+        let mut mqtt_options =
+            MqttOptions::new("spawn-client", &mqtt_config.host, mqtt_config.port);
+        mqtt_options.set_keep_alive(Duration::from_secs(5));
+        let (client, mut connection) = Client::new(mqtt_options, 10);
+
+        client
+            .publish(
+                "devices/announce",
+                QoS::AtMostOnce,
+                false,
+                payload.as_bytes(),
+            )
+            .unwrap();
+
+        // Drive the event loop to ensure the message is sent
+        for notification in connection.iter() {
+            if let Ok(Event::Outgoing(Outgoing::Publish(_))) = notification {
+                break;
+            }
         }
 
-        // Create device entity
-        let cube_mesh = meshes.add(Cuboid::new(
-            crate::environment::CUBE_SIZE,
-            crate::environment::CUBE_SIZE,
-            crate::environment::CUBE_SIZE,
-        ));
-        let lamp_texture: Handle<Image> = asset_server.load("textures/lamp.webp");
-        let lamp_material = materials.add(StandardMaterial {
-            base_color_texture: Some(lamp_texture),
-            base_color: Color::srgb(0.2, 0.2, 0.2),
-            ..default()
-        });
-
-        let mut entity_commands = commands.spawn((
-            Mesh3d(cube_mesh),
-            MeshMaterial3d(lamp_material),
-            Transform::from_translation(Vec3::new(x, y, z)),
-            DeviceEntity {
-                device_id: device_id.clone(),
-                device_type: "lamp".to_string(),
-            },
-            Visibility::default(),
-        ));
-
-        // Add BlinkCube component for lamp devices so they can blink
-        entity_commands.insert(BlinkCube);
-
-        // Add Interactable component so players can interact with lamps
-        entity_commands.insert(Interactable {
-            interaction_type: InteractionType::ToggleLamp,
-        });
-
-        // Add LampState component to track lamp state
-        entity_commands.insert(crate::interaction::LampState { is_on: false });
-
-        // Track the spawned device
-        devices_tracker.spawned_devices.insert(device_id.clone());
-
-        reply!(log, "Device {} spawned at ({}, {}, {})", device_id, x, y, z);
-        info!("Device {} spawned via console", device_id);
+        reply!(log, "Spawn command sent for device {}", device_id);
     }
 }
 

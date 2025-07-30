@@ -2,6 +2,7 @@ use bevy::pbr::MeshMaterial3d;
 use bevy::prelude::*;
 
 use super::environment_types::*;
+use crate::PendingCommands;
 use crate::camera_controllers::CameraController;
 use crate::console::BlinkCube;
 use crate::mqtt::TemperatureResource;
@@ -11,7 +12,7 @@ pub struct EnvironmentPlugin;
 impl Plugin for EnvironmentPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(VoxelWorld::default())
-            .add_systems(Startup, setup_environment)
+            .add_systems(Startup, (setup_environment, setup_background_world).chain())
             .add_systems(
                 Update,
                 (
@@ -164,5 +165,37 @@ fn update_thermometer_scale(
             let scale_y = (value / 100.0).clamp(0.1, 2.0);
             transform.scale = Vec3::new(1.0, scale_y, 1.0);
         }
+    }
+}
+
+/// Setup background world by executing the background world script
+fn setup_background_world(mut pending_commands: ResMut<PendingCommands>) {
+    // Execute background world script if it exists
+    let background_script_path = "scripts/background_world.txt";
+    if std::path::Path::new(background_script_path).exists() {
+        match std::fs::read_to_string(background_script_path) {
+            Ok(content) => {
+                let commands = content
+                    .lines()
+                    .map(|line| line.trim())
+                    .filter(|line| !line.is_empty() && !line.starts_with('#'))
+                    .map(|line| line.to_string())
+                    .collect::<Vec<String>>();
+
+                info!(
+                    "Executing background world script with {} commands",
+                    commands.len()
+                );
+                pending_commands.commands.extend(commands);
+            }
+            Err(e) => {
+                error!("Failed to read background world script: {}", e);
+            }
+        }
+    } else {
+        info!(
+            "Background world script not found at {}, using default terrain",
+            background_script_path
+        );
     }
 }

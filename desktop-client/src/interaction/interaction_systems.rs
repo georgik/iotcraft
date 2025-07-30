@@ -39,7 +39,8 @@ impl Plugin for InteractionPlugin {
                     draw_interaction_cursor,
                     draw_crosshair,
                 )
-                    .chain(),
+                    .chain()
+                    .run_if(in_state(crate::ui::GameState::InGame)),
             );
     }
 }
