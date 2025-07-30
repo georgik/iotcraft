@@ -130,6 +130,13 @@ pub struct GiveCommand {
     pub count: u32,
 }
 
+#[derive(Parser, ConsoleCommand)]
+#[command(name = "test_error")]
+pub struct TestErrorCommand {
+    /// Error message to display
+    pub message: String,
+}
+
 #[derive(Resource)]
 pub struct BlinkState {
     pub blinking: bool,

@@ -113,6 +113,8 @@ fn handle_load_world_events(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     asset_server: Res<AssetServer>,
+    mut error_resource: ResMut<crate::ui::error_indicator::ErrorResource>,
+    time: Res<Time>,
 ) {
     for event in load_events.read() {
         info!("Loading world: {}", event.world_name);
@@ -235,11 +237,29 @@ fn handle_load_world_events(
                                 info!("Successfully loaded world: {}", event.world_name);
                             }
                             Err(e) => {
-                                error!("Failed to parse world data for {}: {}", event.world_name, e)
+                                let error_message = format!(
+                                    "Failed to parse world data for {}: {}",
+                                    event.world_name, e
+                                );
+                                error!("{}", error_message);
+
+                                // Trigger error indicator
+                                error_resource.indicator_on = true;
+                                error_resource.last_error_time = time.elapsed_secs();
+                                error_resource.messages.push(error_message);
                             }
                         }
                     }
-                    Err(e) => error!("Failed to read world data for {}: {}", event.world_name, e),
+                    Err(e) => {
+                        let error_message =
+                            format!("Failed to read world data for {}: {}", event.world_name, e);
+                        error!("{}", error_message);
+
+                        // Trigger error indicator
+                        error_resource.indicator_on = true;
+                        error_resource.last_error_time = time.elapsed_secs();
+                        error_resource.messages.push(error_message);
+                    }
                 }
             } else {
                 warn!("World data file not found for: {}", event.world_name);

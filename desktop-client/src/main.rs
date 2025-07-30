@@ -1,3 +1,4 @@
+use bevy::asset::Assets;
 use bevy::prelude::*;
 use bevy::window::CursorGrabMode;
 use bevy_console::{
@@ -22,6 +23,7 @@ mod inventory;
 mod mqtt;
 mod script;
 mod ui;
+
 mod world;
 
 // Re-export types for easier access
@@ -32,7 +34,7 @@ use environment::*;
 use interaction::{Interactable, InteractionPlugin as MyInteractionPlugin, InteractionType};
 use inventory::{InventoryPlugin, PlayerInventory, handle_give_command};
 use mqtt::{MqttPlugin, *};
-use ui::{CrosshairPlugin, GameState, InventoryUiPlugin, MainMenuPlugin};
+use ui::{CrosshairPlugin, ErrorIndicatorPlugin, GameState, InventoryUiPlugin, MainMenuPlugin};
 use world::WorldPlugin;
 
 // Define handle_blink_command function for console
@@ -827,6 +829,7 @@ fn main() {
         .add_plugins(InventoryPlugin)
         .add_plugins(InventoryUiPlugin)
         .add_plugins(CrosshairPlugin)
+        .add_plugins(ErrorIndicatorPlugin)
         .add_plugins(MainMenuPlugin)
         .add_plugins(WorldPlugin)
         .init_state::<GameState>()
@@ -852,6 +855,9 @@ fn main() {
         .add_console_command::<SaveMapCommand, _>(handle_save_map_command)
         .add_console_command::<LoadMapCommand, _>(handle_load_map_command)
         .add_console_command::<GiveCommand, _>(handle_give_command)
+        .add_console_command::<TestErrorCommand, _>(
+            crate::console::console_systems::handle_test_error_command,
+        )
         .insert_resource(BlinkState::default())
         // .add_systems(Update, draw_cursor) // Disabled: InteractionPlugin handles cursor drawing
         .add_systems(

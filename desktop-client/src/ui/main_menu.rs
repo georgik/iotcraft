@@ -79,6 +79,10 @@ pub struct ReturnToGameButton;
 #[derive(Component)]
 pub struct SaveAndQuitButton;
 
+/// Component for the Quit to Menu button
+#[derive(Component)]
+pub struct QuitToMenuButton;
+
 /// Game state enum
 #[derive(Debug, Clone, Eq, PartialEq, Hash, States, Default)]
 pub enum GameState {
@@ -423,6 +427,7 @@ fn setup_gameplay_menu(mut commands: Commands, mut windows: Query<&mut Window>) 
                     parent.spawn(Text::new("Return to Game"));
                 });
 
+            // Save and Quit to Main Menu
             parent
                 .spawn((
                     Button,
@@ -438,6 +443,24 @@ fn setup_gameplay_menu(mut commands: Commands, mut windows: Query<&mut Window>) 
                 ))
                 .with_children(|parent| {
                     parent.spawn(Text::new("Save and Quit to Main Menu"));
+                });
+
+            // Quit to Main Menu (without saving)
+            parent
+                .spawn((
+                    Button,
+                    Node {
+                        width: Val::Px(350.0),
+                        height: Val::Px(50.0),
+                        justify_content: JustifyContent::Center,
+                        align_items: AlignItems::Center,
+                        ..default()
+                    },
+                    BackgroundColor(Color::srgb(0.15, 0.15, 0.15)),
+                    QuitToMenuButton,
+                ))
+                .with_children(|parent| {
+                    parent.spawn(Text::new("Quit to Main Menu (No Save)"));
                 });
         });
 }
@@ -458,6 +481,15 @@ fn gameplay_menu_interaction(
         (
             Changed<Interaction>,
             With<SaveAndQuitButton>,
+            Without<ReturnToGameButton>,
+        ),
+    >,
+    mut quit_to_menu_query: Query<
+        (&Interaction, &mut BackgroundColor),
+        (
+            Changed<Interaction>,
+            With<QuitToMenuButton>,
+            Without<SaveAndQuitButton>,
             Without<ReturnToGameButton>,
         ),
     >,
@@ -490,6 +522,22 @@ fn gameplay_menu_interaction(
                         world_name: current_world.name.clone(),
                     });
                 }
+                game_state.set(GameState::MainMenu);
+            }
+            Interaction::Hovered => {
+                *color = Color::srgb(0.25, 0.25, 0.25).into();
+            }
+            Interaction::None => {
+                *color = Color::srgb(0.15, 0.15, 0.15).into();
+            }
+        }
+    }
+
+    for (interaction, mut color) in quit_to_menu_query.iter_mut() {
+        match *interaction {
+            Interaction::Pressed => {
+                *color = Color::srgb(0.75, 0.35, 0.35).into();
+                info!("Quitting to main menu without saving");
                 game_state.set(GameState::MainMenu);
             }
             Interaction::Hovered => {
