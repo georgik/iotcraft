@@ -20,7 +20,6 @@ pub struct LogoCube;
 /// Component for voxel blocks in the world
 #[derive(Component)]
 pub struct VoxelBlock {
-    pub block_type: BlockType,
     pub position: IVec3,
 }
 
@@ -39,14 +38,12 @@ pub enum BlockType {
 #[derive(Resource)]
 pub struct VoxelWorld {
     pub blocks: HashMap<IVec3, BlockType>,
-    pub chunk_size: i32,
 }
 
 impl Default for VoxelWorld {
     fn default() -> Self {
         Self {
             blocks: HashMap::new(),
-            chunk_size: 16,
         }
     }
 }
@@ -60,11 +57,6 @@ impl VoxelWorld {
     /// Remove a block at the given position
     pub fn remove_block(&mut self, position: &IVec3) -> Option<BlockType> {
         self.blocks.remove(position)
-    }
-
-    /// Get block type at position
-    pub fn get_block(&self, position: &IVec3) -> Option<BlockType> {
-        self.blocks.get(position).copied()
     }
 
     /// Check if there's a block at the given position

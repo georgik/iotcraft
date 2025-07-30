@@ -62,7 +62,6 @@ pub struct DeviceEntity {
 #[derive(Component, Clone, Debug)]
 pub struct DoorState {
     pub is_open: bool,
-    pub device_id: String,
 }
 
 #[derive(Component, Clone, Debug)]

@@ -12,7 +12,7 @@ use crate::devices::{
     device_types::{DoorState, OriginalPosition},
 };
 use crate::environment::Ground;
-use crate::environment::{VoxelBlock, VoxelWorld};
+use crate::environment::VoxelWorld;
 use crate::inventory::{ItemType, PlaceBlockEvent, PlayerInventory};
 
 pub struct InteractionPlugin;
@@ -39,7 +39,8 @@ impl Plugin for InteractionPlugin {
                     draw_interaction_cursor,
                     draw_crosshair,
                 )
-                    .chain(),
+                    .chain()
+                    .run_if(in_state(crate::ui::GameState::InGame)),
             );
     }
 }
@@ -59,15 +60,9 @@ fn setup_lamp_materials(
             ..default()
         }),
         lamp_on: materials.add(StandardMaterial {
-            base_color_texture: Some(lamp_texture.clone()),
+            base_color_texture: Some(lamp_texture),
             base_color: Color::srgb(1.0, 0.9, 0.6), // Bright yellow when on
             emissive: LinearRgba::new(0.8, 0.7, 0.4, 1.0),
-            ..default()
-        }),
-        hovered: materials.add(StandardMaterial {
-            base_color_texture: Some(lamp_texture),
-            base_color: Color::srgb(0.6, 0.8, 1.0), // Blue tint when hovered
-            emissive: LinearRgba::new(0.1, 0.2, 0.3, 1.0),
             ..default()
         }),
     };
@@ -78,30 +73,12 @@ fn setup_lamp_materials(
 /// Setup material resources for different door states
 fn setup_door_materials(
     mut commands: Commands,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-    asset_server: Res<AssetServer>,
+    _materials: ResMut<Assets<StandardMaterial>>,
+    _asset_server: Res<AssetServer>,
 ) {
-    let door_texture: Handle<Image> = asset_server.load("textures/door.webp");
-
-    let door_materials = DoorMaterials {
-        door_closed: materials.add(StandardMaterial {
-            base_color_texture: Some(door_texture.clone()),
-            base_color: Color::srgb(0.8, 0.6, 0.4), // Wood-like brown when closed
-            ..default()
-        }),
-        door_open: materials.add(StandardMaterial {
-            base_color_texture: Some(door_texture.clone()),
-            base_color: Color::srgb(0.6, 0.8, 0.4), // Greenish tint when open
-            ..default()
-        }),
-        hovered: materials.add(StandardMaterial {
-            base_color_texture: Some(door_texture),
-            base_color: Color::srgb(0.6, 0.8, 1.0), // Blue tint when hovered
-            emissive: LinearRgba::new(0.1, 0.2, 0.3, 1.0),
-            ..default()
-        }),
-    };
-
+    // Currently doors use transform-based animations instead of material changes
+    // Create empty resource for potential future use
+    let door_materials = DoorMaterials {};
     commands.insert_resource(door_materials);
 }
 
@@ -253,7 +230,7 @@ fn draw_crosshair(
     );
 
     // Draw ghost block if we have inventory item and valid placement position
-    if let Some(selected_item) = inventory.get_selected_item() {
+    if let Some(_selected_item) = inventory.get_selected_item() {
         if let Some(ghost_pos) = ghost_state.position {
             if ghost_state.can_place {
                 let position = ghost_pos.as_vec3();
@@ -303,7 +280,7 @@ fn handle_interaction_input(
     camera_query: Single<(&Camera, &GlobalTransform)>,
     windows: Query<&Window>,
     console_open: Res<ConsoleOpen>,
-    voxel_world: Res<VoxelWorld>,
+    _voxel_world: Res<VoxelWorld>,
     ghost_state: Res<GhostBlockState>,
 ) {
     // Don't interact when console is open
@@ -336,7 +313,7 @@ fn handle_interaction_input(
             let Some(cursor_position) = window.cursor_position() else {
                 return;
             };
-            let Ok(ray) = camera.viewport_to_world(camera_transform, cursor_position) else {
+            let Ok(_ray) = camera.viewport_to_world(camera_transform, cursor_position) else {
                 return;
             };
 
@@ -344,7 +321,6 @@ fn handle_interaction_input(
                 if ghost_state.can_place {
                     place_block_events.write(PlaceBlockEvent {
                         position: placement_position,
-                        block_type,
                     });
 
                     info!("Placed {:?} at {:?}", block_type, placement_position);
@@ -427,7 +403,6 @@ fn handle_lamp_toggle_events(
                 // Add lamp state component if it doesn't exist
                 commands.entity(entity).insert(LampState {
                     is_on: event.new_state,
-                    device_id: event.device_id.clone(),
                 });
             }
 
@@ -505,7 +480,6 @@ fn handle_door_toggle_events(
                 // Add door state component if it doesn't exist
                 commands.entity(entity).insert(DoorState {
                     is_open: event.new_state,
-                    device_id: event.device_id.clone(),
                 });
             }
         }
@@ -518,7 +492,7 @@ fn update_door_visuals(
         (&DoorState, &mut Transform, &OriginalPosition),
         (Changed<DoorState>, With<DeviceEntity>),
     >,
-    device_query: Query<&DeviceEntity>,
+    _device_query: Query<&DeviceEntity>,
 ) {
     // Update rotation for doors that changed state
     for (door_state, mut transform, original_pos) in door_query.iter_mut() {

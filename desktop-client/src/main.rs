@@ -1,3 +1,4 @@
+use bevy::asset::Assets;
 use bevy::prelude::*;
 use bevy::window::CursorGrabMode;
 use bevy_console::{
@@ -23,15 +24,18 @@ mod mqtt;
 mod script;
 mod ui;
 
+mod world;
+
 // Re-export types for easier access
 use config::MqttConfig;
 use console::*;
 use devices::*;
 use environment::*;
-use interaction::{Interactable, InteractionPlugin as MyInteractionPlugin, InteractionType};
+use interaction::InteractionPlugin as MyInteractionPlugin;
 use inventory::{InventoryPlugin, PlayerInventory, handle_give_command};
 use mqtt::{MqttPlugin, *};
-use ui::{CrosshairPlugin, GameState, InventoryUiPlugin, MainMenuPlugin};
+use ui::{CrosshairPlugin, ErrorIndicatorPlugin, GameState, InventoryUiPlugin, MainMenuPlugin};
+use world::WorldPlugin;
 
 // Define handle_blink_command function for console
 fn handle_blink_command(
@@ -230,7 +234,6 @@ fn handle_place_block_command(
             MeshMaterial3d(material),
             Transform::from_translation(Vec3::new(x as f32, y as f32, z as f32)),
             VoxelBlock {
-                block_type,
                 position: IVec3::new(x, y, z),
             },
         ));
@@ -296,7 +299,6 @@ fn handle_wall_command(
                         MeshMaterial3d(material.clone()),
                         Transform::from_translation(Vec3::new(x as f32, y as f32, z as f32)),
                         VoxelBlock {
-                            block_type: block_type_enum,
                             position: IVec3::new(x, y, z),
                         },
                     ));
@@ -409,7 +411,6 @@ fn handle_load_map_command(
                             position.z as f32,
                         )),
                         VoxelBlock {
-                            block_type: *block_type,
                             position: *position,
                         },
                     ));
@@ -447,6 +448,7 @@ fn execute_pending_commands(
     mut materials: ResMut<Assets<StandardMaterial>>,
     asset_server: Res<AssetServer>,
     query: Query<(Entity, &VoxelBlock)>,
+    mut inventory: ResMut<PlayerInventory>,
 ) {
     for command in pending_commands.commands.drain(..) {
         info!("Executing queued command: {}", command);
@@ -661,7 +663,6 @@ fn execute_pending_commands(
                                         x as f32, y as f32, z as f32,
                                     )),
                                     VoxelBlock {
-                                        block_type,
                                         position: IVec3::new(x, y, z),
                                     },
                                 ));
@@ -700,6 +701,38 @@ fn execute_pending_commands(
                                 }
                             }
                         }
+                    }
+                }
+            }
+            "give" => {
+                if parts.len() == 3 {
+                    if let Ok(quantity) = parts[2].parse::<usize>() {
+                        let item_type_str = parts[1];
+                        let item_type = match item_type_str {
+                            "grass" => crate::inventory::ItemType::Block(BlockType::Grass),
+                            "dirt" => crate::inventory::ItemType::Block(BlockType::Dirt),
+                            "stone" => crate::inventory::ItemType::Block(BlockType::Stone),
+                            "quartz_block" => {
+                                crate::inventory::ItemType::Block(BlockType::QuartzBlock)
+                            }
+                            "glass_pane" => crate::inventory::ItemType::Block(BlockType::GlassPane),
+                            "cyan_terracotta" => {
+                                crate::inventory::ItemType::Block(BlockType::CyanTerracotta)
+                            }
+                            _ => {
+                                print_console_line.write(PrintConsoleLine::new(format!(
+                                    "Invalid item type: {}",
+                                    item_type_str
+                                )));
+                                continue;
+                            }
+                        };
+
+                        inventory.add_items(item_type, quantity as u32);
+                        print_console_line.write(PrintConsoleLine::new(format!(
+                            "Added {} x {}",
+                            quantity, item_type_str
+                        )));
                     }
                 }
             }
@@ -767,7 +800,6 @@ fn execute_pending_commands(
                                                                 x as f32, y as f32, z as f32,
                                                             )),
                                                             VoxelBlock {
-                                                                block_type: block_type_enum,
                                                                 position: IVec3::new(x, y, z),
                                                             },
                                                         ));
@@ -825,7 +857,9 @@ fn main() {
         .add_plugins(InventoryPlugin)
         .add_plugins(InventoryUiPlugin)
         .add_plugins(CrosshairPlugin)
+        .add_plugins(ErrorIndicatorPlugin)
         .add_plugins(MainMenuPlugin)
+        .add_plugins(WorldPlugin)
         .init_state::<GameState>()
         .insert_resource(ConsoleConfiguration {
             keys: vec![KeyCode::F12],
@@ -849,6 +883,9 @@ fn main() {
         .add_console_command::<SaveMapCommand, _>(handle_save_map_command)
         .add_console_command::<LoadMapCommand, _>(handle_load_map_command)
         .add_console_command::<GiveCommand, _>(handle_give_command)
+        .add_console_command::<TestErrorCommand, _>(
+            crate::console::console_systems::handle_test_error_command,
+        )
         .insert_resource(BlinkState::default())
         // .add_systems(Update, draw_cursor) // Disabled: InteractionPlugin handles cursor drawing
         .add_systems(
@@ -862,7 +899,10 @@ fn main() {
         .add_systems(Update, manage_camera_controller)
         .add_systems(Update, handle_console_t_key.after(ConsoleSet::Commands))
         .add_systems(Update, handle_mouse_capture.after(ConsoleSet::Commands))
-        .add_systems(Update, handle_esc_key.after(ConsoleSet::Commands))
+        .add_systems(
+            Update,
+            crate::console::esc_handling::handle_esc_key.after(ConsoleSet::Commands),
+        )
         .insert_resource(script_executor)
         .insert_resource(PendingCommands {
             commands: Vec::new(),
@@ -871,51 +911,6 @@ fn main() {
         .add_systems(Update, execute_pending_commands)
         .add_systems(Update, handle_inventory_input)
         .run();
-}
-
-fn draw_cursor(
-    camera_query: Single<(&Camera, &GlobalTransform)>,
-    ground: Single<&GlobalTransform, With<Ground>>,
-    windows: Query<&Window>,
-    mut gizmos: Gizmos,
-    console_open: Res<ConsoleOpen>,
-) {
-    if console_open.open {
-        return;
-    }
-
-    let Ok(windows) = windows.single() else {
-        return;
-    };
-
-    let (camera, camera_transform) = *camera_query;
-
-    let Some(cursor_position) = windows.cursor_position() else {
-        return;
-    };
-
-    // Calculate a ray pointing from the camera into the world based on the cursor's position.
-    let Ok(ray) = camera.viewport_to_world(camera_transform, cursor_position) else {
-        return;
-    };
-
-    // Calculate if and where the ray is hitting the ground plane.
-    let Some(distance) =
-        ray.intersect_plane(ground.translation(), InfinitePlane3d::new(ground.up()))
-    else {
-        return;
-    };
-    let point = ray.get_point(distance);
-
-    // Draw a circle just above the ground plane at that position.
-    gizmos.circle(
-        Isometry3d::new(
-            point + ground.up() * 0.01,
-            Quat::from_rotation_arc(Vec3::Z, ground.up().as_vec3()),
-        ),
-        0.2,
-        Color::WHITE,
-    );
 }
 
 fn handle_mqtt_command(
@@ -949,66 +944,42 @@ fn handle_mqtt_command(
     }
 }
 
-fn handle_spawn_command(
-    mut log: ConsoleCommand<SpawnCommand>,
-    mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-    asset_server: Res<AssetServer>,
-    mut devices_tracker: ResMut<DevicesTracker>,
-) {
+fn handle_spawn_command(mut log: ConsoleCommand<SpawnCommand>, mqtt_config: Res<MqttConfig>) {
     if let Some(Ok(SpawnCommand { device_id, x, y, z })) = log.take() {
         info!("Console command: spawn {} {} {} {}", device_id, x, y, z);
 
-        // Check if device is already spawned
-        if devices_tracker.spawned_devices.contains(&device_id) {
-            reply!(log, "Device {} already spawned", device_id);
-            return;
+        // Use the same MQTT announcement system as spawn_door for consistency
+        let payload = json!({
+            "device_id": device_id,
+            "device_type": "lamp",
+            "state": "online",
+            "location": { "x": x, "y": y, "z": z }
+        })
+        .to_string();
+
+        // Create a temporary client for simulation
+        let mut mqtt_options =
+            MqttOptions::new("spawn-client", &mqtt_config.host, mqtt_config.port);
+        mqtt_options.set_keep_alive(Duration::from_secs(5));
+        let (client, mut connection) = Client::new(mqtt_options, 10);
+
+        client
+            .publish(
+                "devices/announce",
+                QoS::AtMostOnce,
+                false,
+                payload.as_bytes(),
+            )
+            .unwrap();
+
+        // Drive the event loop to ensure the message is sent
+        for notification in connection.iter() {
+            if let Ok(Event::Outgoing(Outgoing::Publish(_))) = notification {
+                break;
+            }
         }
 
-        // Create device entity
-        let cube_mesh = meshes.add(Cuboid::new(
-            crate::environment::CUBE_SIZE,
-            crate::environment::CUBE_SIZE,
-            crate::environment::CUBE_SIZE,
-        ));
-        let lamp_texture: Handle<Image> = asset_server.load("textures/lamp.webp");
-        let lamp_material = materials.add(StandardMaterial {
-            base_color_texture: Some(lamp_texture),
-            base_color: Color::srgb(0.2, 0.2, 0.2),
-            ..default()
-        });
-
-        let mut entity_commands = commands.spawn((
-            Mesh3d(cube_mesh),
-            MeshMaterial3d(lamp_material),
-            Transform::from_translation(Vec3::new(x, y, z)),
-            DeviceEntity {
-                device_id: device_id.clone(),
-                device_type: "lamp".to_string(),
-            },
-            Visibility::default(),
-        ));
-
-        // Add BlinkCube component for lamp devices so they can blink
-        entity_commands.insert(BlinkCube);
-
-        // Add Interactable component so players can interact with lamps
-        entity_commands.insert(Interactable {
-            interaction_type: InteractionType::ToggleLamp,
-        });
-
-        // Add LampState component to track lamp state
-        entity_commands.insert(crate::interaction::LampState {
-            is_on: false,
-            device_id: device_id.clone(),
-        });
-
-        // Track the spawned device
-        devices_tracker.spawned_devices.insert(device_id.clone());
-
-        reply!(log, "Device {} spawned at ({}, {}, {})", device_id, x, y, z);
-        info!("Device {} spawned via console", device_id);
+        reply!(log, "Spawn command sent for device {}", device_id);
     }
 }
 

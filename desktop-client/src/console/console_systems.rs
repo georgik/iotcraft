@@ -50,7 +50,7 @@ pub fn handle_blink_command(
     }
 }
 
-pub fn handle_mqtt_command(
+fn handle_mqtt_command(
     mut log: ConsoleCommand<MqttCommand>,
     temperature: Res<TemperatureResource>,
 ) {
@@ -221,5 +221,23 @@ pub fn handle_move_command(
             reply!(log, "Device {} not found", device_id);
             info!("Device {} not found for move command", device_id);
         }
+    }
+}
+
+pub fn handle_test_error_command(
+    mut log: ConsoleCommand<TestErrorCommand>,
+    mut error_resource: ResMut<crate::ui::error_indicator::ErrorResource>,
+    time: Res<Time>,
+) {
+    if let Some(Ok(TestErrorCommand { message })) = log.take() {
+        error!("Test error command: {}", message);
+
+        // Trigger the error indicator
+        error_resource.indicator_on = true;
+        error_resource.last_error_time = time.elapsed_secs();
+        error_resource.messages.push(message.clone());
+
+        // The error message will appear in the UI indicator and in the console reply
+        reply!(log, "ERROR: {}", message);
     }
 }

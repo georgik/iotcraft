@@ -35,51 +35,49 @@ pub fn place_block_system(
 ) {
     for event in events.read() {
         if let Some(selected_item) = inventory.get_selected_item_mut() {
-            if let ItemType::Block(block_type) = selected_item.item_type {
-                if selected_item.count > 0 {
-                    // Update the voxel world data
-                    voxel_world.set_block(event.position, block_type);
+            let ItemType::Block(block_type) = selected_item.item_type;
+            if selected_item.count > 0 {
+                // Update the voxel world data
+                voxel_world.set_block(event.position, block_type);
+                info!(
+                    "Placed block {:?} at {:?} in VoxelWorld",
+                    block_type, event.position
+                );
 
-                    // Spawn the visual block
-                    let cube_mesh = meshes.add(Cuboid::new(
-                        crate::environment::CUBE_SIZE,
-                        crate::environment::CUBE_SIZE,
-                        crate::environment::CUBE_SIZE,
-                    ));
-                    let texture_path = match block_type {
-                        BlockType::Grass => "textures/grass.webp",
-                        BlockType::Dirt => "textures/dirt.webp",
-                        BlockType::Stone => "textures/stone.webp",
-                        BlockType::QuartzBlock => "textures/quartz_block.webp",
-                        BlockType::GlassPane => "textures/glass_pane.webp",
-                        BlockType::CyanTerracotta => "textures/cyan_terracotta.webp",
-                    };
-                    let texture: Handle<Image> = asset_server.load(texture_path);
-                    let material = materials.add(StandardMaterial {
-                        base_color_texture: Some(texture),
-                        ..default()
-                    });
+                // Spawn the visual block
+                let cube_mesh = meshes.add(Cuboid::new(
+                    crate::environment::CUBE_SIZE,
+                    crate::environment::CUBE_SIZE,
+                    crate::environment::CUBE_SIZE,
+                ));
+                let texture_path = match block_type {
+                    BlockType::Grass => "textures/grass.webp",
+                    BlockType::Dirt => "textures/dirt.webp",
+                    BlockType::Stone => "textures/stone.webp",
+                    BlockType::QuartzBlock => "textures/quartz_block.webp",
+                    BlockType::GlassPane => "textures/glass_pane.webp",
+                    BlockType::CyanTerracotta => "textures/cyan_terracotta.webp",
+                };
+                let texture: Handle<Image> = asset_server.load(texture_path);
+                let material = materials.add(StandardMaterial {
+                    base_color_texture: Some(texture),
+                    ..default()
+                });
 
-                    commands.spawn((
-                        Mesh3d(cube_mesh),
-                        MeshMaterial3d(material),
-                        Transform::from_translation(Vec3::new(
-                            event.position.x as f32,
-                            event.position.y as f32,
-                            event.position.z as f32,
-                        )),
-                        crate::environment::VoxelBlock {
-                            block_type,
-                            position: event.position,
-                        },
-                    ));
+                commands.spawn((
+                    Mesh3d(cube_mesh),
+                    MeshMaterial3d(material),
+                    Transform::from_translation(event.position.as_vec3()),
+                    crate::environment::VoxelBlock {
+                        position: event.position,
+                    },
+                ));
 
-                    // Remove item from inventory
-                    selected_item.remove(1);
+                // Remove item from inventory
+                selected_item.remove(1);
 
-                    if selected_item.is_empty() {
-                        inventory.clear_selected_item();
-                    }
+                if selected_item.is_empty() {
+                    inventory.clear_selected_item();
                 }
             }
         }
