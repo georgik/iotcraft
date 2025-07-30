@@ -202,20 +202,20 @@ fn update_ghost_block_preview(
     ghost_state.position = None;
     ghost_state.can_place = false;
 
-    // Perform precise raycast into the voxel world
+    // Perform precise raycast to find which block face is being looked at.
+    let mut last_pos = (ray.origin + ray.direction * min_distance).as_ivec3();
     let mut current_distance = min_distance;
     while current_distance <= max_distance {
         let check_position = (ray.origin + ray.direction * current_distance).as_ivec3();
-
         if voxel_world.is_block_at(check_position) {
-            let placement_position = check_position + IVec3::new(0, 1, 0);
-
-            if !voxel_world.is_block_at(placement_position) {
-                ghost_state.position = Some(placement_position);
+            // Hit a block. The placement position is the last position that was air.
+            if !voxel_world.is_block_at(last_pos) {
+                ghost_state.position = Some(last_pos);
                 ghost_state.can_place = true;
             }
             break;
         }
+        last_pos = check_position;
         current_distance += step_size;
     }
 }
@@ -304,6 +304,7 @@ fn handle_interaction_input(
     windows: Query<&Window>,
     console_open: Res<ConsoleOpen>,
     voxel_world: Res<VoxelWorld>,
+    ghost_state: Res<GhostBlockState>,
 ) {
     // Don't interact when console is open
     if console_open.open {
@@ -339,31 +340,8 @@ fn handle_interaction_input(
                 return;
             };
 
-            // Use the same improved raycasting as ghost block preview
-            let min_distance = 2.0; // Minimum distance from camera
-            let max_distance = 8.0; // Maximum reach distance
-            let step_size = 0.1; // Fine-grained raycast steps
-
-            // Perform precise raycast into the voxel world
-            let mut hit = None;
-            let mut current_distance = min_distance;
-            while current_distance <= max_distance {
-                let check_position = (ray.origin + ray.direction * current_distance).as_ivec3();
-                if voxel_world.is_block_at(check_position) {
-                    hit = Some(check_position);
-                    break;
-                }
-                current_distance += step_size;
-            }
-
-            if let Some(hit_position) = hit {
-                // Calculate the position to place the block
-                // For simplicity, we're placing it directly above the hit block
-                let placement_position = hit_position + IVec3::new(0, 1, 0);
-
-                // Ensure the space is empty
-                if !voxel_world.is_block_at(placement_position) {
-                    // Write a place block event
+            if let Some(placement_position) = ghost_state.position {
+                if ghost_state.can_place {
                     place_block_events.write(PlaceBlockEvent {
                         position: placement_position,
                         block_type,
