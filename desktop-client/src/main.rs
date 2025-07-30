@@ -448,6 +448,7 @@ fn execute_pending_commands(
     mut materials: ResMut<Assets<StandardMaterial>>,
     asset_server: Res<AssetServer>,
     query: Query<(Entity, &VoxelBlock)>,
+    mut inventory: ResMut<PlayerInventory>,
 ) {
     for command in pending_commands.commands.drain(..) {
         info!("Executing queued command: {}", command);
@@ -700,6 +701,38 @@ fn execute_pending_commands(
                                 }
                             }
                         }
+                    }
+                }
+            }
+            "give" => {
+                if parts.len() == 3 {
+                    if let Ok(quantity) = parts[2].parse::<usize>() {
+                        let item_type_str = parts[1];
+                        let item_type = match item_type_str {
+                            "grass" => crate::inventory::ItemType::Block(BlockType::Grass),
+                            "dirt" => crate::inventory::ItemType::Block(BlockType::Dirt),
+                            "stone" => crate::inventory::ItemType::Block(BlockType::Stone),
+                            "quartz_block" => {
+                                crate::inventory::ItemType::Block(BlockType::QuartzBlock)
+                            }
+                            "glass_pane" => crate::inventory::ItemType::Block(BlockType::GlassPane),
+                            "cyan_terracotta" => {
+                                crate::inventory::ItemType::Block(BlockType::CyanTerracotta)
+                            }
+                            _ => {
+                                print_console_line.write(PrintConsoleLine::new(format!(
+                                    "Invalid item type: {}",
+                                    item_type_str
+                                )));
+                                continue;
+                            }
+                        };
+
+                        inventory.add_items(item_type, quantity as u32);
+                        print_console_line.write(PrintConsoleLine::new(format!(
+                            "Added {} x {}",
+                            quantity, item_type_str
+                        )));
                     }
                 }
             }
