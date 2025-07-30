@@ -26,7 +26,6 @@ pub struct VoxelBlockData {
     pub block_type: BlockType,
 }
 
-
 /// Complete world save data
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WorldSaveData {
@@ -72,7 +71,7 @@ pub struct SaveWorldEvent {
     pub world_name: String,
 }
 
-/// Event to request creating a new world 
+/// Event to request creating a new world
 #[derive(Event)]
 pub struct CreateWorldEvent {
     pub world_name: String,

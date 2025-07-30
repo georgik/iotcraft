@@ -1,7 +1,7 @@
 use crate::environment::BlockType;
 use bevy::prelude::*;
-use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 /// Maximum number of items that can be held in one inventory slot
 pub const MAX_STACK_SIZE: u32 = 64;
@@ -87,7 +87,7 @@ impl PlayerInventory {
             selected_slot: 0,
         }
     }
-    
+
     /// Ensure inventory has the correct number of slots
     pub fn ensure_proper_size(&mut self) {
         if self.slots.len() != INVENTORY_SIZE {

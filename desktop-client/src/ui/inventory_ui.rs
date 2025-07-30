@@ -45,12 +45,14 @@ fn update_inventory_ui(
     // Always update if inventory changed, or if this is the first run (no children yet)
     let should_update = inventory.is_changed() || {
         if let Ok(ui_root_entity) = ui_root_query.get_single() {
-            children_query.get(ui_root_entity).map_or(true, |children| children.is_empty())
+            children_query
+                .get(ui_root_entity)
+                .map_or(true, |children| children.is_empty())
         } else {
             false
         }
     };
-    
+
     if should_update {
         if let Ok(ui_root_entity) = ui_root_query.single() {
             // Clear existing children

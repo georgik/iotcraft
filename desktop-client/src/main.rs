@@ -865,7 +865,10 @@ fn main() {
         .add_systems(Update, manage_camera_controller)
         .add_systems(Update, handle_console_t_key.after(ConsoleSet::Commands))
         .add_systems(Update, handle_mouse_capture.after(ConsoleSet::Commands))
-        .add_systems(Update, crate::console::esc_handling::handle_esc_key.after(ConsoleSet::Commands))
+        .add_systems(
+            Update,
+            crate::console::esc_handling::handle_esc_key.after(ConsoleSet::Commands),
+        )
         .insert_resource(script_executor)
         .insert_resource(PendingCommands {
             commands: Vec::new(),

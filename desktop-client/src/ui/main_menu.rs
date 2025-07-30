@@ -1,5 +1,5 @@
+use crate::world::{CreateWorldEvent, DiscoveredWorlds, LoadWorldEvent, SaveWorldEvent};
 use bevy::{app::AppExit, prelude::*};
-use crate::world::{DiscoveredWorlds, LoadWorldEvent, CreateWorldEvent, SaveWorldEvent};
 
 /// Plugin for the main menu
 pub struct MainMenuPlugin;
@@ -8,8 +8,14 @@ impl Plugin for MainMenuPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(OnEnter(GameState::MainMenu), setup_main_menu)
             .add_systems(OnExit(GameState::MainMenu), despawn_main_menu)
-            .add_systems(OnEnter(GameState::WorldSelection), setup_world_selection_menu)
-            .add_systems(OnExit(GameState::WorldSelection), despawn_world_selection_menu)
+            .add_systems(
+                OnEnter(GameState::WorldSelection),
+                setup_world_selection_menu,
+            )
+            .add_systems(
+                OnExit(GameState::WorldSelection),
+                despawn_world_selection_menu,
+            )
             .add_systems(OnEnter(GameState::GameplayMenu), setup_gameplay_menu)
             .add_systems(OnExit(GameState::GameplayMenu), despawn_gameplay_menu)
             .add_systems(OnEnter(GameState::InGame), grab_cursor_on_game_start)
@@ -246,12 +252,14 @@ fn setup_world_selection_menu(mut commands: Commands, discovered_worlds: Res<Dis
             // Worlds list
             for world_info in &discovered_worlds.worlds {
                 // Format the last played time nicely
-                let last_played = if let Ok(datetime) = chrono::DateTime::parse_from_rfc3339(&world_info.metadata.last_played) {
+                let last_played = if let Ok(datetime) =
+                    chrono::DateTime::parse_from_rfc3339(&world_info.metadata.last_played)
+                {
                     datetime.format("%Y-%m-%d %H:%M").to_string()
                 } else {
                     "Unknown".to_string()
                 };
-                
+
                 parent
                     .spawn((
                         Button,
@@ -276,7 +284,7 @@ fn setup_world_selection_menu(mut commands: Commands, discovered_worlds: Res<Dis
                             },
                             TextColor(Color::WHITE),
                         ));
-                        
+
                         // Last played time on the right
                         parent.spawn((
                             Text::new(format!("Last played: {}", last_played)),
@@ -325,7 +333,11 @@ fn world_selection_interaction(
     >,
     mut create_world_query: Query<
         (&Interaction, &mut BackgroundColor),
-        (Changed<Interaction>, With<CreateWorldButton>, Without<SelectWorldButton>),
+        (
+            Changed<Interaction>,
+            With<CreateWorldButton>,
+            Without<SelectWorldButton>,
+        ),
     >,
     mut game_state: ResMut<NextState<GameState>>,
     mut load_world_events: EventWriter<LoadWorldEvent>,
@@ -335,7 +347,9 @@ fn world_selection_interaction(
         match *interaction {
             Interaction::Pressed => {
                 *color = Color::srgb(0.35, 0.75, 0.35).into();
-                load_world_events.write(LoadWorldEvent { world_name: select_button.0.clone() });
+                load_world_events.write(LoadWorldEvent {
+                    world_name: select_button.0.clone(),
+                });
                 game_state.set(GameState::InGame);
             }
             Interaction::Hovered => {
@@ -441,7 +455,11 @@ fn gameplay_menu_interaction(
     >,
     mut save_and_quit_query: Query<
         (&Interaction, &mut BackgroundColor),
-        (Changed<Interaction>, With<SaveAndQuitButton>, Without<ReturnToGameButton>),
+        (
+            Changed<Interaction>,
+            With<SaveAndQuitButton>,
+            Without<ReturnToGameButton>,
+        ),
     >,
     mut game_state: ResMut<NextState<GameState>>,
     mut save_world_events: EventWriter<SaveWorldEvent>,
@@ -468,7 +486,9 @@ fn gameplay_menu_interaction(
                 *color = Color::srgb(0.35, 0.75, 0.35).into();
                 if let Some(current_world) = current_world.as_ref() {
                     info!("Queueing save for world: {}", current_world.name);
-                    save_world_events.write(SaveWorldEvent { world_name: current_world.name.clone() });
+                    save_world_events.write(SaveWorldEvent {
+                        world_name: current_world.name.clone(),
+                    });
                 }
                 game_state.set(GameState::MainMenu);
             }

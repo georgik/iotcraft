@@ -39,7 +39,10 @@ pub fn place_block_system(
                 if selected_item.count > 0 {
                     // Update the voxel world data
                     voxel_world.set_block(event.position, block_type);
-                    info!("Placed block {:?} at {:?} in VoxelWorld", block_type, event.position);
+                    info!(
+                        "Placed block {:?} at {:?} in VoxelWorld",
+                        block_type, event.position
+                    );
 
                     // Spawn the visual block
                     let cube_mesh = meshes.add(Cuboid::new(
