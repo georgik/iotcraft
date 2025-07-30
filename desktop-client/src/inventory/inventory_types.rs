@@ -1,7 +1,6 @@
 use crate::environment::BlockType;
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 
 /// Maximum number of items that can be held in one inventory slot
 pub const MAX_STACK_SIZE: u32 = 64;
@@ -123,30 +122,6 @@ impl PlayerInventory {
         remaining
     }
 
-    /// Remove items from inventory, returns the amount actually removed
-    pub fn remove_items(&mut self, item_type: ItemType, count: u32) -> u32 {
-        let mut remaining = count;
-
-        for slot in &mut self.slots {
-            if let Some(stack) = slot {
-                if stack.item_type == item_type {
-                    let removed = stack.remove(remaining);
-                    remaining -= removed;
-
-                    if stack.is_empty() {
-                        *slot = None;
-                    }
-
-                    if remaining == 0 {
-                        break;
-                    }
-                }
-            }
-        }
-
-        count - remaining
-    }
-
     /// Get the currently selected item
     pub fn get_selected_item(&self) -> Option<&ItemStack> {
         self.slots.get(self.selected_slot)?.as_ref()
@@ -155,16 +130,6 @@ impl PlayerInventory {
     /// Get a mutable reference to the currently selected item
     pub fn get_selected_item_mut(&mut self) -> Option<&mut ItemStack> {
         self.slots.get_mut(self.selected_slot)?.as_mut()
-    }
-
-    /// Count total items of a specific type
-    pub fn count_items(&self, item_type: ItemType) -> u32 {
-        self.slots
-            .iter()
-            .filter_map(|slot| slot.as_ref())
-            .filter(|stack| stack.item_type == item_type)
-            .map(|stack| stack.count)
-            .sum()
     }
 
     /// Select a different inventory slot
@@ -193,7 +158,6 @@ pub struct GiveItemEvent {
 #[derive(Event)]
 pub struct PlaceBlockEvent {
     pub position: IVec3,
-    pub block_type: BlockType,
 }
 
 /// Event for when player tries to break a block

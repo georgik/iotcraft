@@ -234,7 +234,6 @@ fn handle_place_block_command(
             MeshMaterial3d(material),
             Transform::from_translation(Vec3::new(x as f32, y as f32, z as f32)),
             VoxelBlock {
-                block_type,
                 position: IVec3::new(x, y, z),
             },
         ));
@@ -300,7 +299,6 @@ fn handle_wall_command(
                         MeshMaterial3d(material.clone()),
                         Transform::from_translation(Vec3::new(x as f32, y as f32, z as f32)),
                         VoxelBlock {
-                            block_type: block_type_enum,
                             position: IVec3::new(x, y, z),
                         },
                     ));
@@ -413,7 +411,6 @@ fn handle_load_map_command(
                             position.z as f32,
                         )),
                         VoxelBlock {
-                            block_type: *block_type,
                             position: *position,
                         },
                     ));
@@ -665,7 +662,6 @@ fn execute_pending_commands(
                                         x as f32, y as f32, z as f32,
                                     )),
                                     VoxelBlock {
-                                        block_type,
                                         position: IVec3::new(x, y, z),
                                     },
                                 ));
@@ -771,7 +767,6 @@ fn execute_pending_commands(
                                                                 x as f32, y as f32, z as f32,
                                                             )),
                                                             VoxelBlock {
-                                                                block_type: block_type_enum,
                                                                 position: IVec3::new(x, y, z),
                                                             },
                                                         ));
@@ -885,51 +880,6 @@ fn main() {
         .run();
 }
 
-fn draw_cursor(
-    camera_query: Single<(&Camera, &GlobalTransform)>,
-    ground: Single<&GlobalTransform, With<Ground>>,
-    windows: Query<&Window>,
-    mut gizmos: Gizmos,
-    console_open: Res<ConsoleOpen>,
-) {
-    if console_open.open {
-        return;
-    }
-
-    let Ok(windows) = windows.single() else {
-        return;
-    };
-
-    let (camera, camera_transform) = *camera_query;
-
-    let Some(cursor_position) = windows.cursor_position() else {
-        return;
-    };
-
-    // Calculate a ray pointing from the camera into the world based on the cursor's position.
-    let Ok(ray) = camera.viewport_to_world(camera_transform, cursor_position) else {
-        return;
-    };
-
-    // Calculate if and where the ray is hitting the ground plane.
-    let Some(distance) =
-        ray.intersect_plane(ground.translation(), InfinitePlane3d::new(ground.up()))
-    else {
-        return;
-    };
-    let point = ray.get_point(distance);
-
-    // Draw a circle just above the ground plane at that position.
-    gizmos.circle(
-        Isometry3d::new(
-            point + ground.up() * 0.01,
-            Quat::from_rotation_arc(Vec3::Z, ground.up().as_vec3()),
-        ),
-        0.2,
-        Color::WHITE,
-    );
-}
-
 fn handle_mqtt_command(
     mut log: ConsoleCommand<MqttCommand>,
     temperature: Res<TemperatureResource>,
@@ -1011,10 +961,7 @@ fn handle_spawn_command(
         });
 
         // Add LampState component to track lamp state
-        entity_commands.insert(crate::interaction::LampState {
-            is_on: false,
-            device_id: device_id.clone(),
-        });
+        entity_commands.insert(crate::interaction::LampState { is_on: false });
 
         // Track the spawned device
         devices_tracker.spawned_devices.insert(device_id.clone());

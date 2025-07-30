@@ -60,7 +60,6 @@ fn setup_environment(
                 position.z as f32,
             )),
             VoxelBlock {
-                block_type: *block_type,
                 position: *position,
             },
         ));

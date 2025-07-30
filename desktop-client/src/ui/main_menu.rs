@@ -191,7 +191,7 @@ fn main_menu_interaction(
         ),
     >,
     mut game_state: ResMut<NextState<GameState>>,
-    mut windows: Query<&mut Window>,
+    _windows: Query<&mut Window>,
     mut exit: EventWriter<AppExit>,
 ) {
     // Handle Enter World button

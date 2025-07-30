@@ -204,10 +204,7 @@ fn handle_load_world_events(
                                         Mesh3d(cube_mesh),
                                         MeshMaterial3d(material),
                                         Transform::from_translation(pos.as_vec3()),
-                                        crate::environment::VoxelBlock {
-                                            block_type: *block_type,
-                                            position: *pos,
-                                        },
+                                        crate::environment::VoxelBlock { position: *pos },
                                     ));
                                     spawned_blocks += 1;
                                 }
@@ -226,7 +223,7 @@ fn handle_load_world_events(
                                 });
 
                                 // Set player position if camera exists
-                                if let Ok(camera_entity) = camera_query.get_single() {
+                                if let Ok(camera_entity) = camera_query.single() {
                                     commands.entity(camera_entity).insert(Transform {
                                         translation: save_data.player_position,
                                         rotation: save_data.player_rotation,
@@ -293,12 +290,11 @@ fn handle_save_world_events(
             let world_data_path = current_world.path.join("world.json");
 
             // Get current player position
-            let (player_position, player_rotation) =
-                if let Ok(transform) = camera_query.get_single() {
-                    (transform.translation, transform.rotation)
-                } else {
-                    (Vec3::new(0.0, 2.0, 0.0), Quat::IDENTITY)
-                };
+            let (player_position, player_rotation) = if let Ok(transform) = camera_query.single() {
+                (transform.translation, transform.rotation)
+            } else {
+                (Vec3::new(0.0, 2.0, 0.0), Quat::IDENTITY)
+            };
 
             // Convert blocks from HashMap to Vec for serialization
             info!(

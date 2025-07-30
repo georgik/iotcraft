@@ -1,6 +1,5 @@
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::path::PathBuf;
 
 use crate::environment::BlockType;
@@ -86,24 +85,6 @@ impl Default for WorldMetadata {
             created_at: chrono::Utc::now().to_rfc3339(),
             last_played: chrono::Utc::now().to_rfc3339(),
             version: "1.0.0".to_string(),
-        }
-    }
-}
-
-impl WorldSaveData {
-    pub fn new(name: String, description: String) -> Self {
-        Self {
-            metadata: WorldMetadata {
-                name,
-                description,
-                created_at: chrono::Utc::now().to_rfc3339(),
-                last_played: chrono::Utc::now().to_rfc3339(),
-                version: "1.0.0".to_string(),
-            },
-            blocks: Vec::new(),
-            player_position: Vec3::new(0.0, 2.0, 0.0),
-            player_rotation: Quat::IDENTITY,
-            inventory: PlayerInventory::default(),
         }
     }
 }

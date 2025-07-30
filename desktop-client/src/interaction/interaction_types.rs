@@ -18,7 +18,6 @@ pub enum InteractionType {
 #[derive(Component)]
 pub struct LampState {
     pub is_on: bool,
-    pub device_id: String,
 }
 
 /// Event sent when a door state should be changed
@@ -72,13 +71,11 @@ pub struct PlayerHand;
 pub struct LampMaterials {
     pub lamp_off: Handle<StandardMaterial>,
     pub lamp_on: Handle<StandardMaterial>,
-    pub hovered: Handle<StandardMaterial>,
 }
 
-/// Material handles for door states
+/// Material handles for door states  
 #[derive(Resource)]
 pub struct DoorMaterials {
-    pub door_closed: Handle<StandardMaterial>,
-    pub door_open: Handle<StandardMaterial>,
-    pub hovered: Handle<StandardMaterial>,
+    // Currently unused - doors use transform-based animations instead of material changes
+    // Keeping the struct for potential future use
 }

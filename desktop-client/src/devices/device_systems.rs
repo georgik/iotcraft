@@ -93,20 +93,15 @@ pub fn listen_for_device_announcements(
                                     entity_commands.insert(Interactable {
                                         interaction_type: InteractionType::ToggleLamp,
                                     });
-                                    entity_commands.insert(crate::interaction::LampState {
-                                        is_on: false,
-                                        device_id: device_id.to_string(),
-                                    });
+                                    entity_commands
+                                        .insert(crate::interaction::LampState { is_on: false });
                                 }
                                 DeviceType::Door => {
                                     entity_commands.insert(Interactable {
                                         interaction_type: InteractionType::ToggleDoor,
                                     });
                                     entity_commands.insert(
-                                        crate::devices::device_types::DoorState {
-                                            is_open: false,
-                                            device_id: device_id.to_string(),
-                                        },
+                                        crate::devices::device_types::DoorState { is_open: false },
                                     );
                                     entity_commands.insert(
                                         crate::devices::device_types::OriginalPosition {
