@@ -16,13 +16,9 @@ pub fn handle_esc_key(
 
     match current_state.get() {
         GameState::InGame => {
-            game_state.set(GameState::MainMenu);
-
-            // Release cursor
-            for mut window in &mut windows {
-                window.cursor_options.grab_mode = bevy::window::CursorGrabMode::None;
-                window.cursor_options.visible = true;
-            }
+            // Console escape handler should not interfere with gameplay menu
+            // The MainMenuPlugin now handles ESC in InGame state
+            return;
         }
         GameState::ConsoleOpen => {
             // Close console and return to game

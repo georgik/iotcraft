@@ -1,6 +1,7 @@
 use crate::environment::BlockType;
 use bevy::prelude::*;
 use std::collections::HashMap;
+use serde::{Deserialize, Serialize};
 
 /// Maximum number of items that can be held in one inventory slot
 pub const MAX_STACK_SIZE: u32 = 64;
@@ -9,7 +10,7 @@ pub const MAX_STACK_SIZE: u32 = 64;
 pub const INVENTORY_SIZE: usize = 36; // 9x4 like Minecraft
 
 /// Represents an item that can be held in inventory
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ItemType {
     Block(BlockType),
     // Future items like tools, etc. can be added here
@@ -32,7 +33,7 @@ impl ItemType {
 }
 
 /// Represents a stack of items
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ItemStack {
     pub item_type: ItemType,
     pub count: u32,
@@ -67,10 +68,16 @@ impl ItemStack {
 }
 
 /// Player's inventory system
-#[derive(Resource, Default)]
+#[derive(Resource, Debug, Clone, Serialize, Deserialize)]
 pub struct PlayerInventory {
     pub slots: Vec<Option<ItemStack>>,
     pub selected_slot: usize,
+}
+
+impl Default for PlayerInventory {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl PlayerInventory {
@@ -78,6 +85,13 @@ impl PlayerInventory {
         Self {
             slots: vec![None; INVENTORY_SIZE],
             selected_slot: 0,
+        }
+    }
+    
+    /// Ensure inventory has the correct number of slots
+    pub fn ensure_proper_size(&mut self) {
+        if self.slots.len() != INVENTORY_SIZE {
+            self.slots.resize(INVENTORY_SIZE, None);
         }
     }
 

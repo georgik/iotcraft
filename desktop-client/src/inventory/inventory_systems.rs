@@ -39,6 +39,7 @@ pub fn place_block_system(
                 if selected_item.count > 0 {
                     // Update the voxel world data
                     voxel_world.set_block(event.position, block_type);
+                    info!("Placed block {:?} at {:?} in VoxelWorld", block_type, event.position);
 
                     // Spawn the visual block
                     let cube_mesh = meshes.add(Cuboid::new(
@@ -63,11 +64,7 @@ pub fn place_block_system(
                     commands.spawn((
                         Mesh3d(cube_mesh),
                         MeshMaterial3d(material),
-                        Transform::from_translation(Vec3::new(
-                            event.position.x as f32,
-                            event.position.y as f32,
-                            event.position.z as f32,
-                        )),
+                        Transform::from_translation(event.position.as_vec3()),
                         crate::environment::VoxelBlock {
                             block_type,
                             position: event.position,
