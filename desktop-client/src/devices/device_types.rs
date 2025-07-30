@@ -1,7 +1,46 @@
 use bevy::prelude::*;
+use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::sync::Mutex;
 use std::sync::mpsc::Receiver;
+
+/// Device types available in the system
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum DeviceType {
+    Lamp,
+    Door,
+    Sensor,
+}
+
+impl DeviceType {
+    /// Convert from string representation
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s {
+            "lamp" => Some(DeviceType::Lamp),
+            "door" => Some(DeviceType::Door),
+            "sensor" => Some(DeviceType::Sensor),
+            _ => None,
+        }
+    }
+
+    /// Convert to string representation
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            DeviceType::Lamp => "lamp",
+            DeviceType::Door => "door",
+            DeviceType::Sensor => "sensor",
+        }
+    }
+
+    /// Get the mesh dimensions for this device type (width, height, depth)
+    pub fn mesh_dimensions(&self) -> (f32, f32, f32) {
+        match self {
+            DeviceType::Lamp => (1.0, 1.0, 1.0),
+            DeviceType::Door => (0.2, 2.0, 1.0),
+            DeviceType::Sensor => (1.0, 1.0, 1.0),
+        }
+    }
+}
 
 #[derive(Resource)]
 pub struct DevicesTracker {

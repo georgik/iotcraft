@@ -23,8 +23,8 @@ remove 0 1 5
 remove 0 2 5
 
 # Add doors
-spawn_door front_door 0.0 1.0 -5.0
-spawn_door back_door 0.0 1.0 5.0
+spawn_door front_door 0.0 1.5 -5.0
+spawn_door yard_door 0.0 1.5 5.0
 
 # Add lamps for lighting
 spawn room_lamp_1 -3.0 2.0 -3.0
