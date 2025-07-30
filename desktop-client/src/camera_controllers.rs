@@ -6,6 +6,7 @@
 //!
 //! Unlike other examples, which demonstrate an application, this demonstrates a plugin library.
 
+use crate::ui::GameState;
 use bevy::{
     input::mouse::{AccumulatedMouseMotion, AccumulatedMouseScroll, MouseScrollUnit},
     prelude::*,
@@ -86,7 +87,7 @@ impl Default for CameraController {
             key_down: KeyCode::KeyQ,
             key_run: KeyCode::ShiftLeft,
             mouse_key_cursor_grab: MouseButton::Left,
-            keyboard_key_toggle_cursor_grab: KeyCode::KeyM,
+            keyboard_key_toggle_cursor_grab: KeyCode::F1, // Disabled to use custom state management
             walk_speed: 5.0,
             run_speed: 15.0,
             scroll_factor: 0.1,
@@ -130,10 +131,8 @@ fn run_camera_controller(
     mut windows: Query<&mut Window>,
     accumulated_mouse_motion: Res<AccumulatedMouseMotion>,
     accumulated_mouse_scroll: Res<AccumulatedMouseScroll>,
-    mouse_button_input: Res<ButtonInput<MouseButton>>,
     key_input: Res<ButtonInput<KeyCode>>,
-    mut toggle_cursor_grab: Local<bool>,
-    mut mouse_cursor_grab: Local<bool>,
+    game_state: Res<State<GameState>>,
     mut query: Query<(&mut Transform, &mut CameraController), With<Camera>>,
 ) {
     let dt = time.delta_secs();
@@ -148,10 +147,9 @@ fn run_camera_controller(
         controller.pitch = pitch;
         controller.initialized = true;
 
-        // Enable mouse look by default WITHOUT cursor grabbing
-        *toggle_cursor_grab = true;
+        // Start with mouse not captured (main menu will handle initial state)
 
-        // Keep cursor completely free - no grabbing or confinement
+        // Don't capture mouse on startup - main menu handles cursor state
         for mut window in &mut windows {
             window.cursor_options.grab_mode = CursorGrabMode::None;
             window.cursor_options.visible = true;
@@ -194,42 +192,18 @@ fn run_camera_controller(
         axis_input.y -= 1.0;
     }
 
-    let mut cursor_grab_change = false;
-    if key_input.just_pressed(controller.keyboard_key_toggle_cursor_grab) {
-        *toggle_cursor_grab = !*toggle_cursor_grab;
-        cursor_grab_change = true;
-    }
-    if mouse_button_input.just_pressed(controller.mouse_key_cursor_grab) {
-        *mouse_cursor_grab = true;
-        cursor_grab_change = true;
-    }
-    if mouse_button_input.just_released(controller.mouse_key_cursor_grab) {
-        *mouse_cursor_grab = false;
-        cursor_grab_change = true;
-    }
-    let cursor_grab = *mouse_cursor_grab || *toggle_cursor_grab;
+    // Cursor management is handled by the game state system, not the camera controller
+    // This ensures no conflicts with our main menu and ESC key handling
 
-    // Handle cursor grab - only when explicitly requested
-    if cursor_grab_change {
-        if cursor_grab {
-            for mut window in &mut windows {
-                if !window.focused {
-                    continue;
-                }
+    // Handle mouse input - Apply rotation when in game state and cursor is actually grabbed
+    let is_cursor_grabbed = windows
+        .iter()
+        .any(|window| window.cursor_options.grab_mode == CursorGrabMode::Locked);
 
-                window.cursor_options.grab_mode = CursorGrabMode::Locked;
-                window.cursor_options.visible = false;
-            }
-        } else {
-            for mut window in &mut windows {
-                window.cursor_options.grab_mode = CursorGrabMode::None;
-                window.cursor_options.visible = true;
-            }
-        }
-    }
-
-    // Handle mouse input - Apply rotation when cursor is grabbed OR when toggle is enabled (always-on mode)
-    if accumulated_mouse_motion.delta != Vec2::ZERO && (*toggle_cursor_grab || *mouse_cursor_grab) {
+    if accumulated_mouse_motion.delta != Vec2::ZERO
+        && *game_state.get() == GameState::InGame
+        && is_cursor_grabbed
+    {
         // Apply look update
         controller.pitch = (controller.pitch
             - accumulated_mouse_motion.delta.y * RADIANS_PER_DOT * controller.sensitivity)

@@ -1,4 +1,5 @@
 use bevy::prelude::*;
+use bevy::window::CursorGrabMode;
 use bevy_console::{
     AddConsoleCommand, ConsoleCommand, ConsoleOpen, ConsoleSet, PrintConsoleLine, reply,
 };
@@ -30,7 +31,7 @@ use environment::*;
 use interaction::{Interactable, InteractionPlugin as MyInteractionPlugin, InteractionType};
 use inventory::{InventoryPlugin, PlayerInventory, handle_give_command};
 use mqtt::{MqttPlugin, *};
-use ui::InventoryUiPlugin;
+use ui::{CrosshairPlugin, GameState, InventoryUiPlugin, MainMenuPlugin};
 
 // Define handle_blink_command function for console
 fn handle_blink_command(
@@ -823,6 +824,9 @@ fn main() {
         .add_plugins(MqttPlugin)
         .add_plugins(InventoryPlugin)
         .add_plugins(InventoryUiPlugin)
+        .add_plugins(CrosshairPlugin)
+        .add_plugins(MainMenuPlugin)
+        .init_state::<GameState>()
         .insert_resource(ConsoleConfiguration {
             keys: vec![KeyCode::F12],
             left_pos: 200.0,
@@ -856,8 +860,9 @@ fn main() {
             ),
         )
         .add_systems(Update, manage_camera_controller)
-        .add_systems(Update, handle_console_escape.after(ConsoleSet::Commands))
         .add_systems(Update, handle_console_t_key.after(ConsoleSet::Commands))
+        .add_systems(Update, handle_mouse_capture.after(ConsoleSet::Commands))
+        .add_systems(Update, handle_esc_key.after(ConsoleSet::Commands))
         .insert_resource(script_executor)
         .insert_resource(PendingCommands {
             commands: Vec::new(),
@@ -1082,13 +1087,26 @@ fn manage_camera_controller(
     }
 }
 
-// System to handle ESC key to close console
-fn handle_console_escape(
-    mut console_open: ResMut<ConsoleOpen>,
-    keyboard_input: Res<ButtonInput<KeyCode>>,
+// System to handle mouse capture when window is clicked (for recapturing during gameplay)
+fn handle_mouse_capture(
+    mut windows: Query<&mut Window>,
+    mouse_button_input: Res<ButtonInput<MouseButton>>,
+    game_state: Res<State<GameState>>,
 ) {
-    if keyboard_input.just_pressed(KeyCode::Escape) && console_open.open {
-        console_open.open = false;
+    // Only handle mouse recapture in InGame state (after it was released)
+    if *game_state.get() == GameState::InGame && mouse_button_input.just_pressed(MouseButton::Left)
+    {
+        for mut window in &mut windows {
+            if !window.focused {
+                continue;
+            }
+
+            // Only capture if cursor is currently not captured
+            if window.cursor_options.grab_mode == CursorGrabMode::None {
+                window.cursor_options.grab_mode = CursorGrabMode::Locked;
+                window.cursor_options.visible = false;
+            }
+        }
     }
 }
 
@@ -1096,10 +1114,16 @@ fn handle_console_escape(
 fn handle_console_t_key(
     mut console_open: ResMut<ConsoleOpen>,
     keyboard_input: Res<ButtonInput<KeyCode>>,
+    mut game_state: ResMut<NextState<GameState>>,
+    current_state: Res<State<GameState>>,
 ) {
-    // Only open console with 't' when it's currently closed
-    if keyboard_input.just_pressed(KeyCode::KeyT) && !console_open.open {
+    // Only open console with 't' when it's currently closed and in game
+    if keyboard_input.just_pressed(KeyCode::KeyT)
+        && !console_open.open
+        && *current_state.get() == GameState::InGame
+    {
         console_open.open = true;
+        game_state.set(GameState::ConsoleOpen);
     }
 }
 
