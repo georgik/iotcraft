@@ -17,6 +17,39 @@ impl Default for MqttConfig {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::env;
+
+    #[test]
+    fn test_mqtt_config_default() {
+        let config = MqttConfig::default();
+        assert_eq!(config.host, "localhost");
+        assert_eq!(config.port, 1883);
+    }
+
+    #[test]
+    fn test_mqtt_config_from_env() {
+        unsafe {
+            env::set_var("MQTT_BROKER_HOST", "testhost");
+            env::set_var("MQTT_BROKER_PORT", "1884");
+        }
+        let config = MqttConfig::from_env();
+        assert_eq!(config.host, "testhost");
+        assert_eq!(config.port, 1884);
+    }
+
+    #[test]
+    fn test_broker_address() {
+        let config = MqttConfig {
+            host: "brokerhost".to_string(),
+            port: 8883,
+        };
+        assert_eq!(config.broker_address(), "brokerhost:8883");
+    }
+}
+
 impl MqttConfig {
     /// Load configuration from environment variables or use defaults
     pub fn from_env() -> Self {

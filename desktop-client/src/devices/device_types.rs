@@ -42,6 +42,33 @@ impl DeviceType {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_device_type_from_str() {
+        assert_eq!(DeviceType::from_str("lamp"), Some(DeviceType::Lamp));
+        assert_eq!(DeviceType::from_str("door"), Some(DeviceType::Door));
+        assert_eq!(DeviceType::from_str("sensor"), Some(DeviceType::Sensor));
+        assert_eq!(DeviceType::from_str("unknown"), None);
+    }
+
+    #[test]
+    fn test_device_type_as_str() {
+        assert_eq!(DeviceType::Lamp.as_str(), "lamp");
+        assert_eq!(DeviceType::Door.as_str(), "door");
+        assert_eq!(DeviceType::Sensor.as_str(), "sensor");
+    }
+
+    #[test]
+    fn test_device_type_mesh_dimensions() {
+        assert_eq!(DeviceType::Lamp.mesh_dimensions(), (1.0, 1.0, 1.0));
+        assert_eq!(DeviceType::Door.mesh_dimensions(), (0.2, 2.0, 1.0));
+        assert_eq!(DeviceType::Sensor.mesh_dimensions(), (1.0, 1.0, 1.0));
+    }
+}
+
 #[derive(Resource)]
 pub struct DevicesTracker {
     pub spawned_devices: HashSet<String>,
