@@ -19,7 +19,10 @@ pub struct CameraControllerPlugin;
 
 impl Plugin for CameraControllerPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, run_camera_controller);
+        app.add_systems(
+            Update,
+            (sync_camera_controller_with_transform, run_camera_controller).chain(),
+        );
     }
 }
 
@@ -71,6 +74,8 @@ pub struct CameraController {
     pub yaw: f32,
     /// This [`CameraController`]'s translation velocity.
     pub velocity: Vec3,
+    /// Flag to ignore the next mouse motion delta after cursor re-grab to prevent camera jump
+    pub ignore_next_mouse_delta: bool,
 }
 
 impl Default for CameraController {
@@ -95,6 +100,7 @@ impl Default for CameraController {
             pitch: 0.0,
             yaw: 0.0,
             velocity: Vec3::ZERO,
+            ignore_next_mouse_delta: false,
         }
     }
 }
@@ -123,6 +129,37 @@ Freecam Controls:
             self.key_down,
             self.key_run,
         )
+    }
+}
+
+/// System to sync camera controller's yaw/pitch with transform changes (e.g., from world loading)
+fn sync_camera_controller_with_transform(
+    mut query: Query<(&Transform, &mut CameraController), (With<Camera>, Changed<Transform>)>,
+) {
+    for (transform, mut controller) in query.iter_mut() {
+        // Only sync if the controller is initialized and the transform changed externally
+        if controller.initialized {
+            let (yaw, pitch, _roll) = transform.rotation.to_euler(EulerRot::YXZ);
+
+            // Check if this is a significant change (not just from our own mouse input)
+            let yaw_diff = (controller.yaw - yaw).abs();
+            let pitch_diff = (controller.pitch - pitch).abs();
+
+            // If the difference is significant, it means the transform was changed externally
+            // (e.g., by world loading), so we need to sync our internal state
+            if yaw_diff > 0.01 || pitch_diff > 0.01 {
+                info!(
+                    "Syncing camera controller with external transform change: yaw {} -> {}, pitch {} -> {}",
+                    controller.yaw, yaw, controller.pitch, pitch
+                );
+                controller.yaw = yaw;
+                controller.pitch = pitch;
+
+                // Also set the ignore flag to prevent the next mouse delta from causing issues
+                controller.ignore_next_mouse_delta = true;
+                info!("Set ignore_next_mouse_delta flag due to external transform change");
+            }
+        }
     }
 }
 
@@ -204,13 +241,24 @@ fn run_camera_controller(
         && *game_state.get() == GameState::InGame
         && is_cursor_grabbed
     {
-        // Apply look update
-        controller.pitch = (controller.pitch
-            - accumulated_mouse_motion.delta.y * RADIANS_PER_DOT * controller.sensitivity)
-            .clamp(-PI / 2., PI / 2.);
-        controller.yaw -=
-            accumulated_mouse_motion.delta.x * RADIANS_PER_DOT * controller.sensitivity;
-        transform.rotation = Quat::from_euler(EulerRot::ZYX, 0.0, controller.yaw, controller.pitch);
+        // Check if we should ignore this mouse delta (first frame after cursor re-grab)
+        if controller.ignore_next_mouse_delta {
+            // Reset the flag and skip this mouse input to prevent camera jump
+            controller.ignore_next_mouse_delta = false;
+            info!(
+                "Ignoring mouse delta after cursor re-grab to prevent jump: {:?}",
+                accumulated_mouse_motion.delta
+            );
+        } else {
+            // Apply look update
+            controller.pitch = (controller.pitch
+                - accumulated_mouse_motion.delta.y * RADIANS_PER_DOT * controller.sensitivity)
+                .clamp(-PI / 2., PI / 2.);
+            controller.yaw -=
+                accumulated_mouse_motion.delta.x * RADIANS_PER_DOT * controller.sensitivity;
+            transform.rotation =
+                Quat::from_euler(EulerRot::ZYX, 0.0, controller.yaw, controller.pitch);
+        }
     }
 
     // Update velocity

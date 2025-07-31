@@ -32,17 +32,32 @@ impl Plugin for MainMenuPlugin {
 }
 
 /// System to ensure cursor is grabbed when entering the game
-fn grab_cursor_on_game_start(mut windows: Query<&mut Window>) {
+fn grab_cursor_on_game_start(
+    mut windows: Query<&mut Window>,
+    mut camera_controller_query: Query<&mut crate::camera_controllers::CameraController>,
+) {
     for mut window in &mut windows {
         info!("Grabbing cursor on game start - setting to Locked");
+
+        // Center the cursor before grabbing it to ensure raycasting starts from screen center
+        let screen_center = Vec2::new(window.width() / 2.0, window.height() / 2.0);
+        window.set_cursor_position(Some(screen_center));
+
         window.cursor_options.grab_mode = bevy::window::CursorGrabMode::Locked;
         window.cursor_options.visible = false;
         info!(
-            "Cursor grab mode after setting: {:?}",
+            "Cursor grab mode after setting: {:?}, cursor positioned at screen center",
             window.cursor_options.grab_mode
         );
     }
+
+    // Set flag to ignore the next mouse delta to prevent camera jump
+    if let Ok(mut controller) = camera_controller_query.single_mut() {
+        controller.ignore_next_mouse_delta = true;
+        info!("Set ignore_next_mouse_delta flag to prevent camera jump after cursor re-grab");
+    }
 }
+
 /// Component to mark the main menu UI
 #[derive(Component)]
 pub struct MainMenu;

@@ -102,9 +102,18 @@ fn raycast_interaction_system(
 
     let (camera, camera_transform) = *camera_query;
 
-    let Some(cursor_position) = window.cursor_position() else {
-        hovered_entity.entity = None;
-        return;
+    // Use screen center when cursor is grabbed, otherwise use cursor position
+    let cursor_position = if window.cursor_options.grab_mode == bevy::window::CursorGrabMode::Locked
+    {
+        // When cursor is grabbed, use screen center where crosshair is displayed
+        Vec2::new(window.width() / 2.0, window.height() / 2.0)
+    } else {
+        // When cursor is not grabbed, use actual cursor position
+        let Some(cursor_pos) = window.cursor_position() else {
+            hovered_entity.entity = None;
+            return;
+        };
+        cursor_pos
     };
 
     // Calculate a ray pointing from the camera into the world based on the cursor's position
@@ -161,9 +170,19 @@ fn update_ghost_block_preview(
     };
 
     let (camera, camera_transform) = *camera_query;
-    let Some(cursor_position) = window.cursor_position() else {
-        ghost_state.position = None;
-        return;
+
+    // Use screen center when cursor is grabbed, otherwise use cursor position
+    let cursor_position = if window.cursor_options.grab_mode == bevy::window::CursorGrabMode::Locked
+    {
+        // When cursor is grabbed, use screen center where crosshair is displayed
+        Vec2::new(window.width() / 2.0, window.height() / 2.0)
+    } else {
+        // When cursor is not grabbed, use actual cursor position
+        let Some(cursor_pos) = window.cursor_position() else {
+            ghost_state.position = None;
+            return;
+        };
+        cursor_pos
     };
 
     let Ok(ray) = camera.viewport_to_world(camera_transform, cursor_position) else {
@@ -277,8 +296,8 @@ fn handle_interaction_input(
     mut interaction_events: EventWriter<InteractionEvent>,
     mut place_block_events: EventWriter<PlaceBlockEvent>,
     inventory: ResMut<PlayerInventory>,
-    camera_query: Single<(&Camera, &GlobalTransform)>,
-    windows: Query<&Window>,
+    _camera_query: Single<(&Camera, &GlobalTransform)>,
+    _windows: Query<&Window>,
     console_open: Res<ConsoleOpen>,
     _voxel_world: Res<VoxelWorld>,
     ghost_state: Res<GhostBlockState>,
@@ -305,17 +324,8 @@ fn handle_interaction_input(
         if let Some(selected_item) = inventory.get_selected_item() {
             let ItemType::Block(block_type) = selected_item.item_type;
 
-            // Perform raycasting to find the target block for placement
-            let Ok(window) = windows.single() else {
-                return;
-            };
-            let (camera, camera_transform) = *camera_query;
-            let Some(cursor_position) = window.cursor_position() else {
-                return;
-            };
-            let Ok(_ray) = camera.viewport_to_world(camera_transform, cursor_position) else {
-                return;
-            };
+            // For block placement, we rely on the ghost_state which already uses correct cursor logic
+            // No need for additional raycasting here since ghost_state handles it
 
             if let Some(placement_position) = ghost_state.position {
                 if ghost_state.can_place {
