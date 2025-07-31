@@ -143,3 +143,68 @@ fn update_inventory_ui(
         }
     }
 }
+
+/// Pure function to determine slot color based on selection state
+pub fn get_slot_color(is_selected: bool) -> (f32, f32, f32, f32) {
+    if is_selected {
+        (1.0, 1.0, 0.0, 0.8) // Yellow for selected
+    } else {
+        (0.5, 0.5, 0.5, 0.8) // Gray for others
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_get_slot_color() {
+        // Selected slot should be yellow
+        let selected_color = get_slot_color(true);
+        assert_eq!(selected_color, (1.0, 1.0, 0.0, 0.8));
+
+        // Unselected slot should be gray
+        let unselected_color = get_slot_color(false);
+        assert_eq!(unselected_color, (0.5, 0.5, 0.5, 0.8));
+    }
+
+    #[test]
+    fn test_get_block_texture_path() {
+        assert_eq!(
+            get_block_texture_path(&BlockType::Grass),
+            "textures/grass.webp"
+        );
+        assert_eq!(
+            get_block_texture_path(&BlockType::Dirt),
+            "textures/dirt.webp"
+        );
+        assert_eq!(
+            get_block_texture_path(&BlockType::Stone),
+            "textures/stone.webp"
+        );
+        assert_eq!(
+            get_block_texture_path(&BlockType::QuartzBlock),
+            "textures/quartz_block.webp"
+        );
+        assert_eq!(
+            get_block_texture_path(&BlockType::GlassPane),
+            "textures/glass_pane.webp"
+        );
+        assert_eq!(
+            get_block_texture_path(&BlockType::CyanTerracotta),
+            "textures/cyan_terracotta.webp"
+        );
+    }
+}
+
+/// Pure function to get texture path for block type
+pub fn get_block_texture_path(block_type: &BlockType) -> &'static str {
+    match block_type {
+        BlockType::Grass => "textures/grass.webp",
+        BlockType::Dirt => "textures/dirt.webp",
+        BlockType::Stone => "textures/stone.webp",
+        BlockType::QuartzBlock => "textures/quartz_block.webp",
+        BlockType::GlassPane => "textures/glass_pane.webp",
+        BlockType::CyanTerracotta => "textures/cyan_terracotta.webp",
+    }
+}

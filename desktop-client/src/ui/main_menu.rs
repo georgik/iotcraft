@@ -578,3 +578,56 @@ fn handle_escape_key(
         }
     }
 }
+
+/// Pure function to format timestamp for world selection display
+pub fn format_last_played_time(rfc3339_timestamp: &str) -> String {
+    if let Ok(datetime) = chrono::DateTime::parse_from_rfc3339(rfc3339_timestamp) {
+        datetime.format("%Y-%m-%d %H:%M").to_string()
+    } else {
+        "Unknown".to_string()
+    }
+}
+
+/// Pure function to generate new world name with timestamp
+pub fn generate_new_world_name() -> String {
+    format!("NewWorld-{}", chrono::Utc::now().timestamp())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_format_last_played_time() {
+        // Valid RFC3339 timestamp
+        let valid_timestamp = "2023-12-25T15:30:00Z";
+        let formatted = format_last_played_time(valid_timestamp);
+        assert_eq!(formatted, "2023-12-25 15:30");
+
+        // Invalid timestamp should return "Unknown"
+        let invalid_timestamp = "invalid-date";
+        let formatted = format_last_played_time(invalid_timestamp);
+        assert_eq!(formatted, "Unknown");
+
+        // Empty string should return "Unknown"
+        let empty_timestamp = "";
+        let formatted = format_last_played_time(empty_timestamp);
+        assert_eq!(formatted, "Unknown");
+    }
+
+    #[test]
+    fn test_generate_new_world_name() {
+        let name1 = generate_new_world_name();
+
+        // Name should start with "NewWorld-"
+        assert!(name1.starts_with("NewWorld-"));
+
+        // Name should contain a timestamp (numeric after "NewWorld-")
+        let timestamp_part = &name1["NewWorld-".len()..];
+        assert!(!timestamp_part.is_empty());
+        assert!(timestamp_part.chars().all(|c| c.is_ascii_digit()));
+
+        // Should generate a valid world name format
+        assert!(name1.len() > "NewWorld-".len());
+    }
+}
