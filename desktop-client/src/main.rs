@@ -28,6 +28,7 @@ mod world;
 
 // Re-export types for easier access
 use config::MqttConfig;
+use console::console_types::{LookCommand, TeleportCommand};
 use console::*;
 use devices::*;
 use environment::*;
@@ -366,6 +367,62 @@ fn handle_save_map_command(mut log: ConsoleCommand<SaveMapCommand>, voxel_world:
     }
 }
 
+fn handle_teleport_command(
+    mut log: ConsoleCommand<TeleportCommand>,
+    mut camera_query: Query<(&mut Transform, &mut CameraController), With<Camera>>,
+) {
+    if let Some(Ok(TeleportCommand { x, y, z })) = log.take() {
+        if let Ok((mut transform, _camera_controller)) = camera_query.single_mut() {
+            // Set the camera position
+            transform.translation = Vec3::new(x, y, z);
+
+            reply!(log, "Teleported to ({:.1}, {:.1}, {:.1})", x, y, z);
+            info!("Camera teleported to ({:.1}, {:.1}, {:.1})", x, y, z);
+        } else {
+            reply!(log, "Error: Could not find camera to teleport");
+        }
+    }
+}
+
+fn handle_look_command(
+    mut log: ConsoleCommand<LookCommand>,
+    mut camera_query: Query<(&mut Transform, &mut CameraController), With<Camera>>,
+) {
+    if let Some(Ok(LookCommand { yaw, pitch })) = log.take() {
+        if let Ok((mut transform, mut camera_controller)) = camera_query.single_mut() {
+            // Convert degrees to radians for internal use
+            let yaw_rad = yaw.to_radians();
+            let pitch_rad = pitch.to_radians();
+
+            // Update the camera controller's internal yaw and pitch
+            camera_controller.yaw = yaw_rad;
+            camera_controller.pitch =
+                pitch_rad.clamp(-std::f32::consts::PI / 2.0, std::f32::consts::PI / 2.0);
+
+            // Apply the rotation to the transform using the same logic as the camera controller
+            transform.rotation = Quat::from_euler(
+                bevy::math::EulerRot::ZYX,
+                0.0,
+                camera_controller.yaw,
+                camera_controller.pitch,
+            );
+
+            reply!(
+                log,
+                "Set look angles to yaw: {:.1}°, pitch: {:.1}°",
+                yaw,
+                pitch
+            );
+            info!(
+                "Camera look angles set to yaw: {:.1}°, pitch: {:.1}°",
+                yaw, pitch
+            );
+        } else {
+            reply!(log, "Error: Could not find camera to set look direction");
+        }
+    }
+}
+
 fn handle_load_map_command(
     mut log: ConsoleCommand<LoadMapCommand>,
     mut voxel_world: ResMut<VoxelWorld>,
@@ -449,6 +506,7 @@ fn execute_pending_commands(
     asset_server: Res<AssetServer>,
     query: Query<(Entity, &VoxelBlock)>,
     mut inventory: ResMut<PlayerInventory>,
+    mut camera_query: Query<(&mut Transform, &mut CameraController), With<Camera>>,
 ) {
     for command in pending_commands.commands.drain(..) {
         info!("Executing queued command: {}", command);
@@ -819,6 +877,74 @@ fn execute_pending_commands(
                     }
                 }
             }
+            "tp" => {
+                if parts.len() == 4 {
+                    if let Ok(x) = parts[1].parse::<f32>() {
+                        if let Ok(y) = parts[2].parse::<f32>() {
+                            if let Ok(z) = parts[3].parse::<f32>() {
+                                if let Ok((mut transform, _camera_controller)) =
+                                    camera_query.single_mut()
+                                {
+                                    // Set the camera position
+                                    transform.translation = Vec3::new(x, y, z);
+
+                                    print_console_line.write(PrintConsoleLine::new(format!(
+                                        "Teleported to ({:.1}, {:.1}, {:.1})",
+                                        x, y, z
+                                    )));
+                                    info!("Camera teleported to ({:.1}, {:.1}, {:.1})", x, y, z);
+                                } else {
+                                    print_console_line.write(PrintConsoleLine::new(
+                                        "Error: Could not find camera to teleport".to_string(),
+                                    ));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            "look" => {
+                if parts.len() == 3 {
+                    if let Ok(yaw) = parts[1].parse::<f32>() {
+                        if let Ok(pitch) = parts[2].parse::<f32>() {
+                            if let Ok((mut transform, mut camera_controller)) =
+                                camera_query.single_mut()
+                            {
+                                // Convert degrees to radians for internal use
+                                let yaw_rad = yaw.to_radians();
+                                let pitch_rad = pitch.to_radians();
+
+                                // Update the camera controller's internal yaw and pitch
+                                camera_controller.yaw = yaw_rad;
+                                camera_controller.pitch = pitch_rad
+                                    .clamp(-std::f32::consts::PI / 2.0, std::f32::consts::PI / 2.0);
+
+                                // Apply the rotation to the transform using the same logic as the camera controller
+                                transform.rotation = Quat::from_euler(
+                                    bevy::math::EulerRot::ZYX,
+                                    0.0,
+                                    camera_controller.yaw,
+                                    camera_controller.pitch,
+                                );
+
+                                print_console_line.write(PrintConsoleLine::new(format!(
+                                    "Set look angles to yaw: {:.1}°, pitch: {:.1}°",
+                                    yaw, pitch
+                                )));
+                                info!(
+                                    "Camera look angles set to yaw: {:.1}°, pitch: {:.1}°",
+                                    yaw, pitch
+                                );
+                            } else {
+                                print_console_line.write(PrintConsoleLine::new(
+                                    "Error: Could not find camera to set look direction"
+                                        .to_string(),
+                                ));
+                            }
+                        }
+                    }
+                }
+            }
             _ => {
                 print_console_line.write(PrintConsoleLine::new(format!(
                     "Unknown command: {}",
@@ -886,6 +1012,8 @@ fn main() {
         .add_console_command::<TestErrorCommand, _>(
             crate::console::console_systems::handle_test_error_command,
         )
+        .add_console_command::<TeleportCommand, _>(handle_teleport_command)
+        .add_console_command::<LookCommand, _>(handle_look_command)
         .insert_resource(BlinkState::default())
         // .add_systems(Update, draw_cursor) // Disabled: InteractionPlugin handles cursor drawing
         .add_systems(
@@ -907,9 +1035,13 @@ fn main() {
         .insert_resource(PendingCommands {
             commands: Vec::new(),
         })
+        .init_resource::<DiagnosticsVisible>()
+        .add_systems(Startup, setup_diagnostics_ui)
         .add_systems(Update, script_execution_system)
         .add_systems(Update, execute_pending_commands)
         .add_systems(Update, handle_inventory_input)
+        .add_systems(Update, handle_diagnostics_toggle)
+        .add_systems(Update, update_diagnostics_content)
         .run();
 }
 
@@ -1058,7 +1190,175 @@ fn manage_camera_controller(
     }
 }
 
-// System to handle mouse capture when window is clicked (for recapturing during gameplay)
+// Resource to track diagnostics visibility
+#[derive(Resource)]
+struct DiagnosticsVisible {
+    visible: bool,
+}
+
+impl Default for DiagnosticsVisible {
+    fn default() -> Self {
+        Self { visible: false }
+    }
+}
+
+#[derive(Component)]
+struct DiagnosticsText;
+
+#[derive(Component)]
+struct DiagnosticsOverlay;
+
+// System to handle F3 key toggle
+fn handle_diagnostics_toggle(
+    keyboard_input: Res<ButtonInput<KeyCode>>,
+    mut diagnostics_visible: ResMut<DiagnosticsVisible>,
+    mut diagnostics_query: Query<&mut Visibility, With<DiagnosticsOverlay>>,
+) {
+    if keyboard_input.just_pressed(KeyCode::F3) {
+        diagnostics_visible.visible = !diagnostics_visible.visible;
+
+        if let Ok(mut visibility) = diagnostics_query.single_mut() {
+            *visibility = if diagnostics_visible.visible {
+                Visibility::Visible
+            } else {
+                Visibility::Hidden
+            };
+        }
+
+        info!(
+            "Diagnostics screen toggled: {}",
+            diagnostics_visible.visible
+        );
+    }
+}
+
+// System to update diagnostics content
+fn update_diagnostics_content(
+    diagnostics_visible: Res<DiagnosticsVisible>,
+    mut diagnostics_text_query: Query<&mut Text, With<DiagnosticsText>>,
+    camera_query: Query<(&Transform, &CameraController), With<Camera>>,
+    voxel_world: Res<VoxelWorld>,
+    inventory: Res<PlayerInventory>,
+    device_query: Query<&DeviceEntity>,
+    time: Res<Time>,
+) {
+    if !diagnostics_visible.visible {
+        return;
+    }
+
+    if let Ok(mut text) = diagnostics_text_query.single_mut() {
+        if let Ok((transform, camera_controller)) = camera_query.single() {
+            let translation = transform.translation;
+            let yaw_degrees = camera_controller.yaw.to_degrees();
+            let pitch_degrees = camera_controller.pitch.to_degrees();
+
+            // Calculate additional useful information
+            let device_count = device_query.iter().count();
+            let block_count = voxel_world.blocks.len();
+            let selected_slot = inventory.selected_slot + 1; // 1-indexed for display
+
+            // Get selected item info
+            let selected_item = if let Some(item_stack) = inventory
+                .slots
+                .get(inventory.selected_slot)
+                .and_then(|slot| slot.as_ref())
+            {
+                if item_stack.count > 0 {
+                    format!(
+                        "{} x {}",
+                        item_stack.count,
+                        match item_stack.item_type {
+                            crate::inventory::ItemType::Block(block_type) => match block_type {
+                                BlockType::Grass => "Grass",
+                                BlockType::Dirt => "Dirt",
+                                BlockType::Stone => "Stone",
+                                BlockType::QuartzBlock => "Quartz Block",
+                                BlockType::GlassPane => "Glass Pane",
+                                BlockType::CyanTerracotta => "Cyan Terracotta",
+                            },
+                        }
+                    )
+                } else {
+                    "Empty".to_string()
+                }
+            } else {
+                "Empty".to_string()
+            };
+
+            let uptime = time.elapsed_secs();
+            let minutes = (uptime / 60.0) as u32;
+            let seconds = (uptime % 60.0) as u32;
+
+            text.0 = format!(
+                "IoTCraft Debug Information (Press F3 to toggle)\n\
+                ------------------------------------------------------------------------------------------
+                \n\
+                - PLAYER INFORMATION\n\
+                Position: X={:.2}  Y={:.2}  Z={:.2}\n\
+                Rotation: Yaw={:.1}°  Pitch={:.1}°\n\
+                Selected Slot: {} ({})\n\
+                \n\
+                - WORLD INFORMATION\n\
+                Total Blocks: {}\n\
+                IoT Devices: {}\n\
+                Session Time: {}m {}s\n\
+                \n\
+                - SCRIPT COMMANDS\n\
+                Teleport: tp {:.2} {:.2} {:.2}\n\
+                Look Direction: look {:.1} {:.1}\n\
+                \n\
+                - CONTROLS\n\
+                F3: Toggle this debug screen\n\
+                T: Open console\n\
+                1-9: Select inventory slot\n\
+                Mouse Wheel: Scroll inventory slots",
+                translation.x, translation.y, translation.z,
+                yaw_degrees, pitch_degrees,
+                selected_slot, selected_item,
+                block_count,
+                device_count,
+                minutes, seconds,
+                translation.x, translation.y, translation.z,
+                yaw_degrees, pitch_degrees
+            );
+        }
+    }
+}
+
+// System to setup diagnostics UI
+fn setup_diagnostics_ui(mut commands: Commands) {
+    // Create a full-width diagnostics panel at the top
+    commands
+        .spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(10.0),
+                top: Val::Px(10.0),
+                right: Val::Px(10.0),
+                width: Val::Auto,
+                height: Val::Px(480.0), // Fixed height to ensure proper display
+                padding: UiRect::all(Val::Px(20.0)),
+                flex_direction: FlexDirection::Column,
+                ..default()
+            },
+            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.85)), // Dark semi-transparent background
+            Visibility::Hidden,                                 // Start hidden
+            DiagnosticsOverlay,                                 // Add the component for toggling
+        ))
+        .with_children(|parent| {
+            parent.spawn((
+                Text::new("IoTCraft Debug Information (Press F3 to toggle)\n\nLoading..."),
+                TextFont {
+                    font_size: 16.0,
+                    ..default()
+                },
+                TextColor(Color::WHITE),
+                DiagnosticsText, // Component for text updates
+            ));
+        });
+}
+
+// System to handle mouse capture when window is clicked...
 fn handle_mouse_capture(
     mut windows: Query<&mut Window>,
     mouse_button_input: Res<ButtonInput<MouseButton>>,

@@ -199,6 +199,38 @@ save_map simple_structure.json
 
 ## Camera Controls
 
+### Player/Camera Positioning
+
+#### `tp <x> <y> <z>`
+Teleports the player/camera to the specified coordinates.
+
+**Parameters:**
+- `x`, `y`, `z`: Float coordinates for the new camera position
+
+**Examples:**
+```
+tp 0 5 0
+tp -10.5 2.0 15.0
+tp 100 50 -25
+```
+
+#### `look <yaw> <pitch>`
+Sets the camera's viewing direction using yaw and pitch angles.
+
+**Parameters:**
+- `yaw`: Horizontal rotation in degrees (0° = North, 90° = East, 180° = South, 270° = West)
+- `pitch`: Vertical rotation in degrees (-90° = straight down, 0° = level, 90° = straight up)
+
+**Examples:**
+```
+look 0 0      # Look north and level
+look 90 -30   # Look east and slightly downward
+look 180 45   # Look south and upward
+look 270 0    # Look west and level
+```
+
+**Note:** These commands are particularly useful in scripts for setting up specific camera positions and orientations when creating or loading worlds.
+
 While not console commands, these keyboard controls are essential for navigation:
 
 - **WASD**: Move camera (forward/backward/left/right)

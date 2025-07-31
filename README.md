@@ -18,8 +18,10 @@ IoTCraft is a multi-component Rust project showcasing MQTT-controlled IoT device
   - Drag-and-drop device positioning with persistent storage
   - **Door system** - 3D doors that rotate 90 degrees when opened/closed
   - **Comprehensive console interface** for world and device management
+  - **Real-time diagnostics overlay** - Press F3 for detailed debug information
   - A rotating logo cube and thermometer indicator
   - **Enhanced WASD + mouse camera controls** (fixed Luanti-like movement)
+  - **Enhanced inventory system** - 9-slot hotbar with item management
   - Comprehensive MQTT logging and diagnostics
 
 - **mqtt-server**  
@@ -268,6 +270,50 @@ export MQTT_PORT="1883"
 - `MqttConfig` - Centralized configuration management
 - `DragState` - Mouse interaction state management
 - Clean separation of concerns between systems
+
+### 🔬 Real-Time Diagnostics System
+
+**F3 Debug Overlay:**
+- Press **F3** to toggle the comprehensive diagnostics overlay
+- Real-time display of player position, camera rotation, and movement data
+- Current inventory slot and selected item information
+- World statistics: total blocks placed, active IoT devices
+- Session uptime tracking
+- Useful script commands for quick reference
+
+**Diagnostic Information Includes:**
+- **Player Data:** Position coordinates (X, Y, Z), camera yaw/pitch angles
+- **World Status:** Block count, device count, session duration
+- **Inventory State:** Selected slot number and item type/quantity
+- **Quick Commands:** Ready-to-use teleport and camera orientation commands
+- **Control Reminders:** Key bindings and interface shortcuts
+
+**Developer Features:**
+- Copy-paste ready commands for scripting
+- Real-time coordinate tracking for precise building
+- Performance monitoring for large world optimization
+- Session time tracking for productivity measurement
+
+### 📦 Enhanced Inventory System
+
+**9-Slot Hotbar:**
+- Visual inventory display at bottom of screen
+- Number keys (1-9) for quick slot selection
+- Mouse wheel scrolling between inventory slots
+- Real-time item count display
+- Selected slot highlighting
+
+**Item Management:**
+- Stack-based item storage (up to 64 items per stack)
+- Visual item icons for different block types
+- `give <item_type> <quantity>` console command for item spawning
+- Integration with building system for seamless block placement
+
+**Supported Items:**
+- Grass blocks, Dirt blocks, Stone blocks
+- Quartz blocks, Glass panes, Cyan terracotta
+- Automatic item consumption when placing blocks
+- Empty slot indicators
 
 ### 📡 MQTT Topic Architecture
 

@@ -1,6 +1,12 @@
 # New World Initialization Script
 # Creates a basic world with grass plains and hills
 
+# Set initial camera position and orientation for better view
+# Position the camera to the left of the structure to avoid obstruction
+# Looking towards the center where lamps might spawn
+tp -8 3 15
+look -34 -3
+
 # Create a large grass plain (50x50 area)
 wall grass -25 0 -25 25 0 25
 

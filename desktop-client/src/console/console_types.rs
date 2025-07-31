@@ -137,6 +137,26 @@ pub struct TestErrorCommand {
     pub message: String,
 }
 
+#[derive(Parser, ConsoleCommand)]
+#[command(name = "tp")]
+pub struct TeleportCommand {
+    /// X coordinate
+    pub x: f32,
+    /// Y coordinate
+    pub y: f32,
+    /// Z coordinate
+    pub z: f32,
+}
+
+#[derive(Parser, ConsoleCommand)]
+#[command(name = "look")]
+pub struct LookCommand {
+    /// Yaw angle in degrees (horizontal rotation)
+    pub yaw: f32,
+    /// Pitch angle in degrees (vertical rotation)
+    pub pitch: f32,
+}
+
 #[derive(Resource)]
 pub struct BlinkState {
     pub blinking: bool,
