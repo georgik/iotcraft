@@ -15,6 +15,63 @@ pub enum ItemType {
     // Future items like tools, etc. can be added here
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_item_stack_add_and_remove() {
+        let item_type = ItemType::Block(BlockType::Grass);
+        let mut stack = ItemStack::new(item_type, 10);
+
+        // Test adding
+        assert_eq!(stack.add(5), 0); // Should successfully add all 5
+        assert_eq!(stack.count, 15);
+        assert_eq!(stack.add(60), 11); // Can only add 49 (64 max capacity)
+        assert_eq!(stack.count, 64);
+
+        // Test removing
+        assert_eq!(stack.remove(10), 10); // Should successfully remove 10
+        assert_eq!(stack.count, 54);
+        assert_eq!(stack.remove(60), 54); // Can only remove 54
+        assert!(stack.is_empty());
+    }
+
+    #[test]
+    fn test_inventory_add_items() {
+        let mut inventory = PlayerInventory::new();
+        let item_type = ItemType::Block(BlockType::Stone);
+
+        // Test adding items that fit completely
+        assert_eq!(inventory.add_items(item_type, 64), 0); // Should add all 64 (fills 1 slot)
+        assert_eq!(inventory.add_items(item_type, 100), 0); // Should add all 100 (fills 1 more slot + partial)
+
+        // Test adding items that exceed inventory capacity
+        // Inventory has 36 slots * 64 max per slot = 2304 total capacity
+        // We've added 164 items, so 2304 - 164 = 2140 items can still fit
+        let remaining_capacity = (36 * 64) - 164;
+        let excess_items = remaining_capacity + 50; // Try to add 50 more than capacity
+        assert_eq!(inventory.add_items(item_type, excess_items), 50); // Should return 50 excess
+
+        // Test selecting item
+        inventory.select_slot(0);
+        assert!(inventory.get_selected_item().is_some());
+
+        // Test clear selected slot
+        inventory.clear_selected_item();
+        assert!(inventory.get_selected_item().is_none());
+    }
+
+    #[test]
+    fn test_inventory_select_slot() {
+        let mut inventory = PlayerInventory::new();
+        inventory.select_slot(5);
+        assert_eq!(inventory.selected_slot, 5);
+        inventory.select_slot(40); // Out of bounds, should not change
+        assert_eq!(inventory.selected_slot, 5);
+    }
+}
+
 impl ItemType {
     /// Get the display name for this item type
     pub fn display_name(&self) -> &'static str {
