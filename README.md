@@ -63,6 +63,11 @@ cargo run
 # Run the Bevy 3D visualizer:
 cd desktop-client
 cargo run
+
+# Run with a specific language (optional):
+# Supported languages: en-US, de-DE, cs-CZ, bg-BG, es-ES, fr-FR, hr-HR, hu-HU, it-IT, ja-JP, pl-PL, pt-BR, ro-RO, sk-SK, sl-SI, zh-CN
+cargo run -- --lang=de-DE  # German
+cargo run -- --lang=cs-CZ  # Czech
 ```
 
 ### MQTT Server
@@ -340,6 +345,18 @@ export MQTT_PORT="1883"
   "z": -1.0
 }
 ```
+
+## Credits
+
+### Fonts
+
+IoTCraft uses the **Noto Sans** font family for UI text rendering:
+
+- **Noto Sans Regular** - Licensed under the SIL Open Font License 1.1
+- **Copyright:** Google Inc.
+- **License:** [SIL Open Font License 1.1](https://scripts.sil.org/OFL)
+
+The Noto Sans font provides excellent Unicode coverage for multilingual text rendering.
 
 ## Development
 

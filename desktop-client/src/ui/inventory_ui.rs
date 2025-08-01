@@ -145,6 +145,7 @@ fn update_inventory_ui(
 }
 
 /// Pure function to determine slot color based on selection state
+#[allow(dead_code)]
 pub fn get_slot_color(is_selected: bool) -> (f32, f32, f32, f32) {
     if is_selected {
         (1.0, 1.0, 0.0, 0.8) // Yellow for selected
@@ -198,6 +199,7 @@ mod tests {
 }
 
 /// Pure function to get texture path for block type
+#[allow(dead_code)]
 pub fn get_block_texture_path(block_type: &BlockType) -> &'static str {
     match block_type {
         BlockType::Grass => "textures/grass.webp",

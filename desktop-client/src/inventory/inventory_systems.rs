@@ -30,7 +30,7 @@ mod tests {
     use crate::inventory::{
         BreakBlockEvent, GiveItemEvent, ItemType, PlaceBlockEvent, PlayerInventory,
     };
-    use bevy::{ecs::system::IntoSystem, prelude::*};
+    use bevy::ecs::system::IntoSystem;
 
     #[test]
     fn test_give_item_system() {
