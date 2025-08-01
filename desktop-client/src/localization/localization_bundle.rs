@@ -9,11 +9,6 @@ pub struct LocalizationBundle {
 }
 
 impl LocalizationBundle {
-    /// Create a new localization bundle
-    pub fn new() -> Self {
-        Self::default()
-    }
-
     /// Load localization files for a specific language
     pub fn load_language(&mut self, language: Language) -> Result<(), Box<dyn std::error::Error>> {
         let mut translations = HashMap::new();
@@ -65,16 +60,6 @@ impl LocalizationBundle {
         key.to_string()
     }
 
-    /// Get all loaded languages
-    pub fn loaded_languages(&self) -> Vec<Language> {
-        self.translations.keys().copied().collect()
-    }
-
-    /// Check if a language is loaded
-    pub fn is_language_loaded(&self, language: Language) -> bool {
-        self.translations.contains_key(&language)
-    }
-
     /// Get the default localization content for each language
     fn get_localization_content(&self, language: Language) -> String {
         match language {
@@ -88,8 +73,6 @@ impl LocalizationBundle {
             Language::FrenchFR => include_str!("../../localization/fr-FR/main.ftl").to_string(),
             Language::ItalianIT => include_str!("../../localization/it-IT/main.ftl").to_string(),
             Language::PortugueseBR => include_str!("../../localization/pt-BR/main.ftl").to_string(),
-            Language::ChineseCN => include_str!("../../localization/zh-CN/main.ftl").to_string(),
-            Language::JapaneseJP => include_str!("../../localization/ja-JP/main.ftl").to_string(),
             Language::SlovenianSI => include_str!("../../localization/sl-SI/main.ftl").to_string(),
             Language::CroatianHR => include_str!("../../localization/hr-HR/main.ftl").to_string(),
             Language::RomanianRO => include_str!("../../localization/ro-RO/main.ftl").to_string(),
@@ -104,7 +87,7 @@ mod tests {
 
     #[test]
     fn test_localization_bundle_loads_english() {
-        let mut bundle = LocalizationBundle::new();
+        let mut bundle = LocalizationBundle::default();
         bundle
             .load_language(Language::EnglishUS)
             .expect("Failed to load English");
@@ -119,7 +102,7 @@ mod tests {
 
     #[test]
     fn test_localization_bundle_with_args() {
-        let mut bundle = LocalizationBundle::new();
+        let mut bundle = LocalizationBundle::default();
         bundle
             .load_language(Language::EnglishUS)
             .expect("Failed to load English");
@@ -132,7 +115,7 @@ mod tests {
 
     #[test]
     fn test_localization_bundle_fallback() {
-        let bundle = LocalizationBundle::new();
+        let bundle = LocalizationBundle::default();
 
         // Should return the key when translation is not found
         let text = bundle.get_text(Language::EnglishUS, "non-existent-key", &[]);

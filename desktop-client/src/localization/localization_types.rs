@@ -1,5 +1,4 @@
 use bevy::prelude::*;
-use unic_langid::LanguageIdentifier;
 
 /// Supported languages in the application using BCP 47 language tags
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -24,10 +23,6 @@ pub enum Language {
     ItalianIT,
     /// Portuguese (Brazil)
     PortugueseBR,
-    /// Chinese (China)
-    ChineseCN,
-    /// Japanese (Japan)
-    JapaneseJP,
     /// Slovenian (Slovenia)
     SlovenianSI,
     /// Croatian (Croatia)
@@ -39,60 +34,6 @@ pub enum Language {
 }
 
 impl Language {
-    /// Get the BCP 47 language tag for this language
-    pub fn language_tag(self) -> &'static str {
-        match self {
-            Language::EnglishUS => "en-US",
-            Language::SpanishES => "es-ES",
-            Language::GermanDE => "de-DE",
-            Language::CzechCZ => "cs-CZ",
-            Language::SlovakSK => "sk-SK",
-            Language::PolishPL => "pl-PL",
-            Language::HungarianHU => "hu-HU",
-            Language::FrenchFR => "fr-FR",
-            Language::ItalianIT => "it-IT",
-            Language::PortugueseBR => "pt-BR",
-            Language::ChineseCN => "zh-CN",
-            Language::JapaneseJP => "ja-JP",
-            Language::SlovenianSI => "sl-SI",
-            Language::CroatianHR => "hr-HR",
-            Language::RomanianRO => "ro-RO",
-            Language::BulgarianBG => "bg-BG",
-        }
-    }
-
-    /// Get the language identifier for this language
-    pub fn language_id(self) -> LanguageIdentifier {
-        self.language_tag().parse().unwrap()
-    }
-
-    /// Get the directory name for localization files (using BCP 47 language tags)
-    pub fn directory_name(self) -> &'static str {
-        self.language_tag()
-    }
-
-    /// Get a human-readable name for the language
-    pub fn display_name(self) -> &'static str {
-        match self {
-            Language::EnglishUS => "English (United States)",
-            Language::SpanishES => "Español (España)",
-            Language::GermanDE => "Deutsch (Deutschland)",
-            Language::CzechCZ => "Čeština (Česká republika)",
-            Language::SlovakSK => "Slovenčina (Slovensko)",
-            Language::PolishPL => "Polski (Polska)",
-            Language::HungarianHU => "Magyar (Magyarország)",
-            Language::FrenchFR => "Français (France)",
-            Language::ItalianIT => "Italiano (Italia)",
-            Language::PortugueseBR => "Português (Brasil)",
-            Language::ChineseCN => "中文 (中国)",
-            Language::JapaneseJP => "日本語 (日本)",
-            Language::SlovenianSI => "Slovenščina (Slovenija)",
-            Language::CroatianHR => "Hrvatski (Hrvatska)",
-            Language::RomanianRO => "Română (România)",
-            Language::BulgarianBG => "Български (България)",
-        }
-    }
-
     /// Get all supported languages
     pub fn all() -> Vec<Language> {
         vec![
@@ -106,8 +47,6 @@ impl Language {
             Language::FrenchFR,
             Language::ItalianIT,
             Language::PortugueseBR,
-            Language::ChineseCN,
-            Language::JapaneseJP,
             Language::SlovenianSI,
             Language::CroatianHR,
             Language::RomanianRO,
@@ -128,8 +67,6 @@ impl Language {
             "fr-FR" | "fr" => Some(Language::FrenchFR),
             "it-IT" | "it" => Some(Language::ItalianIT),
             "pt-BR" => Some(Language::PortugueseBR),
-            "zh-CN" | "zh" => Some(Language::ChineseCN),
-            "ja-JP" | "ja" => Some(Language::JapaneseJP),
             "sl-SI" | "sl" => Some(Language::SlovenianSI),
             "hr-HR" | "hr" => Some(Language::CroatianHR),
             "ro-RO" | "ro" => Some(Language::RomanianRO),
@@ -257,11 +194,5 @@ impl LocalizedText {
             key: key.into(),
             args,
         }
-    }
-
-    /// Add an argument to the localized text
-    pub fn with_arg(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
-        self.args.push((key.into(), value.into()));
-        self
     }
 }

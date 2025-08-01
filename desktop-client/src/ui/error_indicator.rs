@@ -25,7 +25,6 @@ impl Default for ErrorResource {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bevy::ecs::system::ResMut;
 
     #[test]
     fn test_error_indicator_behavior() {
@@ -43,27 +42,6 @@ mod tests {
         assert!(error_resource.indicator_on);
         assert_eq!(error_resource.messages.len(), 1);
         assert_eq!(error_resource.messages[0], "Test error");
-    }
-
-    #[test]
-    fn test_should_show_error() {
-        // Error should show when indicator is on and time is within 5 seconds
-        assert!(should_show_error(true, 2.0));
-        assert!(should_show_error(true, 4.9));
-
-        // Error should not show when time exceeds 5 seconds
-        assert!(!should_show_error(true, 5.0));
-        assert!(!should_show_error(true, 10.0));
-
-        // Error should not show when indicator is off
-        assert!(!should_show_error(false, 2.0));
-        assert!(!should_show_error(false, 10.0));
-    }
-
-    #[test]
-    fn test_get_error_display_text() {
-        assert_eq!(get_error_display_text(true), "ERROR");
-        assert_eq!(get_error_display_text(false), "");
     }
 }
 
@@ -155,18 +133,4 @@ pub fn trigger_error(
 
     // Send to console
     print_console_line.write(PrintConsoleLine::new(format!("ERROR: {}", message)));
-}
-
-/// Pure function to determine if error should be shown based on time elapsed
-pub fn should_show_error(indicator_on: bool, time_since_last_error: f32) -> bool {
-    indicator_on && time_since_last_error < 5.0
-}
-
-/// Pure function to get error display text
-pub fn get_error_display_text(should_show: bool) -> String {
-    if should_show {
-        "ERROR".to_string()
-    } else {
-        "".to_string()
-    }
 }

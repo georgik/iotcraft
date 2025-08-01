@@ -642,6 +642,7 @@ fn handle_escape_key(
 }
 
 /// Pure function to format timestamp for world selection display
+#[allow(dead_code)]
 pub fn format_last_played_time(rfc3339_timestamp: &str) -> String {
     if let Ok(datetime) = chrono::DateTime::parse_from_rfc3339(rfc3339_timestamp) {
         datetime.format("%Y-%m-%d %H:%M").to_string()
@@ -651,6 +652,7 @@ pub fn format_last_played_time(rfc3339_timestamp: &str) -> String {
 }
 
 /// Pure function to generate new world name with timestamp
+#[allow(dead_code)]
 pub fn generate_new_world_name() -> String {
     format!("NewWorld-{}", chrono::Utc::now().timestamp())
 }

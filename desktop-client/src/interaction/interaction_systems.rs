@@ -52,7 +52,7 @@ mod tests {
         DeviceEntity,
         device_types::{DoorState, OriginalPosition},
     };
-    use bevy::{ecs::system::IntoSystem, prelude::*};
+    use bevy::ecs::system::IntoSystem;
 
     #[test]
     fn test_handle_interaction_events_lamp() {
