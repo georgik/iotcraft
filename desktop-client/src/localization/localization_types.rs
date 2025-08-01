@@ -1,51 +1,65 @@
 use bevy::prelude::*;
 use unic_langid::LanguageIdentifier;
 
-/// Supported languages in the application
+/// Supported languages in the application using BCP 47 language tags
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Language {
-    English,
-    Spanish,
-    German,
+    /// English (United States)
+    EnglishUS,
+    /// Spanish (Spain)
+    SpanishES,
+    /// German (Germany)
+    GermanDE,
 }
 
 impl Language {
-    /// Get the language identifier for this language
-    pub fn language_id(self) -> LanguageIdentifier {
+    /// Get the BCP 47 language tag for this language
+    pub fn language_tag(self) -> &'static str {
         match self {
-            Language::English => "en-US".parse().unwrap(),
-            Language::Spanish => "es-ES".parse().unwrap(),
-            Language::German => "de-DE".parse().unwrap(),
+            Language::EnglishUS => "en-US",
+            Language::SpanishES => "es-ES",
+            Language::GermanDE => "de-DE",
         }
     }
 
-    /// Get the directory name for localization files
+    /// Get the language identifier for this language
+    pub fn language_id(self) -> LanguageIdentifier {
+        self.language_tag().parse().unwrap()
+    }
+
+    /// Get the directory name for localization files (using BCP 47 language tags)
     pub fn directory_name(self) -> &'static str {
-        match self {
-            Language::English => "en",
-            Language::Spanish => "es",
-            Language::German => "de",
-        }
+        self.language_tag()
     }
 
     /// Get a human-readable name for the language
     pub fn display_name(self) -> &'static str {
         match self {
-            Language::English => "English",
-            Language::Spanish => "Español",
-            Language::German => "Deutsch",
+            Language::EnglishUS => "English (United States)",
+            Language::SpanishES => "Español (España)",
+            Language::GermanDE => "Deutsch (Deutschland)",
         }
     }
 
     /// Get all supported languages
     pub fn all() -> Vec<Language> {
-        vec![Language::English, Language::Spanish, Language::German]
+        vec![Language::EnglishUS, Language::SpanishES, Language::GermanDE]
+    }
+
+    /// Parse a BCP 47 language tag into a Language enum variant
+    pub fn from_language_tag(tag: &str) -> Option<Language> {
+        match tag {
+            "en-US" | "en" => Some(Language::EnglishUS),
+            "es-ES" | "es" => Some(Language::SpanishES),
+            "de-DE" | "de" => Some(Language::GermanDE),
+            _ => None,
+        }
     }
 }
 
 impl Default for Language {
     fn default() -> Self {
-        Language::English
+        Language::EnglishUS
     }
 }
 
@@ -59,8 +73,8 @@ pub struct LocalizationConfig {
 impl Default for LocalizationConfig {
     fn default() -> Self {
         Self {
-            current_language: Language::English,
-            fallback_language: Language::English,
+            current_language: Language::EnglishUS,
+            fallback_language: Language::EnglishUS,
         }
     }
 }

@@ -78,9 +78,9 @@ impl LocalizationBundle {
     /// Get the default localization content for each language
     fn get_localization_content(&self, language: Language) -> String {
         match language {
-            Language::English => include_str!("../../localization/en/main.ftl").to_string(),
-            Language::Spanish => include_str!("../../localization/es/main.ftl").to_string(),
-            Language::German => include_str!("../../localization/de/main.ftl").to_string(),
+            Language::EnglishUS => include_str!("../../localization/en-US/main.ftl").to_string(),
+            Language::SpanishES => include_str!("../../localization/es-ES/main.ftl").to_string(),
+            Language::GermanDE => include_str!("../../localization/de-DE/main.ftl").to_string(),
         }
     }
 }
@@ -93,14 +93,14 @@ mod tests {
     fn test_localization_bundle_loads_english() {
         let mut bundle = LocalizationBundle::new();
         bundle
-            .load_language(Language::English)
+            .load_language(Language::EnglishUS)
             .expect("Failed to load English");
 
         // Test basic key retrieval
-        let text = bundle.get_text(Language::English, "menu-enter-world", &[]);
+        let text = bundle.get_text(Language::EnglishUS, "menu-enter-world", &[]);
         assert_eq!(text, "Enter the world");
 
-        let text = bundle.get_text(Language::English, "menu-quit-application", &[]);
+        let text = bundle.get_text(Language::EnglishUS, "menu-quit-application", &[]);
         assert_eq!(text, "Quit Application");
     }
 
@@ -108,12 +108,12 @@ mod tests {
     fn test_localization_bundle_with_args() {
         let mut bundle = LocalizationBundle::new();
         bundle
-            .load_language(Language::English)
+            .load_language(Language::EnglishUS)
             .expect("Failed to load English");
 
         // Test with arguments
         let args = vec![("time".to_string(), "2023-12-25 15:30".to_string())];
-        let text = bundle.get_text(Language::English, "world-last-played", &args);
+        let text = bundle.get_text(Language::EnglishUS, "world-last-played", &args);
         assert_eq!(text, "Last played: 2023-12-25 15:30");
     }
 
@@ -122,7 +122,7 @@ mod tests {
         let bundle = LocalizationBundle::new();
 
         // Should return the key when translation is not found
-        let text = bundle.get_text(Language::English, "non-existent-key", &[]);
+        let text = bundle.get_text(Language::EnglishUS, "non-existent-key", &[]);
         assert_eq!(text, "non-existent-key");
     }
 }
