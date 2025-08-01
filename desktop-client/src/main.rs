@@ -18,6 +18,7 @@ mod config;
 mod console;
 mod devices;
 mod environment;
+mod fonts;
 mod interaction;
 mod inventory;
 mod localization;
@@ -33,6 +34,7 @@ use console::console_types::{LookCommand, TeleportCommand};
 use console::*;
 use devices::*;
 use environment::*;
+use fonts::{FontPlugin, Fonts};
 use interaction::InteractionPlugin as MyInteractionPlugin;
 use inventory::{InventoryPlugin, PlayerInventory, handle_give_command};
 use localization::{LocalizationConfig, LocalizationPlugin};
@@ -981,12 +983,26 @@ fn main() {
         localization_config.current_language
     );
 
-    App::new()
-        .insert_resource(localization_config)
+    let mut app = App::new();
+
+    // Initialize resources first
+    app.insert_resource(localization_config)
         .insert_resource(ClearColor(Color::srgb(0.53, 0.81, 0.92)))
-        .insert_resource(mqtt_config)
-        .add_plugins(DefaultPlugins)
-        .add_plugins(LocalizationPlugin) // Load localization first
+        .insert_resource(mqtt_config);
+
+    // Add default plugins and initialize AssetServer
+    app.add_plugins(DefaultPlugins);
+
+    // Initialize fonts resource immediately after AssetServer is available
+    // We need to do this in a way that ensures AssetServer exists
+    app.world_mut()
+        .resource_scope(|world, asset_server: Mut<AssetServer>| {
+            let fonts = Fonts::new(&asset_server);
+            world.insert_resource(fonts);
+        });
+
+    app.add_plugins(FontPlugin) // Keep FontPlugin for any additional font-related systems
+        .add_plugins(LocalizationPlugin) // Load localization after fonts
         .add_plugins(CameraControllerPlugin)
         .add_plugins(ConsolePlugin)
         .add_plugins(DevicePlugin)
@@ -1340,7 +1356,7 @@ fn update_diagnostics_content(
 }
 
 // System to setup diagnostics UI
-fn setup_diagnostics_ui(mut commands: Commands) {
+fn setup_diagnostics_ui(mut commands: Commands, fonts: Res<Fonts>) {
     // Create a full-width diagnostics panel at the top
     commands
         .spawn((
@@ -1363,8 +1379,10 @@ fn setup_diagnostics_ui(mut commands: Commands) {
             parent.spawn((
                 Text::new("IoTCraft Debug Information (Press F3 to toggle)\n\nLoading..."),
                 TextFont {
+                    font: fonts.regular.clone(),
                     font_size: 16.0,
-                    ..default()
+                    font_smoothing: bevy::text::FontSmoothing::default(),
+                    line_height: bevy::text::LineHeight::default(),
                 },
                 TextColor(Color::WHITE),
                 DiagnosticsText, // Component for text updates

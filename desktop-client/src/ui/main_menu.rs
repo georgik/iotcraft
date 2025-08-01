@@ -1,3 +1,4 @@
+use crate::fonts::Fonts;
 use crate::localization::{
     LocalizationBundle, LocalizationConfig, LocalizedText, get_localized_text,
 };
@@ -116,6 +117,7 @@ fn setup_main_menu(
     mut commands: Commands,
     _localization_bundle: Res<LocalizationBundle>,
     _localization_config: Res<LocalizationConfig>,
+    fonts: Res<Fonts>,
 ) {
     commands
         .spawn((
@@ -159,8 +161,10 @@ fn setup_main_menu(
                                 Text::new(""), // Will be filled by localization system
                                 LocalizedText::new("menu-enter-world"),
                                 TextFont {
+                                    font: fonts.regular.clone(),
                                     font_size: 20.0,
-                                    ..default()
+                                    font_smoothing: bevy::text::FontSmoothing::default(),
+                                    line_height: bevy::text::LineHeight::default(),
                                 },
                                 TextColor(Color::WHITE),
                             ));
@@ -185,8 +189,10 @@ fn setup_main_menu(
                                 Text::new(""), // Will be filled by localization system
                                 LocalizedText::new("menu-quit-application"),
                                 TextFont {
+                                    font: fonts.regular.clone(),
                                     font_size: 20.0,
-                                    ..default()
+                                    font_smoothing: bevy::text::FontSmoothing::default(),
+                                    line_height: bevy::text::LineHeight::default(),
                                 },
                                 TextColor(Color::WHITE),
                             ));
@@ -256,6 +262,7 @@ fn setup_world_selection_menu(
     discovered_worlds: Res<DiscoveredWorlds>,
     localization_bundle: Res<LocalizationBundle>,
     localization_config: Res<LocalizationConfig>,
+    fonts: Res<Fonts>,
 ) {
     commands
         .spawn((
@@ -281,8 +288,10 @@ fn setup_world_selection_menu(
                     &[],
                 )),
                 TextFont {
+                    font: fonts.regular.clone(),
                     font_size: 40.0,
-                    ..default()
+                    font_smoothing: bevy::text::FontSmoothing::default(),
+                    line_height: bevy::text::LineHeight::default(),
                 },
                 TextColor(Color::WHITE),
             ));
@@ -317,8 +326,10 @@ fn setup_world_selection_menu(
                         parent.spawn((
                             Text::new(world_info.name.clone()),
                             TextFont {
+                                font: fonts.regular.clone(),
                                 font_size: 18.0,
-                                ..default()
+                                font_smoothing: bevy::text::FontSmoothing::default(),
+                                line_height: bevy::text::LineHeight::default(),
                             },
                             TextColor(Color::WHITE),
                         ));
@@ -332,8 +343,10 @@ fn setup_world_selection_menu(
                                 &[("time".to_string(), last_played)],
                             )),
                             TextFont {
+                                font: fonts.regular.clone(),
                                 font_size: 14.0,
-                                ..default()
+                                font_smoothing: bevy::text::FontSmoothing::default(),
+                                line_height: bevy::text::LineHeight::default(),
                             },
                             TextColor(Color::srgb(0.8, 0.8, 0.8)),
                         ));

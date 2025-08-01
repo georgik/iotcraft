@@ -1,5 +1,6 @@
 use super::device_types::*;
 use crate::config::MqttConfig;
+use crate::fonts::Fonts;
 use bevy::prelude::*;
 use bevy_console::ConsoleOpen;
 use log::{error, info};
@@ -71,7 +72,7 @@ impl Plugin for DevicePositioningPlugin {
     }
 }
 
-fn setup_device_info_ui(mut commands: Commands) {
+fn setup_device_info_ui(mut commands: Commands, fonts: Res<Fonts>) {
     commands
         .spawn((
             Node {
@@ -93,8 +94,10 @@ fn setup_device_info_ui(mut commands: Commands) {
             parent.spawn((
                 Text::new("Device Info: "),
                 TextFont {
+                    font: fonts.regular.clone(),
                     font_size: 20.0,
-                    ..Default::default()
+                    font_smoothing: bevy::text::FontSmoothing::default(),
+                    line_height: bevy::text::LineHeight::default(),
                 },
                 TextColor(Color::WHITE),
                 DeviceInfoText,

@@ -30,9 +30,11 @@ pub trait LocalizationConfigHelper {
     fn set_language(&mut self, language: Language) -> bool;
 
     /// Get the current language
+    #[allow(dead_code)]
     fn current_language(&self) -> Language;
 
     /// Get the fallback language
+    #[allow(dead_code)]
     fn fallback_language(&self) -> Language;
 }
 

@@ -1,3 +1,4 @@
+use crate::fonts::Fonts;
 use bevy::prelude::*;
 use bevy_console::PrintConsoleLine;
 
@@ -76,7 +77,7 @@ impl Plugin for ErrorIndicatorPlugin {
     }
 }
 
-fn setup_error_indicator(mut commands: Commands) {
+fn setup_error_indicator(mut commands: Commands, fonts: Res<Fonts>) {
     // Create error indicator UI in top-right corner
     commands
         .spawn((
@@ -97,8 +98,10 @@ fn setup_error_indicator(mut commands: Commands) {
             parent.spawn((
                 Text::new(""),
                 TextFont {
+                    font: fonts.regular.clone(),
                     font_size: 16.0,
-                    ..default()
+                    font_smoothing: bevy::text::FontSmoothing::default(),
+                    line_height: bevy::text::LineHeight::default(),
                 },
                 TextColor(Color::srgb(1.0, 0.2, 0.2)), // Red color for errors
                 ErrorIndicator,

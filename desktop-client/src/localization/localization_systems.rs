@@ -1,3 +1,4 @@
+use crate::fonts::Fonts;
 use crate::localization::{
     Language, LanguageChangeEvent, LocalizationBundle, LocalizationConfig,
     LocalizationConfigHelper, LocalizedText, get_localized_text,
@@ -78,35 +79,43 @@ pub fn initialize_localized_text(
 }
 
 /// Helper function to create a text bundle with localization
+#[allow(dead_code)]
 pub fn create_localized_text_bundle(
     key: impl Into<String>,
     font_size: f32,
     color: Color,
+    fonts: &Fonts,
 ) -> (Text, LocalizedText, TextFont, TextColor) {
     (
         Text::new(""), // Will be filled by the localization system
         LocalizedText::new(key),
         TextFont {
+            font: fonts.regular.clone(),
             font_size,
-            ..default()
+            font_smoothing: bevy::text::FontSmoothing::default(),
+            line_height: bevy::text::LineHeight::default(),
         },
         TextColor(color),
     )
 }
 
 /// Helper function to create a text bundle with localization and arguments
+#[allow(dead_code)]
 pub fn create_localized_text_bundle_with_args(
     key: impl Into<String>,
     args: Vec<(String, String)>,
     font_size: f32,
     color: Color,
+    fonts: &Fonts,
 ) -> (Text, LocalizedText, TextFont, TextColor) {
     (
         Text::new(""), // Will be filled by the localization system
         LocalizedText::with_args(key, args),
         TextFont {
+            font: fonts.regular.clone(),
             font_size,
-            ..default()
+            font_smoothing: bevy::text::FontSmoothing::default(),
+            line_height: bevy::text::LineHeight::default(),
         },
         TextColor(color),
     )
