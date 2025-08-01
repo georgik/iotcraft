@@ -1,24 +1,24 @@
 # Main Menu
-menu-enter-world = Enter the world
-menu-quit-application = Quit Application
-menu-select-world = Select a World
-menu-create-new-world = Create New World
-menu-return-to-game = Return to Game
-menu-save-and-quit = Save and Quit to Main Menu
-menu-quit-no-save = Quit to Main Menu (No Save)
+menu-enter-world = Lépjen be a világba
+menu-quit-application = Kilépés az alkalmazásból
+menu-select-world = Válasszon világot
+menu-create-new-world = Új világ létrehozása
+menu-return-to-game = Vissza a játékhoz
+menu-save-and-quit = Mentés és kilépés a főmenübe
+menu-quit-no-save = Kilépés a főmenübe (mentés nélkül)
 
 # World Selection
-world-last-played = Last played: {$time}
-world-unknown-time = Unknown
+world-last-played = Utoljára játszott: {$time}
+world-unknown-time = Ismeretlen
 
 # Inventory and Items
-item-grass = Grass
-item-dirt = Dirt  
-item-stone = Stone
-item-quartz-block = Quartz Block
-item-glass-pane = Glass Pane
-item-cyan-terracotta = Cyan Terracotta
-inventory-empty = Empty
+item-grass = Fű
+item-dirt = Föld
+item-stone = Kő
+item-quartz-block = Kvarc blokk
+item-glass-pane = Üvegtábla
+item-cyan-terracotta = Cián terrakotta
+inventory-empty = Üres
 
 # Console Commands
 console-blink-started = Blink started

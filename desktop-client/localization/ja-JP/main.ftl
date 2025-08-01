@@ -1,24 +1,24 @@
 # Main Menu
-menu-enter-world = Enter the world
-menu-quit-application = Quit Application
-menu-select-world = Select a World
-menu-create-new-world = Create New World
-menu-return-to-game = Return to Game
-menu-save-and-quit = Save and Quit to Main Menu
-menu-quit-no-save = Quit to Main Menu (No Save)
+menu-enter-world = 世界に入る
+menu-quit-application = アプリケーションを終了
+menu-select-world = ワールドを選択
+menu-create-new-world = 新しい世界を作成
+menu-return-to-game = ゲームに戻る
+menu-save-and-quit = 保存してメインメニューに戻る
+menu-quit-no-save = 保存せずにメインメニューに戻る
 
 # World Selection
-world-last-played = Last played: {$time}
-world-unknown-time = Unknown
+world-last-played = 最後の再生日： {$time}
+world-unknown-time = 不明
 
 # Inventory and Items
-item-grass = Grass
-item-dirt = Dirt  
-item-stone = Stone
-item-quartz-block = Quartz Block
-item-glass-pane = Glass Pane
-item-cyan-terracotta = Cyan Terracotta
-inventory-empty = Empty
+item-grass = 草
+item-dirt = 土
+item-stone = 石
+item-quartz-block = 石英ブロック
+item-glass-pane = ガラスパネル
+item-cyan-terracotta = シアンテラコッタ
+inventory-empty = 空
 
 # Console Commands
 console-blink-started = Blink started

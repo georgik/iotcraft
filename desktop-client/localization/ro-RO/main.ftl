@@ -1,24 +1,24 @@
 # Main Menu
-menu-enter-world = Enter the world
-menu-quit-application = Quit Application
-menu-select-world = Select a World
-menu-create-new-world = Create New World
-menu-return-to-game = Return to Game
-menu-save-and-quit = Save and Quit to Main Menu
-menu-quit-no-save = Quit to Main Menu (No Save)
+menu-enter-world = Intra în lume
+menu-quit-application = Închide aplicația
+menu-select-world = Selectează o lume
+menu-create-new-world = Creează o lume nouă
+menu-return-to-game = Înapoi la joc
+menu-save-and-quit = Salvează și ieși în meniul principal
+menu-quit-no-save = Ieși în meniul principal (fără salvare)
 
 # World Selection
-world-last-played = Last played: {$time}
-world-unknown-time = Unknown
+world-last-played = Ultima dată jucat: {$time}
+world-unknown-time = Necunoscut
 
 # Inventory and Items
-item-grass = Grass
-item-dirt = Dirt  
-item-stone = Stone
-item-quartz-block = Quartz Block
-item-glass-pane = Glass Pane
-item-cyan-terracotta = Cyan Terracotta
-inventory-empty = Empty
+item-grass = Iarbă
+item-dirt = Pământ
+item-stone = Piatră
+item-quartz-block = Bloc de cuarț
+item-glass-pane = Panou de sticlă
+item-cyan-terracotta = Teracotă cyan
+inventory-empty = Gol
 
 # Console Commands
 console-blink-started = Blink started

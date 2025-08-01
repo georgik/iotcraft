@@ -1,24 +1,24 @@
 # Main Menu
-menu-enter-world = Enter the world
-menu-quit-application = Quit Application
-menu-select-world = Select a World
-menu-create-new-world = Create New World
-menu-return-to-game = Return to Game
-menu-save-and-quit = Save and Quit to Main Menu
-menu-quit-no-save = Quit to Main Menu (No Save)
+menu-enter-world = Uđite u svijet
+menu-quit-application = Zatvori aplikaciju
+menu-select-world = Odaberite svijet
+menu-create-new-world = Stvorite novi svijet
+menu-return-to-game = Povratak u igru
+menu-save-and-quit = Spremi i izađi u glavni izbornik
+menu-quit-no-save = Izađite u glavni izbornik (bez spremanja)
 
 # World Selection
-world-last-played = Last played: {$time}
-world-unknown-time = Unknown
+world-last-played = Zadnji put igrano: {$time}
+world-unknown-time = Nepoznato
 
 # Inventory and Items
-item-grass = Grass
-item-dirt = Dirt  
-item-stone = Stone
-item-quartz-block = Quartz Block
-item-glass-pane = Glass Pane
-item-cyan-terracotta = Cyan Terracotta
-inventory-empty = Empty
+item-grass = Trava
+item-dirt = Zemlja
+item-stone = Kamen
+item-quartz-block = Kvarcni blok
+item-glass-pane = Stakleni panel
+item-cyan-terracotta = Cijan terakota
+inventory-empty = Prazno
 
 # Console Commands
 console-blink-started = Blink started
