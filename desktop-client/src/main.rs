@@ -35,7 +35,7 @@ use devices::*;
 use environment::*;
 use interaction::InteractionPlugin as MyInteractionPlugin;
 use inventory::{InventoryPlugin, PlayerInventory, handle_give_command};
-use localization::LocalizationPlugin;
+use localization::{LocalizationConfig, LocalizationPlugin};
 use mqtt::{MqttPlugin, *};
 use ui::{CrosshairPlugin, ErrorIndicatorPlugin, GameState, InventoryUiPlugin, MainMenuPlugin};
 use world::WorldPlugin;
@@ -72,6 +72,9 @@ struct Args {
     /// Script file to execute on startup
     #[arg(short, long)]
     script: Option<String>,
+    /// Force a specific language (BCP 47 format, e.g., en-US, cs-CZ, pt-BR)
+    #[arg(short, long)]
+    language: Option<String>,
 }
 
 // Script execution system
@@ -971,7 +974,15 @@ fn main() {
     let mqtt_config = MqttConfig::from_env();
     info!("Using MQTT broker: {}", mqtt_config.broker_address());
 
+    // Determine the language configuration
+    let localization_config = LocalizationConfig::new(args.language);
+    info!(
+        "Initial language set to: {:?}",
+        localization_config.current_language
+    );
+
     App::new()
+        .insert_resource(localization_config)
         .insert_resource(ClearColor(Color::srgb(0.53, 0.81, 0.92)))
         .insert_resource(mqtt_config)
         .add_plugins(DefaultPlugins)

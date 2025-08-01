@@ -81,6 +81,19 @@ impl LocalizationBundle {
             Language::EnglishUS => include_str!("../../localization/en-US/main.ftl").to_string(),
             Language::SpanishES => include_str!("../../localization/es-ES/main.ftl").to_string(),
             Language::GermanDE => include_str!("../../localization/de-DE/main.ftl").to_string(),
+            Language::CzechCZ => include_str!("../../localization/cs-CZ/main.ftl").to_string(),
+            Language::SlovakSK => include_str!("../../localization/sk-SK/main.ftl").to_string(),
+            Language::PolishPL => include_str!("../../localization/pl-PL/main.ftl").to_string(),
+            Language::HungarianHU => include_str!("../../localization/hu-HU/main.ftl").to_string(),
+            Language::FrenchFR => include_str!("../../localization/fr-FR/main.ftl").to_string(),
+            Language::ItalianIT => include_str!("../../localization/it-IT/main.ftl").to_string(),
+            Language::PortugueseBR => include_str!("../../localization/pt-BR/main.ftl").to_string(),
+            Language::ChineseCN => include_str!("../../localization/zh-CN/main.ftl").to_string(),
+            Language::JapaneseJP => include_str!("../../localization/ja-JP/main.ftl").to_string(),
+            Language::SlovenianSI => include_str!("../../localization/sl-SI/main.ftl").to_string(),
+            Language::CroatianHR => include_str!("../../localization/hr-HR/main.ftl").to_string(),
+            Language::RomanianRO => include_str!("../../localization/ro-RO/main.ftl").to_string(),
+            Language::BulgarianBG => include_str!("../../localization/bg-BG/main.ftl").to_string(),
         }
     }
 }
