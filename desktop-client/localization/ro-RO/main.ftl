@@ -5,7 +5,10 @@ menu-select-world = Selectează o lume
 menu-create-new-world = Creează o lume nouă
 menu-return-to-game = Înapoi la joc
 menu-save-and-quit = Salvează și ieși în meniul principal
-menu-quit-no-save = Ieși în meniul principal (fără salvare)
+menu-quit-no-save = Ieșire la meniul principal (fără salvare)
+menu-language = Limba:
+menu-settings = Setări
+menu-back-to-main = Înapoi la meniul principal
 
 # World Selection
 world-last-played = Ultima dată jucat: {$time}

@@ -1,6 +1,7 @@
 use crate::fonts::Fonts;
 use crate::localization::{
-    LocalizationBundle, LocalizationConfig, LocalizedText, get_localized_text,
+    Language, LanguageChangeEvent, LocalizationBundle, LocalizationConfig, LocalizedText,
+    get_localized_text,
 };
 use crate::world::{CreateWorldEvent, DiscoveredWorlds, LoadWorldEvent, SaveWorldEvent};
 use bevy::{app::AppExit, prelude::*};
@@ -20,6 +21,8 @@ impl Plugin for MainMenuPlugin {
                 OnExit(GameState::WorldSelection),
                 despawn_world_selection_menu,
             )
+            .add_systems(OnEnter(GameState::Settings), setup_settings_menu)
+            .add_systems(OnExit(GameState::Settings), despawn_settings_menu)
             .add_systems(OnEnter(GameState::GameplayMenu), setup_gameplay_menu)
             .add_systems(OnExit(GameState::GameplayMenu), despawn_gameplay_menu)
             .add_systems(OnEnter(GameState::InGame), grab_cursor_on_game_start)
@@ -27,6 +30,8 @@ impl Plugin for MainMenuPlugin {
                 Update,
                 (
                     main_menu_interaction.run_if(in_state(GameState::MainMenu)),
+                    settings_menu_interaction.run_if(in_state(GameState::Settings)),
+                    language_button_interaction.run_if(in_state(GameState::Settings)),
                     world_selection_interaction.run_if(in_state(GameState::WorldSelection)),
                     gameplay_menu_interaction.run_if(in_state(GameState::GameplayMenu)),
                     handle_escape_key,
@@ -102,11 +107,28 @@ pub struct SaveAndQuitButton;
 #[derive(Component)]
 pub struct QuitToMenuButton;
 
+/// Component for language selector buttons
+#[derive(Component)]
+pub struct LanguageButton(pub Language);
+
+/// Component for the Settings button
+#[derive(Component)]
+pub struct SettingsButton;
+
+/// Component to mark the settings menu UI
+#[derive(Component)]
+pub struct SettingsMenu;
+
+/// Component for the Back to Main Menu button in settings
+#[derive(Component)]
+pub struct BackToMainMenuButton;
+
 /// Game state enum
 #[derive(Debug, Clone, Eq, PartialEq, Hash, States, Default)]
 pub enum GameState {
     #[default]
     MainMenu,
+    Settings,
     WorldSelection,
     GameplayMenu,
     InGame,
@@ -170,6 +192,34 @@ fn setup_main_menu(
                             ));
                         });
 
+                    // Settings button
+                    parent
+                        .spawn((
+                            Button,
+                            Node {
+                                width: Val::Px(300.0),
+                                height: Val::Px(50.0),
+                                justify_content: JustifyContent::Center,
+                                align_items: AlignItems::Center,
+                                ..default()
+                            },
+                            BackgroundColor(Color::srgb(0.15, 0.15, 0.15)),
+                            SettingsButton,
+                        ))
+                        .with_children(|parent| {
+                            parent.spawn((
+                                Text::new(""), // Will be filled by localization system
+                                LocalizedText::new("menu-settings"),
+                                TextFont {
+                                    font: fonts.regular.clone(),
+                                    font_size: 20.0,
+                                    font_smoothing: bevy::text::FontSmoothing::default(),
+                                    line_height: bevy::text::LineHeight::default(),
+                                },
+                                TextColor(Color::WHITE),
+                            ));
+                        });
+
                     // Quit button
                     parent
                         .spawn((
@@ -212,12 +262,21 @@ fn main_menu_interaction(
         (&Interaction, &mut BackgroundColor),
         (Changed<Interaction>, With<EnterWorldButton>),
     >,
+    mut settings_query: Query<
+        (&Interaction, &mut BackgroundColor),
+        (
+            Changed<Interaction>,
+            With<SettingsButton>,
+            Without<EnterWorldButton>,
+        ),
+    >,
     mut quit_query: Query<
         (&Interaction, &mut BackgroundColor),
         (
             Changed<Interaction>,
             With<QuitButton>,
             Without<EnterWorldButton>,
+            Without<SettingsButton>,
         ),
     >,
     mut game_state: ResMut<NextState<GameState>>,
@@ -230,6 +289,22 @@ fn main_menu_interaction(
             Interaction::Pressed => {
                 *color = Color::srgb(0.35, 0.75, 0.35).into();
                 game_state.set(GameState::WorldSelection);
+            }
+            Interaction::Hovered => {
+                *color = Color::srgb(0.25, 0.25, 0.25).into();
+            }
+            Interaction::None => {
+                *color = Color::srgb(0.15, 0.15, 0.15).into();
+            }
+        }
+    }
+
+    // Handle Settings button
+    for (interaction, mut color) in settings_query.iter_mut() {
+        match *interaction {
+            Interaction::Pressed => {
+                *color = Color::srgb(0.35, 0.75, 0.35).into();
+                game_state.set(GameState::Settings);
             }
             Interaction::Hovered => {
                 *color = Color::srgb(0.25, 0.25, 0.25).into();
@@ -254,6 +329,66 @@ fn main_menu_interaction(
                 *color = Color::srgb(0.2, 0.1, 0.1).into();
             }
         }
+    }
+}
+
+fn language_button_interaction(
+    mut language_button_query: Query<
+        (&Interaction, &mut BackgroundColor, &LanguageButton),
+        (Changed<Interaction>, With<LanguageButton>),
+    >,
+    mut localization_config: ResMut<LocalizationConfig>,
+    mut language_change_events: EventWriter<LanguageChangeEvent>,
+) {
+    for (interaction, mut color, language_button) in language_button_query.iter_mut() {
+        let is_current = language_button.0 == localization_config.current_language;
+
+        match *interaction {
+            Interaction::Pressed => {
+                if !is_current {
+                    info!("Language changed to: {:?}", language_button.0);
+                    localization_config.current_language = language_button.0;
+                    language_change_events.write(LanguageChangeEvent {
+                        new_language: language_button.0,
+                    });
+                }
+                *color = Color::srgb(0.2, 0.4, 0.6).into(); // Pressed/selected color
+            }
+            Interaction::Hovered => {
+                if is_current {
+                    *color = Color::srgb(0.3, 0.5, 0.7).into(); // Lighter highlight for current
+                } else {
+                    *color = Color::srgb(0.2, 0.2, 0.2).into(); // Hover color for others
+                }
+            }
+            Interaction::None => {
+                if is_current {
+                    *color = Color::srgb(0.2, 0.4, 0.6).into(); // Current language color
+                } else {
+                    *color = Color::srgb(0.1, 0.1, 0.1).into(); // Normal color
+                }
+            }
+        }
+    }
+}
+
+/// Get display code for a language (e.g., "en-US", "de-DE", "fr-FR")
+fn get_language_display_code(language: Language) -> String {
+    match language {
+        Language::EnglishUS => "en-US".to_string(),
+        Language::SpanishES => "es-ES".to_string(),
+        Language::GermanDE => "de-DE".to_string(),
+        Language::CzechCZ => "cs-CZ".to_string(),
+        Language::SlovakSK => "sk-SK".to_string(),
+        Language::PolishPL => "pl-PL".to_string(),
+        Language::HungarianHU => "hu-HU".to_string(),
+        Language::FrenchFR => "fr-FR".to_string(),
+        Language::ItalianIT => "it-IT".to_string(),
+        Language::PortugueseBR => "pt-BR".to_string(),
+        Language::SlovenianSI => "sl-SI".to_string(),
+        Language::CroatianHR => "hr-HR".to_string(),
+        Language::RomanianRO => "ro-RO".to_string(),
+        Language::BulgarianBG => "bg-BG".to_string(),
     }
 }
 
@@ -627,6 +762,190 @@ fn gameplay_menu_interaction(
     }
 }
 
+fn setup_settings_menu(
+    mut commands: Commands,
+    localization_bundle: Res<LocalizationBundle>,
+    localization_config: Res<LocalizationConfig>,
+    fonts: Res<Fonts>,
+) {
+    commands
+        .spawn((
+            Node {
+                width: Val::Percent(100.0),
+                height: Val::Percent(100.0),
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+                flex_direction: FlexDirection::Column,
+                row_gap: Val::Px(20.0),
+                ..default()
+            },
+            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.5)),
+            SettingsMenu,
+        ))
+        .with_children(|parent| {
+            // Settings title
+            parent.spawn((
+                Text::new(get_localized_text(
+                    &localization_bundle,
+                    &localization_config,
+                    "menu-settings",
+                    &[],
+                )),
+                TextFont {
+                    font: fonts.regular.clone(),
+                    font_size: 40.0,
+                    font_smoothing: bevy::text::FontSmoothing::default(),
+                    line_height: bevy::text::LineHeight::default(),
+                },
+                TextColor(Color::WHITE),
+            ));
+
+            // Language label
+            parent.spawn((
+                Text::new(get_localized_text(
+                    &localization_bundle,
+                    &localization_config,
+                    "menu-language",
+                    &[],
+                )),
+                TextFont {
+                    font: fonts.regular.clone(),
+                    font_size: 20.0,
+                    font_smoothing: bevy::text::FontSmoothing::default(),
+                    line_height: bevy::text::LineHeight::default(),
+                },
+                TextColor(Color::WHITE),
+            ));
+
+            // Language buttons container
+            parent
+                .spawn(Node {
+                    flex_direction: FlexDirection::Row,
+                    justify_content: JustifyContent::Center,
+                    align_items: AlignItems::Center,
+                    column_gap: Val::Px(10.0),
+                    row_gap: Val::Px(10.0),
+                    flex_wrap: FlexWrap::Wrap,
+                    max_width: Val::Px(600.0),
+                    ..default()
+                })
+                .with_children(|parent| {
+                    // Create language buttons for all supported languages
+                    let languages = [
+                        Language::EnglishUS,
+                        Language::SpanishES,
+                        Language::GermanDE,
+                        Language::CzechCZ,
+                        Language::SlovakSK,
+                        Language::PolishPL,
+                        Language::HungarianHU,
+                        Language::FrenchFR,
+                        Language::ItalianIT,
+                        Language::PortugueseBR,
+                        Language::SlovenianSI,
+                        Language::CroatianHR,
+                        Language::RomanianRO,
+                        Language::BulgarianBG,
+                    ];
+
+                    for language in languages {
+                        let is_current = language == localization_config.current_language;
+                        parent
+                            .spawn((
+                                Button,
+                                Node {
+                                    width: Val::Px(80.0),
+                                    height: Val::Px(40.0),
+                                    justify_content: JustifyContent::Center,
+                                    align_items: AlignItems::Center,
+                                    ..default()
+                                },
+                                BackgroundColor(if is_current {
+                                    Color::srgb(0.2, 0.4, 0.6) // Current language color
+                                } else {
+                                    Color::srgb(0.1, 0.1, 0.1) // Normal color
+                                }),
+                                LanguageButton(language),
+                            ))
+                            .with_children(|parent| {
+                                parent.spawn((
+                                    Text::new(get_language_display_code(language)),
+                                    TextFont {
+                                        font: fonts.regular.clone(),
+                                        font_size: 14.0,
+                                        font_smoothing: bevy::text::FontSmoothing::default(),
+                                        line_height: bevy::text::LineHeight::default(),
+                                    },
+                                    TextColor(Color::WHITE),
+                                ));
+                            });
+                    }
+                });
+
+            // Back to Main Menu button
+            parent
+                .spawn((
+                    Button,
+                    Node {
+                        width: Val::Px(300.0),
+                        height: Val::Px(50.0),
+                        justify_content: JustifyContent::Center,
+                        align_items: AlignItems::Center,
+                        margin: UiRect::top(Val::Px(40.0)),
+                        ..default()
+                    },
+                    BackgroundColor(Color::srgb(0.15, 0.15, 0.15)),
+                    BackToMainMenuButton,
+                ))
+                .with_children(|parent| {
+                    parent.spawn((
+                        Text::new(get_localized_text(
+                            &localization_bundle,
+                            &localization_config,
+                            "menu-back-to-main",
+                            &[],
+                        )),
+                        TextFont {
+                            font: fonts.regular.clone(),
+                            font_size: 20.0,
+                            font_smoothing: bevy::text::FontSmoothing::default(),
+                            line_height: bevy::text::LineHeight::default(),
+                        },
+                        TextColor(Color::WHITE),
+                    ));
+                });
+        });
+}
+
+fn despawn_settings_menu(mut commands: Commands, query: Query<Entity, With<SettingsMenu>>) {
+    for entity in query.iter() {
+        commands.entity(entity).despawn();
+    }
+}
+
+fn settings_menu_interaction(
+    mut back_to_main_query: Query<
+        (&Interaction, &mut BackgroundColor),
+        (Changed<Interaction>, With<BackToMainMenuButton>),
+    >,
+    mut game_state: ResMut<NextState<GameState>>,
+) {
+    for (interaction, mut color) in back_to_main_query.iter_mut() {
+        match *interaction {
+            Interaction::Pressed => {
+                *color = Color::srgb(0.35, 0.75, 0.35).into();
+                game_state.set(GameState::MainMenu);
+            }
+            Interaction::Hovered => {
+                *color = Color::srgb(0.25, 0.25, 0.25).into();
+            }
+            Interaction::None => {
+                *color = Color::srgb(0.15, 0.15, 0.15).into();
+            }
+        }
+    }
+}
+
 fn handle_escape_key(
     keyboard_input: Res<ButtonInput<KeyCode>>,
     current_state: Res<State<GameState>>,
@@ -636,6 +955,7 @@ fn handle_escape_key(
         match **current_state {
             GameState::InGame => game_state.set(GameState::GameplayMenu),
             GameState::GameplayMenu => game_state.set(GameState::InGame),
+            GameState::Settings => game_state.set(GameState::MainMenu),
             _ => (),
         }
     }

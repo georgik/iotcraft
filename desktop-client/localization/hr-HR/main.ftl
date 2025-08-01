@@ -5,7 +5,10 @@ menu-select-world = Odaberite svijet
 menu-create-new-world = Stvorite novi svijet
 menu-return-to-game = Povratak u igru
 menu-save-and-quit = Spremi i izađi u glavni izbornik
-menu-quit-no-save = Izađite u glavni izbornik (bez spremanja)
+menu-quit-no-save = Izlaz u glavni izbornik (bez spremanja)
+menu-language = Jezik:
+menu-settings = Postavke
+menu-back-to-main = Povratak u glavni izbornik
 
 # World Selection
 world-last-played = Zadnji put igrano: {$time}

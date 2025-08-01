@@ -5,7 +5,10 @@ menu-select-world = Изберете свят
 menu-create-new-world = Създайте нов свят
 menu-return-to-game = Върнете се към играта
 menu-save-and-quit = Записвай и излезте към главното меню
-menu-quit-no-save = Излезте към главното меню (без запазване)
+menu-quit-no-save = Изход към главното меню (без запазване)
+menu-language = Език:
+menu-settings = Настройки
+menu-back-to-main = Назад към главното меню
 
 # World Selection
 world-last-played = Последно играно: {$time}

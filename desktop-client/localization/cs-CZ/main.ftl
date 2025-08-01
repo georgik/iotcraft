@@ -6,6 +6,9 @@ menu-create-new-world = Vytvořit nový svět
 menu-return-to-game = Vrátit se do hry
 menu-save-and-quit = Uložit a ukončit do hlavního menu
 menu-quit-no-save = Ukončit do hlavního menu (bez uložení)
+menu-language = Jazyk:
+menu-settings = Nastavení
+menu-back-to-main = Zpět do hlavního menu
 
 # World Selection
 world-last-played = Naposledy hráno: {$time}

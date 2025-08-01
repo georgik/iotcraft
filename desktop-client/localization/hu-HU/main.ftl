@@ -6,6 +6,9 @@ menu-create-new-world = Új világ létrehozása
 menu-return-to-game = Vissza a játékhoz
 menu-save-and-quit = Mentés és kilépés a főmenübe
 menu-quit-no-save = Kilépés a főmenübe (mentés nélkül)
+menu-language = Nyelv:
+menu-settings = Beállítások
+menu-back-to-main = Vissza a főmenübe
 
 # World Selection
 world-last-played = Utoljára játszott: {$time}
