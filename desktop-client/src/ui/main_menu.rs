@@ -1,3 +1,6 @@
+use crate::localization::{
+    LocalizationBundle, LocalizationConfig, LocalizedText, get_localized_text,
+};
 use crate::world::{CreateWorldEvent, DiscoveredWorlds, LoadWorldEvent, SaveWorldEvent};
 use bevy::{app::AppExit, prelude::*};
 
@@ -109,7 +112,11 @@ pub enum GameState {
     ConsoleOpen,
 }
 
-fn setup_main_menu(mut commands: Commands) {
+fn setup_main_menu(
+    mut commands: Commands,
+    _localization_bundle: Res<LocalizationBundle>,
+    _localization_config: Res<LocalizationConfig>,
+) {
     commands
         .spawn((
             Node {
@@ -149,7 +156,8 @@ fn setup_main_menu(mut commands: Commands) {
                         ))
                         .with_children(|parent| {
                             parent.spawn((
-                                Text::new("Enter the world"),
+                                Text::new(""), // Will be filled by localization system
+                                LocalizedText::new("menu-enter-world"),
                                 TextFont {
                                     font_size: 20.0,
                                     ..default()
@@ -174,7 +182,8 @@ fn setup_main_menu(mut commands: Commands) {
                         ))
                         .with_children(|parent| {
                             parent.spawn((
-                                Text::new("Quit Application"),
+                                Text::new(""), // Will be filled by localization system
+                                LocalizedText::new("menu-quit-application"),
                                 TextFont {
                                     font_size: 20.0,
                                     ..default()
@@ -242,7 +251,12 @@ fn main_menu_interaction(
     }
 }
 
-fn setup_world_selection_menu(mut commands: Commands, discovered_worlds: Res<DiscoveredWorlds>) {
+fn setup_world_selection_menu(
+    mut commands: Commands,
+    discovered_worlds: Res<DiscoveredWorlds>,
+    localization_bundle: Res<LocalizationBundle>,
+    localization_config: Res<LocalizationConfig>,
+) {
     commands
         .spawn((
             Node {
@@ -260,7 +274,12 @@ fn setup_world_selection_menu(mut commands: Commands, discovered_worlds: Res<Dis
         .with_children(|parent| {
             // Title
             parent.spawn((
-                Text::new("Select a World"),
+                Text::new(get_localized_text(
+                    &localization_bundle,
+                    &localization_config,
+                    "menu-select-world",
+                    &[],
+                )),
                 TextFont {
                     font_size: 40.0,
                     ..default()
@@ -306,7 +325,12 @@ fn setup_world_selection_menu(mut commands: Commands, discovered_worlds: Res<Dis
 
                         // Last played time on the right
                         parent.spawn((
-                            Text::new(format!("Last played: {}", last_played)),
+                            Text::new(get_localized_text(
+                                &localization_bundle,
+                                &localization_config,
+                                "world-last-played",
+                                &[("time".to_string(), last_played)],
+                            )),
                             TextFont {
                                 font_size: 14.0,
                                 ..default()
@@ -331,7 +355,12 @@ fn setup_world_selection_menu(mut commands: Commands, discovered_worlds: Res<Dis
                     CreateWorldButton,
                 ))
                 .with_children(|parent| {
-                    parent.spawn(Text::new("Create New World"));
+                    parent.spawn(Text::new(get_localized_text(
+                        &localization_bundle,
+                        &localization_config,
+                        "menu-create-new-world",
+                        &[],
+                    )));
                 });
         });
 }
@@ -403,7 +432,12 @@ fn world_selection_interaction(
     }
 }
 
-fn setup_gameplay_menu(mut commands: Commands, mut windows: Query<&mut Window>) {
+fn setup_gameplay_menu(
+    mut commands: Commands,
+    mut windows: Query<&mut Window>,
+    localization_bundle: Res<LocalizationBundle>,
+    localization_config: Res<LocalizationConfig>,
+) {
     // Release cursor when entering gameplay menu to allow UI interaction
     for mut window in &mut windows {
         info!("Releasing cursor for gameplay menu - setting to None");
@@ -439,7 +473,12 @@ fn setup_gameplay_menu(mut commands: Commands, mut windows: Query<&mut Window>) 
                     ReturnToGameButton,
                 ))
                 .with_children(|parent| {
-                    parent.spawn(Text::new("Return to Game"));
+                    parent.spawn(Text::new(get_localized_text(
+                        &localization_bundle,
+                        &localization_config,
+                        "menu-return-to-game",
+                        &[],
+                    )));
                 });
 
             // Save and Quit to Main Menu
@@ -457,7 +496,12 @@ fn setup_gameplay_menu(mut commands: Commands, mut windows: Query<&mut Window>) 
                     SaveAndQuitButton,
                 ))
                 .with_children(|parent| {
-                    parent.spawn(Text::new("Save and Quit to Main Menu"));
+                    parent.spawn(Text::new(get_localized_text(
+                        &localization_bundle,
+                        &localization_config,
+                        "menu-save-and-quit",
+                        &[],
+                    )));
                 });
 
             // Quit to Main Menu (without saving)
@@ -475,7 +519,12 @@ fn setup_gameplay_menu(mut commands: Commands, mut windows: Query<&mut Window>) 
                     QuitToMenuButton,
                 ))
                 .with_children(|parent| {
-                    parent.spawn(Text::new("Quit to Main Menu (No Save)"));
+                    parent.spawn(Text::new(get_localized_text(
+                        &localization_bundle,
+                        &localization_config,
+                        "menu-quit-no-save",
+                        &[],
+                    )));
                 });
         });
 }

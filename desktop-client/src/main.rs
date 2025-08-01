@@ -20,6 +20,7 @@ mod devices;
 mod environment;
 mod interaction;
 mod inventory;
+mod localization;
 mod mqtt;
 mod script;
 mod ui;
@@ -34,6 +35,7 @@ use devices::*;
 use environment::*;
 use interaction::InteractionPlugin as MyInteractionPlugin;
 use inventory::{InventoryPlugin, PlayerInventory, handle_give_command};
+use localization::LocalizationPlugin;
 use mqtt::{MqttPlugin, *};
 use ui::{CrosshairPlugin, ErrorIndicatorPlugin, GameState, InventoryUiPlugin, MainMenuPlugin};
 use world::WorldPlugin;
@@ -973,6 +975,7 @@ fn main() {
         .insert_resource(ClearColor(Color::srgb(0.53, 0.81, 0.92)))
         .insert_resource(mqtt_config)
         .add_plugins(DefaultPlugins)
+        .add_plugins(LocalizationPlugin) // Load localization first
         .add_plugins(CameraControllerPlugin)
         .add_plugins(ConsolePlugin)
         .add_plugins(DevicePlugin)
