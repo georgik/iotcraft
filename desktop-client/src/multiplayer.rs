@@ -145,7 +145,7 @@ fn start_multiplayer_connections(
         }
     });
 
-    // Publisher thread - simple approach using the existing pattern
+    // Publisher thread - persistent connection for publishing poses
     let pub_host = host.clone();
     let pub_client_id = format!("{}-pub", client_id);
     let publish_topic_template = format!("iotcraft/worlds/{}/players", world.0);
@@ -153,38 +153,77 @@ fn start_multiplayer_connections(
     thread::spawn(move || {
         info!("Starting multiplayer pose publisher...");
 
-        // Simple publisher - create new connection for each message like the original approach
-        // but with proper error handling and reconnection logic
-        while let Ok(msg) = outgoing_rx.recv() {
-            let topic = format!("{}/{}/pose", publish_topic_template, msg.player_id);
-            if let Ok(payload) = serde_json::to_string(&msg) {
-                // Use same pattern as existing console commands for consistency
-                let host_clone = pub_host.clone();
-                let client_id_clone = pub_client_id.clone();
+        loop {
+            let mut opts = MqttOptions::new(&pub_client_id, &pub_host, port);
+            opts.set_keep_alive(Duration::from_secs(30));
+            opts.set_clean_session(true);
 
-                // Short-lived connection for publishing (like existing code)
-                let mut opts = MqttOptions::new(&client_id_clone, &host_clone, port);
-                opts.set_keep_alive(Duration::from_secs(5));
-                let (client, mut conn) = Client::new(opts, 10);
+            let (client, mut conn) = Client::new(opts, 10);
+            info!("Pose publisher connecting to {}:{}...", pub_host, port);
 
-                if let Err(e) = client.publish(&topic, QoS::AtMostOnce, false, payload.as_bytes()) {
-                    error!("Failed to publish pose: {}", e);
-                    continue;
+            let mut connected = false;
+
+            // Handle connection events and publishing
+            'connection_loop: loop {
+                // Try to receive a message to publish (non-blocking)
+                match outgoing_rx.try_recv() {
+                    Ok(msg) => {
+                        if connected {
+                            let topic =
+                                format!("{}/{}/pose", publish_topic_template, msg.player_id);
+                            if let Ok(payload) = serde_json::to_string(&msg) {
+                                if let Err(e) = client.publish(
+                                    &topic,
+                                    QoS::AtMostOnce,
+                                    false,
+                                    payload.as_bytes(),
+                                ) {
+                                    error!("Failed to publish pose: {}", e);
+                                }
+                            }
+                        }
+                    }
+                    Err(mpsc::TryRecvError::Empty) => {
+                        // No message to publish, continue with connection handling
+                    }
+                    Err(mpsc::TryRecvError::Disconnected) => {
+                        error!("Publisher channel disconnected, exiting publisher thread");
+                        return;
+                    }
                 }
 
-                // Drive connection until publish is sent
-                for notification in conn.iter() {
-                    if let Ok(Event::Outgoing(Outgoing::Publish(_))) = notification {
-                        break;
+                // Handle MQTT connection events
+                match conn.try_recv() {
+                    Ok(Ok(Event::Incoming(Incoming::ConnAck(_)))) => {
+                        info!("Pose publisher connected successfully");
+                        connected = true;
                     }
-                    if let Err(_) = notification {
-                        break;
+                    Ok(Ok(Event::Outgoing(Outgoing::Publish(_)))) => {
+                        // Message published successfully
+                    }
+                    Ok(Ok(_)) => {
+                        // Other events we don't care about
+                    }
+                    Ok(Err(e)) => {
+                        error!("Pose publisher connection error: {:?}", e);
+                        connected = false;
+                        break 'connection_loop; // Reconnect
+                    }
+                    Err(rumqttc::TryRecvError::Empty) => {
+                        // This is normal, no more events to process right now
+                        thread::sleep(Duration::from_millis(10)); // Small sleep to avoid busy waiting
+                    }
+                    Err(e) => {
+                        error!("Pose publisher try_recv error: {:?}", e);
+                        connected = false;
+                        break 'connection_loop; // Reconnect
                     }
                 }
             }
-        }
 
-        error!("Multiplayer publisher thread exited");
+            error!("Pose publisher disconnected, reconnecting in 5 seconds...");
+            thread::sleep(Duration::from_secs(5));
+        }
     });
 
     info!("Multiplayer connections initialized");
