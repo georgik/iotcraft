@@ -26,6 +26,8 @@ mod mqtt;
 mod script;
 mod ui;
 
+mod multiplayer;
+mod profile;
 mod world;
 
 // Re-export types for easier access
@@ -39,6 +41,8 @@ use interaction::InteractionPlugin as MyInteractionPlugin;
 use inventory::{InventoryPlugin, PlayerInventory, handle_give_command};
 use localization::{LocalizationConfig, LocalizationPlugin};
 use mqtt::{MqttPlugin, *};
+use multiplayer::MultiplayerPlugin;
+use profile::load_or_create_profile;
 use ui::{CrosshairPlugin, ErrorIndicatorPlugin, GameState, InventoryUiPlugin, MainMenuPlugin};
 use world::WorldPlugin;
 
@@ -77,6 +81,9 @@ struct Args {
     /// Force a specific language (BCP 47 format, e.g., en-US, cs-CZ, pt-BR)
     #[arg(short, long)]
     language: Option<String>,
+    /// MQTT server address (default: localhost)
+    #[arg(short, long)]
+    mqtt_server: Option<String>,
 }
 
 // Script execution system
@@ -972,8 +979,8 @@ fn main() {
         script_executor.execute_startup = true;
     }
 
-    // Load MQTT configuration from environment variables
-    let mqtt_config = MqttConfig::from_env();
+    // Load MQTT configuration from CLI args and environment variables
+    let mqtt_config = MqttConfig::from_env_with_override(args.mqtt_server);
     info!("Using MQTT broker: {}", mqtt_config.broker_address());
 
     // Determine the language configuration
@@ -988,7 +995,8 @@ fn main() {
     // Initialize resources first
     app.insert_resource(localization_config)
         .insert_resource(ClearColor(Color::srgb(0.53, 0.81, 0.92)))
-        .insert_resource(mqtt_config);
+        .insert_resource(mqtt_config)
+        .insert_resource(load_or_create_profile());
 
     // Add default plugins and initialize AssetServer
     app.add_plugins(DefaultPlugins);
@@ -1016,6 +1024,7 @@ fn main() {
         .add_plugins(ErrorIndicatorPlugin)
         .add_plugins(MainMenuPlugin)
         .add_plugins(WorldPlugin)
+        .add_plugins(MultiplayerPlugin)
         .init_state::<GameState>()
         .insert_resource(ConsoleConfiguration {
             keys: vec![KeyCode::F12],

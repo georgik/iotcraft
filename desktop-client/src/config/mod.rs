@@ -62,6 +62,20 @@ impl MqttConfig {
         Self { host, port }
     }
 
+    /// Load configuration from CLI args, environment variables, or defaults
+    /// CLI args take precedence over environment variables
+    pub fn from_env_with_override(mqtt_server_override: Option<String>) -> Self {
+        let host = mqtt_server_override
+            .or_else(|| env::var("MQTT_BROKER_HOST").ok())
+            .unwrap_or_else(|| "localhost".to_string());
+        let port = env::var("MQTT_BROKER_PORT")
+            .unwrap_or_else(|_| "1883".to_string())
+            .parse()
+            .unwrap_or(1883);
+
+        Self { host, port }
+    }
+
     /// Get the broker address as a string for display purposes
     pub fn broker_address(&self) -> String {
         format!("{}:{}", self.host, self.port)
