@@ -63,6 +63,7 @@ fn setup_environment(
             VoxelBlock {
                 position: *position,
             },
+            // Physics colliders are managed by PhysicsManagerPlugin based on distance and mode
         ));
     }
 

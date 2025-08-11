@@ -27,7 +27,9 @@ mod script;
 mod ui;
 
 mod multiplayer;
+mod physics_manager;
 mod player_avatar;
+mod player_controller;
 mod profile;
 mod world;
 
@@ -43,7 +45,9 @@ use inventory::{InventoryPlugin, PlayerInventory, handle_give_command};
 use localization::{LocalizationConfig, LocalizationPlugin};
 use mqtt::{MqttPlugin, *};
 use multiplayer::MultiplayerPlugin;
+use physics_manager::PhysicsManagerPlugin;
 use player_avatar::PlayerAvatarPlugin;
+use player_controller::PlayerControllerPlugin;
 use profile::load_or_create_profile_with_override;
 use ui::{CrosshairPlugin, ErrorIndicatorPlugin, GameState, InventoryUiPlugin, MainMenuPlugin};
 use world::WorldPlugin;
@@ -256,6 +260,7 @@ fn handle_place_block_command(
             VoxelBlock {
                 position: IVec3::new(x, y, z),
             },
+            // Physics colliders are managed by PhysicsManagerPlugin based on distance and mode
         ));
 
         reply!(log, "Placed block at ({}, {}, {})", x, y, z);
@@ -321,6 +326,7 @@ fn handle_wall_command(
                         VoxelBlock {
                             position: IVec3::new(x, y, z),
                         },
+                        // Physics colliders are managed by PhysicsManagerPlugin based on distance and mode
                     ));
                 }
             }
@@ -489,6 +495,7 @@ fn handle_load_map_command(
                         VoxelBlock {
                             position: *position,
                         },
+                        // Physics colliders are managed by PhysicsManagerPlugin based on distance and mode
                     ));
                 }
 
@@ -742,6 +749,7 @@ fn execute_pending_commands(
                                     VoxelBlock {
                                         position: IVec3::new(x, y, z),
                                     },
+                                    // Physics colliders are managed by PhysicsManagerPlugin based on distance and mode
                                 ));
 
                                 print_console_line.write(PrintConsoleLine::new(format!(
@@ -879,6 +887,7 @@ fn execute_pending_commands(
                                                             VoxelBlock {
                                                                 position: IVec3::new(x, y, z),
                                                             },
+                                                            // Physics colliders are managed by PhysicsManagerPlugin based on distance and mode
                                                         ));
                                                     }
                                                 }
@@ -1016,7 +1025,10 @@ fn main() {
 
     app.add_plugins(FontPlugin) // Keep FontPlugin for any additional font-related systems
         .add_plugins(LocalizationPlugin) // Load localization after fonts
+        .add_plugins(avian3d::PhysicsPlugins::default()) // Add physics engine
+        .add_plugins(PhysicsManagerPlugin) // Add physics optimization manager
         .add_plugins(CameraControllerPlugin)
+        .add_plugins(PlayerControllerPlugin) // Add player controller for walking/flying modes
         .add_plugins(ConsolePlugin)
         .add_plugins(DevicePlugin)
         .add_plugins(DevicePositioningPlugin)

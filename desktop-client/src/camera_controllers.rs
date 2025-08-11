@@ -6,6 +6,7 @@
 //!
 //! Unlike other examples, which demonstrate an application, this demonstrates a plugin library.
 
+use crate::player_controller::PlayerMode;
 use crate::ui::GameState;
 use bevy::{
     input::mouse::{AccumulatedMouseMotion, AccumulatedMouseScroll, MouseScrollUnit},
@@ -170,6 +171,7 @@ fn run_camera_controller(
     accumulated_mouse_scroll: Res<AccumulatedMouseScroll>,
     key_input: Res<ButtonInput<KeyCode>>,
     game_state: Res<State<GameState>>,
+    player_mode: Res<PlayerMode>,
     mut query: Query<(&mut Transform, &mut CameraController), With<Camera>>,
 ) {
     let dt = time.delta_secs();
@@ -261,28 +263,31 @@ fn run_camera_controller(
         }
     }
 
-    // Update velocity
-    if axis_input != Vec3::ZERO {
-        let max_speed = if key_input.pressed(controller.key_run) {
-            controller.run_speed
+    // Only handle movement in flying mode - walking mode movement is handled by the physics system
+    if *player_mode == PlayerMode::Flying {
+        // Update velocity
+        if axis_input != Vec3::ZERO {
+            let max_speed = if key_input.pressed(controller.key_run) {
+                controller.run_speed
+            } else {
+                controller.walk_speed
+            };
+            controller.velocity = axis_input.normalize() * max_speed;
         } else {
-            controller.walk_speed
-        };
-        controller.velocity = axis_input.normalize() * max_speed;
-    } else {
-        let friction = controller.friction.clamp(0.0, 1.0);
-        controller.velocity *= 1.0 - friction;
-        if controller.velocity.length_squared() < 1e-6 {
-            controller.velocity = Vec3::ZERO;
+            let friction = controller.friction.clamp(0.0, 1.0);
+            controller.velocity *= 1.0 - friction;
+            if controller.velocity.length_squared() < 1e-6 {
+                controller.velocity = Vec3::ZERO;
+            }
         }
-    }
 
-    // Apply movement update - Now uses updated rotation from mouse input
-    if controller.velocity != Vec3::ZERO {
-        let forward = *transform.forward();
-        let right = *transform.right();
-        transform.translation += controller.velocity.x * dt * right
-            + controller.velocity.y * dt * Vec3::Y
-            + controller.velocity.z * dt * forward;
+        // Apply movement update - Now uses updated rotation from mouse input
+        if controller.velocity != Vec3::ZERO {
+            let forward = *transform.forward();
+            let right = *transform.right();
+            transform.translation += controller.velocity.x * dt * right
+                + controller.velocity.y * dt * Vec3::Y
+                + controller.velocity.z * dt * forward;
+        }
     }
 }
