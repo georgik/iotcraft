@@ -8,6 +8,7 @@ use std::time::Duration;
 use super::mqtt_types::*;
 use crate::config::MqttConfig;
 use crate::devices::DeviceAnnouncementReceiver;
+use crate::profile::PlayerProfile;
 
 pub struct MqttPlugin;
 
@@ -20,17 +21,22 @@ impl Plugin for MqttPlugin {
 }
 
 /// Spawn a background thread to subscribe to the temperature topic and feed readings into the channel.
-pub fn spawn_mqtt_subscriber(mut commands: Commands, mqtt_config: Res<MqttConfig>) {
+pub fn spawn_mqtt_subscriber(
+    mut commands: Commands,
+    mqtt_config: Res<MqttConfig>,
+    profile: Res<PlayerProfile>,
+) {
     let (tx, rx) = mpsc::channel::<f32>();
     let mqtt_host = mqtt_config.host.clone();
     let mqtt_port = mqtt_config.port;
+    let temp_client_id = format!("desktop-{}-temp", profile.player_id);
 
     thread::spawn(move || {
         info!(
             "MQTT: Starting temperature subscriber on {}:{}",
             mqtt_host, mqtt_port
         );
-        let mut mqttoptions = MqttOptions::new("desktop-subscriber", &mqtt_host, mqtt_port);
+        let mut mqttoptions = MqttOptions::new(&temp_client_id, &mqtt_host, mqtt_port);
         mqttoptions.set_keep_alive(Duration::from_secs(5));
         let (client, mut connection) = Client::new(mqttoptions, 10);
 
@@ -69,13 +75,14 @@ pub fn spawn_mqtt_subscriber(mut commands: Commands, mqtt_config: Res<MqttConfig
     // Subscribe to device announcements
     let mqtt_host2 = mqtt_config.host.clone();
     let mqtt_port2 = mqtt_config.port;
+    let device_client_id = format!("desktop-{}-devices", profile.player_id);
 
     thread::spawn(move || {
         info!(
             "MQTT: Starting device announcements subscriber on {}:{}",
             mqtt_host2, mqtt_port2
         );
-        let mut mqttoptions = MqttOptions::new("device-subscriber", &mqtt_host2, mqtt_port2);
+        let mut mqttoptions = MqttOptions::new(&device_client_id, &mqtt_host2, mqtt_port2);
         mqttoptions.set_keep_alive(Duration::from_secs(5));
         let (client, mut connection) = Client::new(mqttoptions, 10);
 

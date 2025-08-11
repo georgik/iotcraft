@@ -37,13 +37,29 @@ fn profile_path() -> PathBuf {
 }
 
 pub fn load_or_create_profile() -> PlayerProfile {
+    load_or_create_profile_with_override(None)
+}
+
+pub fn load_or_create_profile_with_override(player_id_override: Option<String>) -> PlayerProfile {
     let path = profile_path();
-    if let Ok(content) = fs::read_to_string(&path) {
+    let mut profile = if let Ok(content) = fs::read_to_string(&path) {
         if let Ok(profile) = serde_json::from_str::<PlayerProfile>(&content) {
-            return profile;
+            profile
+        } else {
+            PlayerProfile::default()
         }
+    } else {
+        PlayerProfile::default()
+    };
+
+    // Override player ID if provided
+    if let Some(id) = player_id_override {
+        profile.player_id = id;
+        // Don't save overridden profile to disk to avoid conflicts
+        return profile;
     }
-    let profile = PlayerProfile::default();
+
+    // Save profile to disk only if not using override
     if let Ok(json) = serde_json::to_string_pretty(&profile) {
         let _ = fs::write(path, json);
     }

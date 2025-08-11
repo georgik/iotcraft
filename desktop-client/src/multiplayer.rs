@@ -48,6 +48,7 @@ pub struct MultiplayerPlugin;
 impl Plugin for MultiplayerPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(WorldId::default())
+            .insert_resource(InitialPoseSent::default())
             .add_systems(Startup, start_multiplayer_connections)
             .add_systems(Update, (publish_local_pose, apply_remote_poses))
             .add_systems(Update, update_position_timer);
@@ -68,6 +69,9 @@ impl Default for PositionTimer {
         }
     }
 }
+
+#[derive(Resource, Default)]
+struct InitialPoseSent(bool);
 
 fn now_ts() -> u64 {
     SystemTime::now()
@@ -106,33 +110,56 @@ fn start_multiplayer_connections(
             opts.set_clean_session(false);
 
             let (client, mut conn) = Client::new(opts, 10);
-            if let Err(e) = client.subscribe(&subscribe_topic, QoS::AtLeastOnce) {
-                error!("Failed to subscribe to poses: {}", e);
-                thread::sleep(Duration::from_secs(5));
-                continue;
-            }
 
-            info!("Subscribed to poses: {}", subscribe_topic);
+            // Wait for connection before subscribing
+            let mut subscribed = false;
+            let mut connection_attempts = 0;
 
             // Handle connection events
             for notification in conn.iter() {
                 match notification {
+                    Ok(Event::Incoming(Incoming::ConnAck(_))) => {
+                        info!("Pose subscriber connected successfully");
+                        // Now that we're connected, subscribe to wildcard topic
+                        if let Err(e) = client.subscribe(&subscribe_topic, QoS::AtLeastOnce) {
+                            error!("Failed to subscribe to poses: {}", e);
+                            break; // Reconnect
+                        } else {
+                            info!("Subscribed to poses: {}", subscribe_topic);
+                            subscribed = true;
+                        }
+                    }
                     Ok(Event::Incoming(Incoming::Publish(p))) => {
-                        if p.topic.contains("/pose") {
+                        if subscribed && p.topic.contains("/pose") {
                             if let Ok(s) = String::from_utf8(p.payload.to_vec()) {
                                 if let Ok(msg) = serde_json::from_str::<PoseMessage>(&s) {
                                     if let Err(_) = pose_tx.send(msg) {
                                         error!("Failed to send pose message to game thread");
                                         break;
                                     }
+                                } else {
+                                    error!("Failed to parse pose message: {}", s);
                                 }
                             }
                         }
                     }
-                    Ok(Event::Incoming(Incoming::ConnAck(_))) => {
-                        info!("Pose subscriber connected successfully");
+                    Ok(Event::Incoming(Incoming::SubAck(_))) => {
+                        info!("Pose subscription acknowledged by broker");
                     }
                     Ok(_) => {} // Other events we don't care about
+                    Err(rumqttc::ConnectionError::NetworkTimeout) => {
+                        connection_attempts += 1;
+                        if connection_attempts > 3 {
+                            error!("Pose subscriber: Too many network timeouts, reconnecting...");
+                            break; // Reconnect
+                        } else {
+                            info!(
+                                "Pose subscriber: Network timeout (attempt {}), continuing...",
+                                connection_attempts
+                            );
+                            // Continue trying instead of immediately breaking
+                        }
+                    }
                     Err(e) => {
                         error!("Pose subscriber connection error: {:?}", e);
                         break; // Reconnect
@@ -162,10 +189,60 @@ fn start_multiplayer_connections(
             info!("Pose publisher connecting to {}:{}...", pub_host, port);
 
             let mut connected = false;
+            let mut reconnect = false;
 
-            // Handle connection events and publishing
-            'connection_loop: loop {
-                // Try to receive a message to publish (non-blocking)
+            // First, wait for connection to be established (blocking)
+            let mut connection_established = false;
+            for event in conn.iter() {
+                match event {
+                    Ok(Event::Incoming(Incoming::ConnAck(_))) => {
+                        info!("Pose publisher connected successfully!");
+                        connected = true;
+                        connection_established = true;
+                        break; // Exit the blocking connection wait
+                    }
+                    Ok(other) => {
+                        info!("Publisher received connection event: {:?}", other);
+                    }
+                    Err(e) => {
+                        error!("Pose publisher connection error during setup: {:?}", e);
+                        reconnect = true;
+                        break;
+                    }
+                }
+            }
+
+            if !connection_established {
+                error!("Failed to establish publisher connection");
+                continue; // Reconnect
+            }
+
+            // Now handle messages and additional events in non-blocking mode
+            loop {
+                // Handle additional connection events (non-blocking)
+                match conn.try_recv() {
+                    Ok(Ok(Event::Outgoing(Outgoing::Publish(_)))) => {
+                        // Message sent successfully (keep quiet)
+                    }
+                    Ok(Ok(_other)) => {
+                        // Other events we don't need to log
+                    }
+                    Ok(Err(e)) => {
+                        error!("Pose publisher connection error: {:?}", e);
+                        reconnect = true;
+                        break;
+                    }
+                    Err(rumqttc::TryRecvError::Empty) => {
+                        // No connection events right now, that's fine
+                    }
+                    Err(rumqttc::TryRecvError::Disconnected) => {
+                        error!("Pose publisher connection lost");
+                        reconnect = true;
+                        break;
+                    }
+                }
+
+                // Check for messages to publish (non-blocking)
                 match outgoing_rx.try_recv() {
                     Ok(msg) => {
                         if connected {
@@ -183,42 +260,17 @@ fn start_multiplayer_connections(
                             }
                         }
                     }
-                    Err(mpsc::TryRecvError::Empty) => {
-                        // No message to publish, continue with connection handling
-                    }
-                    Err(mpsc::TryRecvError::Disconnected) => {
-                        error!("Publisher channel disconnected, exiting publisher thread");
-                        return;
+                    Err(_) => {
+                        // No messages to publish right now, that's fine
                     }
                 }
 
-                // Handle MQTT connection events
-                match conn.try_recv() {
-                    Ok(Ok(Event::Incoming(Incoming::ConnAck(_)))) => {
-                        info!("Pose publisher connected successfully");
-                        connected = true;
-                    }
-                    Ok(Ok(Event::Outgoing(Outgoing::Publish(_)))) => {
-                        // Message published successfully
-                    }
-                    Ok(Ok(_)) => {
-                        // Other events we don't care about
-                    }
-                    Ok(Err(e)) => {
-                        error!("Pose publisher connection error: {:?}", e);
-                        connected = false;
-                        break 'connection_loop; // Reconnect
-                    }
-                    Err(rumqttc::TryRecvError::Empty) => {
-                        // This is normal, no more events to process right now
-                        thread::sleep(Duration::from_millis(10)); // Small sleep to avoid busy waiting
-                    }
-                    Err(e) => {
-                        error!("Pose publisher try_recv error: {:?}", e);
-                        connected = false;
-                        break 'connection_loop; // Reconnect
-                    }
+                if reconnect {
+                    break;
                 }
+
+                // Small sleep to avoid busy waiting
+                thread::sleep(Duration::from_millis(10));
             }
 
             error!("Pose publisher disconnected, reconnecting in 5 seconds...");
@@ -249,10 +301,10 @@ fn publish_local_pose(
 
     let current_position = transform.translation;
 
-    // Only send if position changed significantly (reduce network traffic)
+    // Always send initial pose, then only if position changed significantly
     let should_send = match timer.last_position {
         Some(last_pos) => current_position.distance(last_pos) > 0.01, // 1cm threshold
-        None => true,                                                 // First time
+        None => true,                                                 // Always send first time
     };
 
     if !should_send {
@@ -277,7 +329,7 @@ fn publish_local_pose(
 
     // Send to publisher thread
     if let Ok(tx) = pose_tx.0.lock() {
-        if let Err(_) = tx.send(msg) {
+        if let Err(_) = tx.send(msg.clone()) {
             // Channel disconnected or other error
             error!("Failed to send pose message to publisher thread");
         }

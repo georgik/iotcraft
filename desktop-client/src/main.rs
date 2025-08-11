@@ -42,7 +42,7 @@ use inventory::{InventoryPlugin, PlayerInventory, handle_give_command};
 use localization::{LocalizationConfig, LocalizationPlugin};
 use mqtt::{MqttPlugin, *};
 use multiplayer::MultiplayerPlugin;
-use profile::load_or_create_profile;
+use profile::load_or_create_profile_with_override;
 use ui::{CrosshairPlugin, ErrorIndicatorPlugin, GameState, InventoryUiPlugin, MainMenuPlugin};
 use world::WorldPlugin;
 
@@ -84,6 +84,9 @@ struct Args {
     /// MQTT server address (default: localhost)
     #[arg(short, long)]
     mqtt_server: Option<String>,
+    /// Player ID override for multiplayer testing (default: auto-generated)
+    #[arg(short, long)]
+    player_id: Option<String>,
 }
 
 // Script execution system
@@ -996,7 +999,7 @@ fn main() {
     app.insert_resource(localization_config)
         .insert_resource(ClearColor(Color::srgb(0.53, 0.81, 0.92)))
         .insert_resource(mqtt_config)
-        .insert_resource(load_or_create_profile());
+        .insert_resource(load_or_create_profile_with_override(args.player_id));
 
     // Add default plugins and initialize AssetServer
     app.add_plugins(DefaultPlugins);
