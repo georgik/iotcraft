@@ -46,6 +46,8 @@ pub struct PlayerMovement {
     pub gravity_scale: f32,
     pub is_grounded: bool,
     pub ground_check_distance: f32,
+    pub last_spacebar_press: Option<f64>, // Track last spacebar press for double-tap detection
+    pub double_tap_window: f64,           // Window for double-tap detection (seconds)
 }
 
 impl Default for PlayerMovement {
@@ -58,7 +60,9 @@ impl Default for PlayerMovement {
             air_control: 0.3,
             gravity_scale: 1.0,
             is_grounded: false,
-            ground_check_distance: 1.1,
+            ground_check_distance: 1.2, // Slightly more generous ground detection
+            last_spacebar_press: None,
+            double_tap_window: 0.5, // 500ms window for double-tap
         }
     }
 }
@@ -139,7 +143,7 @@ fn setup_player_physics(
 fn player_movement(
     time: Res<Time>,
     keyboard_input: Res<ButtonInput<KeyCode>>,
-    player_mode: Res<PlayerMode>,
+    mut player_mode: ResMut<PlayerMode>,
     mut camera_query: Query<
         (
             &mut Transform,
@@ -166,6 +170,16 @@ fn player_movement(
         }
         PlayerMode::Walking => {
             if let (Some(mut velocity), Some(mut movement)) = (linear_velocity, player_movement) {
+                // Check for double spacebar to toggle flight mode (like Minecraft Creative)
+                if handle_double_spacebar_flight_toggle(
+                    &time,
+                    &keyboard_input,
+                    &mut movement,
+                    &mut player_mode,
+                ) {
+                    return; // Mode changed, let the next frame handle the new mode
+                }
+
                 handle_walking_movement(
                     &time,
                     &keyboard_input,
@@ -208,12 +222,12 @@ fn handle_walking_movement(
     // Handle input
     let mut movement_input = Vec3::ZERO;
 
-    // Forward/backward movement
+    // Forward/backward movement (fixed direction)
     if keyboard_input.pressed(KeyCode::KeyW) {
-        movement_input -= transform.forward().as_vec3();
+        movement_input += transform.forward().as_vec3();
     }
     if keyboard_input.pressed(KeyCode::KeyS) {
-        movement_input += transform.forward().as_vec3();
+        movement_input -= transform.forward().as_vec3();
     }
 
     // Left/right movement
@@ -258,9 +272,42 @@ fn handle_walking_movement(
         velocity.z *= 1.0 - (movement.ground_friction * dt);
     }
 
-    // Handle jumping
+    // Limit falling speed to prevent excessive velocity buildup
+    const MAX_FALL_SPEED: f32 = -20.0;
+    if velocity.y < MAX_FALL_SPEED {
+        velocity.y = MAX_FALL_SPEED;
+    }
+
+    // Handle jumping (but not if we're checking for double-tap)
     if keyboard_input.just_pressed(KeyCode::Space) && movement.is_grounded {
         velocity.y = movement.jump_force;
         info!("Player jumped!");
     }
+}
+
+/// Handle double spacebar press to toggle flight mode (like Minecraft Creative)
+fn handle_double_spacebar_flight_toggle(
+    time: &Res<Time>,
+    keyboard_input: &Res<ButtonInput<KeyCode>>,
+    movement: &mut PlayerMovement,
+    player_mode: &mut ResMut<PlayerMode>,
+) -> bool {
+    if keyboard_input.just_pressed(KeyCode::Space) {
+        let current_time = time.elapsed_secs_f64();
+
+        if let Some(last_press) = movement.last_spacebar_press {
+            let time_diff = current_time - last_press;
+            if time_diff <= movement.double_tap_window {
+                // Double tap detected! Toggle flight mode
+                **player_mode = PlayerMode::Flying;
+                info!("Double spacebar detected - switching to Flying mode!");
+                movement.last_spacebar_press = None; // Reset to prevent triple-tap issues
+                return true;
+            }
+        }
+
+        movement.last_spacebar_press = Some(current_time);
+    }
+
+    false
 }

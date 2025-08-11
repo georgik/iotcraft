@@ -57,13 +57,21 @@ fn configure_physics_settings(mut commands: Commands) {
 
 /// System to prevent player from falling through the world
 fn prevent_player_fall_through_world(
-    mut player_query: Query<&mut Transform, With<Camera>>,
+    mut player_query: Query<(&mut Transform, Option<&mut LinearVelocity>), With<Camera>>,
     physics_config: Res<PhysicsConfig>,
 ) {
-    if let Ok(mut transform) = player_query.single_mut() {
+    if let Ok((mut transform, velocity)) = player_query.single_mut() {
         if transform.translation.y < physics_config.world_floor {
-            transform.translation.y = physics_config.world_floor + 5.0; // Teleport 5 units above floor
-            info!("Player teleported back up from falling through world");
+            // Teleport to safe coordinates above terrain
+            transform.translation = Vec3::new(4.0, 4.0, 4.0);
+
+            // Reset velocity to prevent continuous falling
+            if let Some(mut vel) = velocity {
+                vel.0 = Vec3::ZERO;
+                info!("Player teleported to safe coordinates (4, 4, 4) and velocity reset");
+            } else {
+                info!("Player teleported to safe coordinates (4, 4, 4) from falling through world");
+            }
         }
     }
 }
