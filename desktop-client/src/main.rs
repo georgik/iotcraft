@@ -27,6 +27,7 @@ mod script;
 mod ui;
 
 mod multiplayer;
+mod player_avatar;
 mod profile;
 mod world;
 
@@ -42,6 +43,7 @@ use inventory::{InventoryPlugin, PlayerInventory, handle_give_command};
 use localization::{LocalizationConfig, LocalizationPlugin};
 use mqtt::{MqttPlugin, *};
 use multiplayer::MultiplayerPlugin;
+use player_avatar::PlayerAvatarPlugin;
 use profile::load_or_create_profile_with_override;
 use ui::{CrosshairPlugin, ErrorIndicatorPlugin, GameState, InventoryUiPlugin, MainMenuPlugin};
 use world::WorldPlugin;
@@ -1028,6 +1030,7 @@ fn main() {
         .add_plugins(MainMenuPlugin)
         .add_plugins(WorldPlugin)
         .add_plugins(MultiplayerPlugin)
+        .add_plugins(PlayerAvatarPlugin)
         .init_state::<GameState>()
         .insert_resource(ConsoleConfiguration {
             keys: vec![KeyCode::F12],

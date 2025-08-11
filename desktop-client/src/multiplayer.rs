@@ -340,7 +340,10 @@ fn apply_remote_poses(
     profile: Res<PlayerProfile>,
     pose_rx: Res<PoseRx>,
     mut commands: Commands,
-    mut remote_players: Query<(&mut Transform, &RemotePlayer)>,
+    mut remote_players: Query<
+        (&mut Transform, &crate::player_avatar::PlayerAvatar),
+        With<RemotePlayer>,
+    >,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
@@ -355,37 +358,36 @@ fn apply_remote_poses(
             continue;
         }
 
-        // Try to update existing remote player
+        // Try to update existing remote player avatar
         let mut updated = false;
-        for (mut transform, remote_player) in remote_players.iter_mut() {
-            if remote_player.player_id == msg.player_id {
+        for (mut transform, player_avatar) in remote_players.iter_mut() {
+            if player_avatar.player_id == msg.player_id {
                 transform.translation = Vec3::new(msg.pos[0], msg.pos[1], msg.pos[2]);
-                // TODO: Also update rotation based on yaw/pitch
+                transform.rotation = Quat::from_rotation_y(msg.yaw);
                 updated = true;
                 break;
             }
         }
 
-        // Spawn new remote player if not found
+        // Spawn new remote player avatar if not found
         if !updated {
-            let cube = meshes.add(Cuboid::new(0.8, 1.8, 0.8)); // Player-sized cube
-            let material = materials.add(StandardMaterial {
-                base_color: Color::srgb(0.2, 0.8, 0.2), // Green for remote players
-                ..Default::default()
+            let position = Vec3::new(msg.pos[0], msg.pos[1], msg.pos[2]);
+            let avatar_entity = crate::player_avatar::spawn_player_avatar(
+                &mut commands,
+                &mut meshes,
+                &mut materials,
+                position,
+                msg.player_id.clone(),
+                msg.player_name.clone(),
+            );
+
+            // Add RemotePlayer component to the spawned avatar
+            commands.entity(avatar_entity).insert(RemotePlayer {
+                player_id: msg.player_id.clone(),
             });
 
-            commands.spawn((
-                Mesh3d(cube),
-                MeshMaterial3d(material),
-                Transform::from_translation(Vec3::new(msg.pos[0], msg.pos[1], msg.pos[2])),
-                RemotePlayer {
-                    player_id: msg.player_id.clone(),
-                },
-                Name::new(format!("RemotePlayer-{}", msg.player_name)),
-            ));
-
             info!(
-                "New remote player joined: {} ({})",
+                "New remote player joined: {} ({}) with voxel avatar",
                 msg.player_name, msg.player_id
             );
         }
