@@ -1,3 +1,12 @@
+pub mod shared_world;
+pub mod world_discovery;
+pub mod world_publisher;
+
+pub use shared_world::*;
+pub use world_discovery::*;
+pub use world_publisher::*;
+
+// Original multiplayer functionality
 use bevy::prelude::*;
 use log::{error, info};
 use rumqttc::{Client, Event, Incoming, MqttOptions, Outgoing, QoS};
@@ -34,6 +43,12 @@ struct PoseMessage {
     pos: [f32; 3],
     yaw: f32,
     pitch: f32,
+    ts: u64,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+struct DisconnectMessage {
+    player_id: String,
     ts: u64,
 }
 
@@ -107,7 +122,7 @@ fn start_multiplayer_connections(
         loop {
             let mut opts = MqttOptions::new(&sub_client_id, &sub_host, port);
             opts.set_keep_alive(Duration::from_secs(30));
-            opts.set_clean_session(false);
+            opts.set_clean_session(true); // Use clean sessions to prevent receiving old pose messages
 
             let (client, mut conn) = Client::new(opts, 10);
 
@@ -176,6 +191,15 @@ fn start_multiplayer_connections(
     let pub_host = host.clone();
     let pub_client_id = format!("{}-pub", client_id);
     let publish_topic_template = format!("iotcraft/worlds/{}/players", world.0);
+    let disconnect_topic = format!(
+        "{}/{}/disconnect",
+        publish_topic_template, profile.player_id
+    );
+    let disconnect_payload = serde_json::to_string(&DisconnectMessage {
+        player_id: profile.player_id.clone(),
+        ts: now_ts(),
+    })
+    .unwrap_or_else(|_| "{}".to_string());
 
     thread::spawn(move || {
         info!("Starting multiplayer pose publisher...");

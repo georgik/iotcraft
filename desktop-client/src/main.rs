@@ -44,7 +44,9 @@ use interaction::InteractionPlugin as MyInteractionPlugin;
 use inventory::{InventoryPlugin, PlayerInventory, handle_give_command};
 use localization::{LocalizationConfig, LocalizationPlugin};
 use mqtt::{MqttPlugin, *};
-use multiplayer::MultiplayerPlugin;
+use multiplayer::{
+    MultiplayerPlugin, SharedWorldPlugin, WorldDiscoveryPlugin, WorldPublisherPlugin,
+};
 use physics_manager::PhysicsManagerPlugin;
 use player_avatar::PlayerAvatarPlugin;
 use player_controller::PlayerControllerPlugin;
@@ -1042,6 +1044,9 @@ fn main() {
         .add_plugins(MainMenuPlugin)
         .add_plugins(WorldPlugin)
         .add_plugins(MultiplayerPlugin)
+        .add_plugins(SharedWorldPlugin)
+        .add_plugins(WorldPublisherPlugin)
+        .add_plugins(WorldDiscoveryPlugin)
         .add_plugins(PlayerAvatarPlugin)
         .init_state::<GameState>()
         .insert_resource(ConsoleConfiguration {

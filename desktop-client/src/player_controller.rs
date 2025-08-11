@@ -121,7 +121,7 @@ fn setup_player_physics(
             // Add physics components to camera with optimized settings
             commands.entity(camera_entity).insert((
                 RigidBody::Dynamic,
-                Collider::capsule(0.3, 1.6), // Player capsule: radius 0.3, height 1.6
+                Collider::capsule(0.4, 1.6), // Player capsule: radius 0.4, height 1.6 (wider to prevent falling through gaps)
                 PlayerMovement::default(),
                 PlayerPhysicsBody,
                 GravityScale(1.5),           // Stronger gravity for snappy movement
