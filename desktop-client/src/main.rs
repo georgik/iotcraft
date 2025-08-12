@@ -852,6 +852,12 @@ fn execute_pending_commands(
                                                 }
                                             };
 
+                                            // Debug: VoxelWorld before adding blocks
+                                            info!(
+                                                "VoxelWorld before wall command: {} blocks",
+                                                voxel_world.blocks.len()
+                                            );
+
                                             let texture_path = match block_type_enum {
                                                 BlockType::Grass => "textures/grass.webp",
                                                 BlockType::Dirt => "textures/dirt.webp",
@@ -874,6 +880,7 @@ fn execute_pending_commands(
                                             let cube_mesh = meshes
                                                 .add(Cuboid::new(CUBE_SIZE, CUBE_SIZE, CUBE_SIZE));
 
+                                            let mut blocks_added = 0;
                                             for x in x1..=x2 {
                                                 for y in y1..=y2 {
                                                     for z in z1..=z2 {
@@ -881,6 +888,7 @@ fn execute_pending_commands(
                                                             IVec3::new(x, y, z),
                                                             block_type_enum,
                                                         );
+                                                        blocks_added += 1;
 
                                                         commands.spawn((
                                                             Mesh3d(cube_mesh.clone()),
@@ -895,6 +903,32 @@ fn execute_pending_commands(
                                                         ));
                                                     }
                                                 }
+                                            }
+
+                                            // Debug: VoxelWorld after adding blocks
+                                            info!(
+                                                "VoxelWorld after wall command: {} blocks (added {})",
+                                                voxel_world.blocks.len(),
+                                                blocks_added
+                                            );
+
+                                            // Debug: Show a few sample blocks that were just added
+                                            let sample_positions = [
+                                                IVec3::new(x1, y1, z1),
+                                                IVec3::new(x2, y2, z2),
+                                                IVec3::new(
+                                                    (x1 + x2) / 2,
+                                                    (y1 + y2) / 2,
+                                                    (z1 + z2) / 2,
+                                                ),
+                                            ];
+
+                                            for pos in sample_positions {
+                                                let has_block = voxel_world.is_block_at(pos);
+                                                info!(
+                                                    "Sample block check at {:?}: has_block={}",
+                                                    pos, has_block
+                                                );
                                             }
 
                                             print_console_line.write(PrintConsoleLine::new(format!(
@@ -1014,7 +1048,12 @@ fn main() {
     app.insert_resource(localization_config)
         .insert_resource(ClearColor(Color::srgb(0.53, 0.81, 0.92)))
         .insert_resource(mqtt_config)
-        .insert_resource(load_or_create_profile_with_override(args.player_id));
+        .insert_resource(load_or_create_profile_with_override(args.player_id))
+        // Initialize script resources early to prevent system dependency issues
+        .insert_resource(script_executor)
+        .insert_resource(PendingCommands {
+            commands: Vec::new(),
+        });
 
     // Add default plugins and initialize AssetServer
     app.add_plugins(DefaultPlugins);
@@ -1033,6 +1072,7 @@ fn main() {
         .add_plugins(PhysicsManagerPlugin) // Add physics optimization manager
         .add_plugins(CameraControllerPlugin)
         .add_plugins(PlayerControllerPlugin) // Add player controller for walking/flying modes
+        .add_plugins(script::script_systems::ScriptPlugin) // Add script plugin early for PendingCommands resource
         .add_plugins(ConsolePlugin)
         .add_plugins(DevicePlugin)
         .add_plugins(DevicePositioningPlugin)
@@ -1096,13 +1136,8 @@ fn main() {
             Update,
             crate::console::esc_handling::handle_esc_key.after(ConsoleSet::Commands),
         )
-        .insert_resource(script_executor)
-        .insert_resource(PendingCommands {
-            commands: Vec::new(),
-        })
         .init_resource::<DiagnosticsVisible>()
         .add_systems(Startup, setup_diagnostics_ui)
-        .add_systems(Update, script_execution_system)
         .add_systems(Update, execute_pending_commands)
         .add_systems(Update, handle_inventory_input)
         .add_systems(Update, handle_diagnostics_toggle)

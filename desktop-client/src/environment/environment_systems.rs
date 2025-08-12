@@ -9,13 +9,23 @@ use crate::mqtt::TemperatureResource;
 
 pub struct EnvironmentPlugin;
 
+/// Resource to ensure background world setup only runs once
+#[derive(Resource, Default)]
+struct BackgroundWorldSetupComplete(bool);
+
 impl Plugin for EnvironmentPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(VoxelWorld::default())
-            .add_systems(Startup, (setup_environment, setup_background_world).chain())
+            .insert_resource(BackgroundWorldSetupComplete::default())
+            .add_systems(Startup, setup_environment)
             .add_systems(
                 Update,
                 (
+                    setup_background_world
+                        .run_if(|setup_complete: Res<BackgroundWorldSetupComplete>| {
+                            !setup_complete.0
+                        })
+                        .run_if(resource_exists::<PendingCommands>),
                     blinking_system,
                     rotate_logo_system,
                     update_thermometer_material,
@@ -170,7 +180,10 @@ fn update_thermometer_scale(
 }
 
 /// Setup background world by executing the background world script
-fn setup_background_world(mut pending_commands: ResMut<PendingCommands>) {
+fn setup_background_world(
+    mut pending_commands: ResMut<PendingCommands>,
+    mut setup_complete: ResMut<BackgroundWorldSetupComplete>,
+) {
     // Execute background world script if it exists
     let background_script_path = "scripts/background_world.txt";
     if std::path::Path::new(background_script_path).exists() {
@@ -199,4 +212,7 @@ fn setup_background_world(mut pending_commands: ResMut<PendingCommands>) {
             background_script_path
         );
     }
+
+    // Mark setup as complete so this system won't run again
+    setup_complete.0 = true;
 }

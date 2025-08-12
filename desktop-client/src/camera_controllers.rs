@@ -275,6 +275,13 @@ fn run_camera_controller(
         controller.velocity = Vec3::ZERO;
         info!("Cleared camera velocity when switching to flying mode");
     }
+
+    // Also clear velocity when switching from flying to walking to prevent initial physics issues
+    if previous_mode.0 == Some(PlayerMode::Flying) && *player_mode == PlayerMode::Walking {
+        controller.velocity = Vec3::ZERO;
+        info!("Cleared camera velocity when switching from flying to walking mode");
+    }
+
     previous_mode.0 = Some(*player_mode);
 
     // Only handle movement in flying mode - walking mode movement is handled by the physics system
