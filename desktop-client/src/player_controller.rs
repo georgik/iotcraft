@@ -61,29 +61,56 @@ fn check_voxel_ground(
 }
 
 /// Check if a position would collide with a voxel block
+/// Uses smart collision detection that prevents camera from entering cubes while avoiding false positives
 fn check_voxel_collision(
     position: Vec3,
     player_height: f32,
     player_radius: f32,
     voxel_world: &crate::environment::VoxelWorld,
 ) -> bool {
-    // Check multiple points around the player's capsule
+    // Player dimensions
     let player_center = position;
     let player_bottom = player_center - Vec3::new(0.0, player_height * 0.5, 0.0);
     let player_top = player_center + Vec3::new(0.0, player_height * 0.5, 0.0);
+    let player_mid = player_center; // Eye level (camera position)
 
-    // Check center, bottom, and top positions
-    let positions_to_check = [
-        player_center,
-        player_bottom,
-        player_top,
-        // Check corners at bottom level
+    // Use smaller buffer to prevent getting stuck - reduced from 0.3 to 0.15
+    let collision_radius = player_radius + 0.15;
+
+    // Only check critical collision points to avoid false positives
+    let mut positions_to_check = Vec::new();
+
+    // Check center positions at different heights
+    positions_to_check.push(player_center);
+
+    // Check 4 cardinal directions at mid-height (most important for horizontal movement)
+    let cardinal_angles: [f32; 4] = [0.0, 90.0, 180.0, 270.0]; // N, E, S, W
+    for angle_deg in cardinal_angles {
+        let angle_rad = angle_deg.to_radians();
+        let x_offset = collision_radius * angle_rad.cos();
+        let z_offset = collision_radius * angle_rad.sin();
+        positions_to_check.push(player_mid + Vec3::new(x_offset, 0.0, z_offset));
+    }
+
+    // Check corners at bottom level (for ground collision)
+    let corner_positions = [
         player_bottom + Vec3::new(player_radius * 0.7, 0.0, player_radius * 0.7),
         player_bottom + Vec3::new(-player_radius * 0.7, 0.0, player_radius * 0.7),
         player_bottom + Vec3::new(player_radius * 0.7, 0.0, -player_radius * 0.7),
         player_bottom + Vec3::new(-player_radius * 0.7, 0.0, -player_radius * 0.7),
     ];
+    positions_to_check.extend_from_slice(&corner_positions);
 
+    // Check top corners (for ceiling collision)
+    let top_corner_positions = [
+        player_top + Vec3::new(player_radius * 0.5, 0.0, player_radius * 0.5),
+        player_top + Vec3::new(-player_radius * 0.5, 0.0, player_radius * 0.5),
+        player_top + Vec3::new(player_radius * 0.5, 0.0, -player_radius * 0.5),
+        player_top + Vec3::new(-player_radius * 0.5, 0.0, -player_radius * 0.5),
+    ];
+    positions_to_check.extend_from_slice(&top_corner_positions);
+
+    // Check all positions for collisions
     for check_pos in positions_to_check {
         let voxel_pos = IVec3::new(
             check_pos.x.floor() as i32,
@@ -135,7 +162,7 @@ impl Default for PlayerMovement {
         Self {
             walk_speed: 5.0,
             run_speed: 12.0,
-            jump_force: 8.0,
+            jump_force: 5.5, // Set to 5.5 for ~1.5 cube height jump (cube size = 1.0)
             ground_friction: 0.9,
             air_control: 0.3,
             gravity_scale: 0.0,
@@ -683,7 +710,16 @@ fn handle_physics_free_walking_movement_menu_only(
             transform.translation.y = ground_y + capsule_half_height + 0.1;
             movement.gravity_scale = 0.0;
             movement.is_grounded = true;
-            info!("Menu mode: Corrected player position to avoid collision");
+
+            // Rate-limit collision correction logging to prevent spam
+            static mut LAST_CORRECTION_LOG: f64 = 0.0;
+            let current_time = time.elapsed_secs_f64();
+            unsafe {
+                if current_time - LAST_CORRECTION_LOG > 1.0 {
+                    LAST_CORRECTION_LOG = current_time;
+                    info!("Menu mode: Corrected player position to avoid collision");
+                }
+            }
         }
     }
 }
