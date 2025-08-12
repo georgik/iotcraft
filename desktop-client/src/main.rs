@@ -22,6 +22,7 @@ mod fonts;
 mod interaction;
 mod inventory;
 mod localization;
+mod minimap;
 mod mqtt;
 mod script;
 mod ui;
@@ -43,6 +44,7 @@ use fonts::{FontPlugin, Fonts};
 use interaction::InteractionPlugin as MyInteractionPlugin;
 use inventory::{InventoryPlugin, PlayerInventory, handle_give_command};
 use localization::{LocalizationConfig, LocalizationPlugin};
+use minimap::MinimapPlugin;
 use mqtt::{MqttPlugin, *};
 use multiplayer::{
     MultiplayerPlugin, SharedWorldPlugin, WorldDiscoveryPlugin, WorldPublisherPlugin,
@@ -1042,6 +1044,7 @@ fn main() {
         .add_plugins(CrosshairPlugin)
         .add_plugins(ErrorIndicatorPlugin)
         .add_plugins(MainMenuPlugin)
+        .add_plugins(MinimapPlugin)
         .add_plugins(WorldPlugin)
         .add_plugins(MultiplayerPlugin)
         .add_plugins(SharedWorldPlugin)
