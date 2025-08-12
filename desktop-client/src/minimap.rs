@@ -1,4 +1,6 @@
+use crate::devices::device_types::{DeviceEntity, DeviceType};
 use crate::environment::{BlockType, VoxelWorld};
+use crate::interaction::interaction_types::LampState;
 use crate::ui::GameState;
 use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
@@ -73,6 +75,14 @@ pub struct MinimapGenerationTask {
     pub player_pos: Vec3,
 }
 
+/// Structure to hold device information for minimap rendering
+#[derive(Clone, Debug)]
+pub struct MinimapDevice {
+    pub position: Vec3,
+    pub device_type: DeviceType,
+    pub is_on: bool, // For lamps, this indicates if the lamp is on
+}
+
 /// Get color for different block types
 fn get_block_color(block_type: BlockType) -> [u8; 4] {
     match block_type {
@@ -88,6 +98,7 @@ fn get_block_color(block_type: BlockType) -> [u8; 4] {
 /// Generate a 2D minimap texture from the voxel world (now async-compatible)
 fn generate_minimap_texture_sync(
     blocks: HashMap<IVec3, BlockType>, // Pass owned data for async
+    devices: Vec<MinimapDevice>,       // Device data for rendering
     player_pos: Vec3,
     player_rotation: Option<f32>, // Player's yaw rotation in radians (None for fixed north mode)
     texture_size: u32,
@@ -164,6 +175,81 @@ fn generate_minimap_texture_sync(
                     pixels[pixel_index + 1] = color[1]; // G
                     pixels[pixel_index + 2] = color[2]; // B
                     pixels[pixel_index + 3] = color[3]; // A
+                }
+            }
+        }
+    }
+
+    // Render devices on top of blocks
+    for device in devices {
+        // Convert device position to minimap coordinates
+        let device_relative_x = device.position.x - player_pos.x;
+        let device_relative_z = device.position.z - player_pos.z;
+
+        // Apply rotation if needed
+        let (rotated_x, rotated_z) = if player_rotation.is_some() {
+            // Apply inverse rotation to device position
+            let rotated_x = device_relative_x * cos_r + device_relative_z * sin_r;
+            let rotated_z = -device_relative_x * sin_r + device_relative_z * cos_r;
+            (rotated_x, rotated_z)
+        } else {
+            (device_relative_x, device_relative_z)
+        };
+
+        // Convert to pixel coordinates
+        let pixel_x = (half_size + rotated_x / scale) as i32;
+        let pixel_z = (half_size + rotated_z / scale) as i32;
+
+        // Check if device is within minimap bounds
+        if pixel_x >= 0
+            && pixel_x < texture_size as i32
+            && pixel_z >= 0
+            && pixel_z < texture_size as i32
+        {
+            // Get device color based on type and state
+            let device_color = match device.device_type {
+                DeviceType::Lamp => {
+                    if device.is_on {
+                        [255, 255, 0, 255] // Bright yellow for ON lamp
+                    } else {
+                        [128, 128, 0, 255] // Dark yellow/brown for OFF lamp
+                    }
+                }
+                DeviceType::Door => [139, 69, 19, 255], // Brown for doors
+                DeviceType::Sensor => [0, 255, 255, 255], // Cyan for sensors
+            };
+
+            // Draw a 3x3 pixel device indicator for better visibility
+            for dx in -1..=1 {
+                for dz in -1..=1 {
+                    let draw_x = pixel_x + dx;
+                    let draw_z = pixel_z + dz;
+
+                    if draw_x >= 0
+                        && draw_x < texture_size as i32
+                        && draw_z >= 0
+                        && draw_z < texture_size as i32
+                    {
+                        let pixel_index =
+                            ((draw_z as u32 * texture_size + draw_x as u32) * 4) as usize;
+
+                        if pixel_index + 3 < pixels.len() {
+                            // For the center pixel, use full color
+                            // For edge pixels, blend with existing color for a softer look
+                            let alpha = if dx == 0 && dz == 0 { 1.0 } else { 0.7 };
+
+                            pixels[pixel_index] = (device_color[0] as f32 * alpha
+                                + pixels[pixel_index] as f32 * (1.0 - alpha))
+                                as u8;
+                            pixels[pixel_index + 1] = (device_color[1] as f32 * alpha
+                                + pixels[pixel_index + 1] as f32 * (1.0 - alpha))
+                                as u8;
+                            pixels[pixel_index + 2] = (device_color[2] as f32 * alpha
+                                + pixels[pixel_index + 2] as f32 * (1.0 - alpha))
+                                as u8;
+                            pixels[pixel_index + 3] = 255; // Full opacity
+                        }
+                    }
                 }
             }
         }
@@ -308,6 +394,7 @@ fn start_minimap_texture_generation(
     mut commands: Commands,
     mut minimap_textures: Query<(Entity, &mut MinimapTexture), Without<MinimapGenerationTask>>,
     player_camera_query: Query<&Transform, With<Camera>>,
+    device_query: Query<(&Transform, &DeviceEntity, Option<&LampState>)>,
     minimap_state: Res<MinimapState>,
     voxel_world: Res<VoxelWorld>,
     time: Res<Time>,
@@ -364,9 +451,43 @@ fn start_minimap_texture_generation(
             .map(|(pos, block_type)| (*pos, *block_type))
             .collect();
 
+        // Collect device data for minimap rendering
+        let devices: Vec<MinimapDevice> = device_query
+            .iter()
+            .filter_map(|(transform, device_entity, lamp_state)| {
+                // Only include devices within minimap radius
+                let device_pos = transform.translation;
+                let dx = (device_pos.x - player_pos.x).abs();
+                let dz = (device_pos.z - player_pos.z).abs();
+
+                if dx <= world_radius as f32 && dz <= world_radius as f32 {
+                    // Parse device type from string
+                    if let Some(device_type) = DeviceType::from_str(&device_entity.device_type) {
+                        let is_on = match device_type {
+                            DeviceType::Lamp => {
+                                lamp_state.map(|state| state.is_on).unwrap_or(false)
+                            }
+                            _ => false, // For non-lamp devices, this field is not relevant
+                        };
+
+                        Some(MinimapDevice {
+                            position: device_pos,
+                            device_type,
+                            is_on,
+                        })
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            })
+            .collect();
+
         info!(
-            "Starting async minimap generation with {} relevant blocks",
-            relevant_blocks.len()
+            "Starting async minimap generation with {} relevant blocks and {} devices",
+            relevant_blocks.len(),
+            devices.len()
         );
 
         // Spawn async task on compute thread pool
@@ -376,6 +497,7 @@ fn start_minimap_texture_generation(
         let task = task_pool.spawn(async move {
             generate_minimap_texture_sync(
                 relevant_blocks,
+                devices,
                 player_pos,
                 player_rotation,
                 texture_size,
