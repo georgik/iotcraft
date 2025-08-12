@@ -30,17 +30,6 @@ mod tests {
     }
 
     #[test]
-    fn test_mqtt_config_from_env() {
-        unsafe {
-            env::set_var("MQTT_BROKER_HOST", "testhost");
-            env::set_var("MQTT_BROKER_PORT", "1884");
-        }
-        let config = MqttConfig::from_env();
-        assert_eq!(config.host, "testhost");
-        assert_eq!(config.port, 1884);
-    }
-
-    #[test]
     fn test_broker_address() {
         let config = MqttConfig {
             host: "brokerhost".to_string(),
@@ -51,9 +40,12 @@ mod tests {
 }
 
 impl MqttConfig {
-    /// Load configuration from environment variables or use defaults
-    pub fn from_env() -> Self {
-        let host = env::var("MQTT_BROKER_HOST").unwrap_or_else(|_| "localhost".to_string());
+    /// Load configuration from CLI args, environment variables, or defaults
+    /// CLI args take precedence over environment variables
+    pub fn from_env_with_override(mqtt_server_override: Option<String>) -> Self {
+        let host = mqtt_server_override
+            .or_else(|| env::var("MQTT_BROKER_HOST").ok())
+            .unwrap_or_else(|| "localhost".to_string());
         let port = env::var("MQTT_BROKER_PORT")
             .unwrap_or_else(|_| "1883".to_string())
             .parse()

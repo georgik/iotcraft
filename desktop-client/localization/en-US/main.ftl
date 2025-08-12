@@ -9,6 +9,14 @@ menu-quit-no-save = Quit to Main Menu (No Save)
 menu-language = Language:
 menu-settings = Settings
 menu-back-to-main = Back to Main Menu
+menu-singleplayer = Singleplayer
+menu-multiplayer = Multiplayer
+menu-join-world = Join World
+menu-publish-world = Publish World
+menu-world-published = World Published
+menu-world-unpublished = World Unpublished
+menu-online-worlds = Online Worlds
+menu-local-worlds = Local Worlds
 
 # World Selection
 world-last-played = Last played: {$time}

@@ -10,7 +10,6 @@ use clap::Parser;
 use log::{error, info};
 use rumqttc::{Client, Event, MqttOptions, Outgoing, QoS};
 use serde_json::json;
-use std::fs;
 use std::time::Duration;
 
 mod camera_controllers;
@@ -22,15 +21,21 @@ mod fonts;
 mod interaction;
 mod inventory;
 mod localization;
+mod minimap;
 mod mqtt;
 mod script;
 mod ui;
 
+mod multiplayer;
+mod physics_manager;
+mod player_avatar;
+mod player_controller;
+mod profile;
 mod world;
 
 // Re-export types for easier access
 use config::MqttConfig;
-use console::console_types::{LookCommand, TeleportCommand};
+use console::console_types::{ListCommand, LookCommand, TeleportCommand};
 use console::*;
 use devices::*;
 use environment::*;
@@ -38,7 +43,14 @@ use fonts::{FontPlugin, Fonts};
 use interaction::InteractionPlugin as MyInteractionPlugin;
 use inventory::{InventoryPlugin, PlayerInventory, handle_give_command};
 use localization::{LocalizationConfig, LocalizationPlugin};
+use minimap::MinimapPlugin;
 use mqtt::{MqttPlugin, *};
+use multiplayer::{
+    MultiplayerPlugin, SharedWorldPlugin, WorldDiscoveryPlugin, WorldPublisherPlugin,
+};
+use physics_manager::PhysicsManagerPlugin;
+use player_avatar::PlayerAvatarPlugin;
+use player_controller::PlayerControllerPlugin;
 use ui::{CrosshairPlugin, ErrorIndicatorPlugin, GameState, InventoryUiPlugin, MainMenuPlugin};
 use world::WorldPlugin;
 
@@ -77,118 +89,12 @@ struct Args {
     /// Force a specific language (BCP 47 format, e.g., en-US, cs-CZ, pt-BR)
     #[arg(short, long)]
     language: Option<String>,
-}
-
-// Script execution system
-#[derive(Resource)]
-struct ScriptExecutor {
-    commands: Vec<String>,
-    current_index: usize,
-    delay_timer: Timer,
-    startup_script: Option<String>,
-    execute_startup: bool,
-}
-
-#[derive(Resource)]
-struct PendingCommands {
-    commands: Vec<String>,
-}
-
-impl Default for ScriptExecutor {
-    fn default() -> Self {
-        Self {
-            commands: Vec::new(),
-            current_index: 0,
-            delay_timer: Timer::from_seconds(0.1, TimerMode::Repeating),
-            startup_script: None,
-            execute_startup: false,
-        }
-    }
-}
-
-fn execute_script(content: &str) -> Vec<String> {
-    content
-        .lines()
-        .map(|line| line.trim())
-        .filter(|line| !line.is_empty() && !line.starts_with('#'))
-        .map(|line| line.to_string())
-        .collect()
-}
-
-fn handle_load_command(
-    mut log: ConsoleCommand<LoadCommand>,
-    mut script_executor: ResMut<ScriptExecutor>,
-) {
-    if let Some(Ok(LoadCommand { filename })) = log.take() {
-        info!("Console command: load {}", filename);
-        match fs::read_to_string(&filename) {
-            Ok(content) => {
-                let commands = execute_script(&content);
-                script_executor.commands = commands;
-                script_executor.current_index = 0;
-                reply!(
-                    log,
-                    "Loaded {} commands from {}",
-                    script_executor.commands.len(),
-                    filename
-                );
-                info!("Loaded script file: {}", filename);
-            }
-            Err(e) => {
-                reply!(log, "Error loading script {}: {}", filename, e);
-            }
-        }
-    }
-}
-
-fn script_execution_system(
-    mut script_executor: ResMut<ScriptExecutor>,
-    time: Res<Time>,
-    mut pending_commands: ResMut<PendingCommands>,
-) {
-    // Handle startup script execution
-    if script_executor.execute_startup {
-        if let Some(ref startup_script) = script_executor.startup_script.clone() {
-            match fs::read_to_string(startup_script) {
-                Ok(content) => {
-                    let commands = execute_script(&content);
-                    script_executor.commands = commands;
-                    script_executor.current_index = 0;
-                    info!("Loaded startup script: {}", startup_script);
-                }
-                Err(e) => {
-                    error!("Error loading startup script {}: {}", startup_script, e);
-                }
-            }
-        }
-        script_executor.execute_startup = false;
-    }
-
-    // Execute commands from script
-    if !script_executor.commands.is_empty()
-        && script_executor.current_index < script_executor.commands.len()
-    {
-        script_executor.delay_timer.tick(time.delta());
-
-        if script_executor.delay_timer.just_finished() {
-            let command = &script_executor.commands[script_executor.current_index];
-
-            // Log the command execution
-            info!("Executing script command: {}", command);
-
-            // Queue the command for execution
-            pending_commands.commands.push(command.clone());
-
-            script_executor.current_index += 1;
-
-            // Check if we've finished executing all commands
-            if script_executor.current_index >= script_executor.commands.len() {
-                script_executor.commands.clear();
-                script_executor.current_index = 0;
-                info!("Script execution completed");
-            }
-        }
-    }
+    /// MQTT server address (default: localhost)
+    #[arg(short, long)]
+    mqtt_server: Option<String>,
+    /// Player ID override for multiplayer testing (default: auto-generated)
+    #[arg(short, long)]
+    player_id: Option<String>,
 }
 
 fn handle_place_block_command(
@@ -244,6 +150,7 @@ fn handle_place_block_command(
             VoxelBlock {
                 position: IVec3::new(x, y, z),
             },
+            // Physics colliders are managed by PhysicsManagerPlugin based on distance and mode
         ));
 
         reply!(log, "Placed block at ({}, {}, {})", x, y, z);
@@ -309,6 +216,7 @@ fn handle_wall_command(
                         VoxelBlock {
                             position: IVec3::new(x, y, z),
                         },
+                        // Physics colliders are managed by PhysicsManagerPlugin based on distance and mode
                     ));
                 }
             }
@@ -477,6 +385,7 @@ fn handle_load_map_command(
                         VoxelBlock {
                             position: *position,
                         },
+                        // Physics colliders are managed by PhysicsManagerPlugin based on distance and mode
                     ));
                 }
 
@@ -501,7 +410,7 @@ fn handle_load_map_command(
 }
 
 fn execute_pending_commands(
-    mut pending_commands: ResMut<PendingCommands>,
+    mut pending_commands: ResMut<crate::script::script_types::PendingCommands>,
     mut print_console_line: EventWriter<PrintConsoleLine>,
     mut blink_state: ResMut<BlinkState>,
     temperature: Res<TemperatureResource>,
@@ -730,6 +639,7 @@ fn execute_pending_commands(
                                     VoxelBlock {
                                         position: IVec3::new(x, y, z),
                                     },
+                                    // Physics colliders are managed by PhysicsManagerPlugin based on distance and mode
                                 ));
 
                                 print_console_line.write(PrintConsoleLine::new(format!(
@@ -828,6 +738,12 @@ fn execute_pending_commands(
                                                 }
                                             };
 
+                                            // Debug: VoxelWorld before adding blocks
+                                            info!(
+                                                "VoxelWorld before wall command: {} blocks",
+                                                voxel_world.blocks.len()
+                                            );
+
                                             let texture_path = match block_type_enum {
                                                 BlockType::Grass => "textures/grass.webp",
                                                 BlockType::Dirt => "textures/dirt.webp",
@@ -850,6 +766,7 @@ fn execute_pending_commands(
                                             let cube_mesh = meshes
                                                 .add(Cuboid::new(CUBE_SIZE, CUBE_SIZE, CUBE_SIZE));
 
+                                            let mut blocks_added = 0;
                                             for x in x1..=x2 {
                                                 for y in y1..=y2 {
                                                     for z in z1..=z2 {
@@ -857,6 +774,7 @@ fn execute_pending_commands(
                                                             IVec3::new(x, y, z),
                                                             block_type_enum,
                                                         );
+                                                        blocks_added += 1;
 
                                                         commands.spawn((
                                                             Mesh3d(cube_mesh.clone()),
@@ -867,9 +785,36 @@ fn execute_pending_commands(
                                                             VoxelBlock {
                                                                 position: IVec3::new(x, y, z),
                                                             },
+                                                            // Physics colliders are managed by PhysicsManagerPlugin based on distance and mode
                                                         ));
                                                     }
                                                 }
+                                            }
+
+                                            // Debug: VoxelWorld after adding blocks
+                                            info!(
+                                                "VoxelWorld after wall command: {} blocks (added {})",
+                                                voxel_world.blocks.len(),
+                                                blocks_added
+                                            );
+
+                                            // Debug: Show a few sample blocks that were just added
+                                            let sample_positions = [
+                                                IVec3::new(x1, y1, z1),
+                                                IVec3::new(x2, y2, z2),
+                                                IVec3::new(
+                                                    (x1 + x2) / 2,
+                                                    (y1 + y2) / 2,
+                                                    (z1 + z2) / 2,
+                                                ),
+                                            ];
+
+                                            for pos in sample_positions {
+                                                let has_block = voxel_world.is_block_at(pos);
+                                                info!(
+                                                    "Sample block check at {:?}: has_block={}",
+                                                    pos, has_block
+                                                );
                                             }
 
                                             print_console_line.write(PrintConsoleLine::new(format!(
@@ -964,16 +909,11 @@ fn execute_pending_commands(
 
 fn main() {
     let args = Args::parse();
-    let mut script_executor = ScriptExecutor::default();
 
-    // Set up startup script if provided
-    if let Some(script_file) = args.script {
-        script_executor.startup_script = Some(script_file);
-        script_executor.execute_startup = true;
-    }
+    // Note: Script execution is now handled by the ScriptPlugin
 
-    // Load MQTT configuration from environment variables
-    let mqtt_config = MqttConfig::from_env();
+    // Load MQTT configuration from CLI args and environment variables
+    let mqtt_config = MqttConfig::from_env_with_override(args.mqtt_server);
     info!("Using MQTT broker: {}", mqtt_config.broker_address());
 
     // Determine the language configuration
@@ -988,7 +928,11 @@ fn main() {
     // Initialize resources first
     app.insert_resource(localization_config)
         .insert_resource(ClearColor(Color::srgb(0.53, 0.81, 0.92)))
-        .insert_resource(mqtt_config);
+        .insert_resource(mqtt_config)
+        .insert_resource(profile::load_or_create_profile_with_override(
+            args.player_id,
+        ));
+    // Script resources are now handled by the ScriptPlugin
 
     // Add default plugins and initialize AssetServer
     app.add_plugins(DefaultPlugins);
@@ -1003,7 +947,11 @@ fn main() {
 
     app.add_plugins(FontPlugin) // Keep FontPlugin for any additional font-related systems
         .add_plugins(LocalizationPlugin) // Load localization after fonts
+        .add_plugins(avian3d::PhysicsPlugins::default()) // Add physics engine
+        .add_plugins(PhysicsManagerPlugin) // Add physics optimization manager
         .add_plugins(CameraControllerPlugin)
+        .add_plugins(PlayerControllerPlugin) // Add player controller for walking/flying modes
+        .add_plugins(script::script_systems::ScriptPlugin) // Add script plugin early for PendingCommands resource
         .add_plugins(ConsolePlugin)
         .add_plugins(DevicePlugin)
         .add_plugins(DevicePositioningPlugin)
@@ -1015,7 +963,13 @@ fn main() {
         .add_plugins(CrosshairPlugin)
         .add_plugins(ErrorIndicatorPlugin)
         .add_plugins(MainMenuPlugin)
+        .add_plugins(MinimapPlugin)
         .add_plugins(WorldPlugin)
+        .add_plugins(MultiplayerPlugin)
+        .add_plugins(SharedWorldPlugin)
+        .add_plugins(WorldPublisherPlugin)
+        .add_plugins(WorldDiscoveryPlugin)
+        .add_plugins(PlayerAvatarPlugin)
         .init_state::<GameState>()
         .insert_resource(ConsoleConfiguration {
             keys: vec![KeyCode::F12],
@@ -1031,7 +985,6 @@ fn main() {
         .add_console_command::<SpawnDoorCommand, _>(
             crate::console::console_systems::handle_spawn_door_command,
         )
-        .add_console_command::<LoadCommand, _>(handle_load_command)
         .add_console_command::<MoveCommand, _>(crate::console::console_systems::handle_move_command)
         .add_console_command::<PlaceBlockCommand, _>(handle_place_block_command)
         .add_console_command::<RemoveBlockCommand, _>(handle_remove_block_command)
@@ -1044,6 +997,7 @@ fn main() {
         )
         .add_console_command::<TeleportCommand, _>(handle_teleport_command)
         .add_console_command::<LookCommand, _>(handle_look_command)
+        .add_console_command::<ListCommand, _>(crate::console::console_systems::handle_list_command)
         .insert_resource(BlinkState::default())
         // .add_systems(Update, draw_cursor) // Disabled: InteractionPlugin handles cursor drawing
         .add_systems(
@@ -1061,13 +1015,8 @@ fn main() {
             Update,
             crate::console::esc_handling::handle_esc_key.after(ConsoleSet::Commands),
         )
-        .insert_resource(script_executor)
-        .insert_resource(PendingCommands {
-            commands: Vec::new(),
-        })
         .init_resource::<DiagnosticsVisible>()
         .add_systems(Startup, setup_diagnostics_ui)
-        .add_systems(Update, script_execution_system)
         .add_systems(Update, execute_pending_commands)
         .add_systems(Update, handle_inventory_input)
         .add_systems(Update, handle_diagnostics_toggle)

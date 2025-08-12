@@ -6,6 +6,7 @@
 //!
 //! Unlike other examples, which demonstrate an application, this demonstrates a plugin library.
 
+use crate::player_controller::PlayerMode;
 use crate::ui::GameState;
 use bevy::{
     input::mouse::{AccumulatedMouseMotion, AccumulatedMouseScroll, MouseScrollUnit},
@@ -14,15 +15,20 @@ use bevy::{
 };
 use std::{f32::consts::*, fmt};
 
+/// Resource to track the previous player mode for camera velocity management
+#[derive(Resource, Default)]
+struct PreviousPlayerMode(Option<PlayerMode>);
+
 /// A freecam-style camera controller plugin.
 pub struct CameraControllerPlugin;
 
 impl Plugin for CameraControllerPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(
-            Update,
-            (sync_camera_controller_with_transform, run_camera_controller).chain(),
-        );
+        app.insert_resource(PreviousPlayerMode::default())
+            .add_systems(
+                Update,
+                (sync_camera_controller_with_transform, run_camera_controller).chain(),
+            );
     }
 }
 
@@ -170,6 +176,8 @@ fn run_camera_controller(
     accumulated_mouse_scroll: Res<AccumulatedMouseScroll>,
     key_input: Res<ButtonInput<KeyCode>>,
     game_state: Res<State<GameState>>,
+    player_mode: Res<PlayerMode>,
+    mut previous_mode: ResMut<PreviousPlayerMode>,
     mut query: Query<(&mut Transform, &mut CameraController), With<Camera>>,
 ) {
     let dt = time.delta_secs();
@@ -261,28 +269,46 @@ fn run_camera_controller(
         }
     }
 
-    // Update velocity
-    if axis_input != Vec3::ZERO {
-        let max_speed = if key_input.pressed(controller.key_run) {
-            controller.run_speed
-        } else {
-            controller.walk_speed
-        };
-        controller.velocity = axis_input.normalize() * max_speed;
-    } else {
-        let friction = controller.friction.clamp(0.0, 1.0);
-        controller.velocity *= 1.0 - friction;
-        if controller.velocity.length_squared() < 1e-6 {
-            controller.velocity = Vec3::ZERO;
-        }
+    // Clear velocity when first entering flying mode to prevent physics carryover
+    // This prevents the "seeing only sky" issue when transitioning from walking to flying
+    if previous_mode.0 != Some(*player_mode) && *player_mode == PlayerMode::Flying {
+        controller.velocity = Vec3::ZERO;
+        info!("Cleared camera velocity when switching to flying mode");
     }
 
-    // Apply movement update - Now uses updated rotation from mouse input
-    if controller.velocity != Vec3::ZERO {
-        let forward = *transform.forward();
-        let right = *transform.right();
-        transform.translation += controller.velocity.x * dt * right
-            + controller.velocity.y * dt * Vec3::Y
-            + controller.velocity.z * dt * forward;
+    // Also clear velocity when switching from flying to walking to prevent initial physics issues
+    if previous_mode.0 == Some(PlayerMode::Flying) && *player_mode == PlayerMode::Walking {
+        controller.velocity = Vec3::ZERO;
+        info!("Cleared camera velocity when switching from flying to walking mode");
+    }
+
+    previous_mode.0 = Some(*player_mode);
+
+    // Only handle movement in flying mode - walking mode movement is handled by the physics system
+    if *player_mode == PlayerMode::Flying {
+        // Update velocity
+        if axis_input != Vec3::ZERO {
+            let max_speed = if key_input.pressed(controller.key_run) {
+                controller.run_speed
+            } else {
+                controller.walk_speed
+            };
+            controller.velocity = axis_input.normalize() * max_speed;
+        } else {
+            let friction = controller.friction.clamp(0.0, 1.0);
+            controller.velocity *= 1.0 - friction;
+            if controller.velocity.length_squared() < 1e-6 {
+                controller.velocity = Vec3::ZERO;
+            }
+        }
+
+        // Apply movement update - Now uses updated rotation from mouse input
+        if controller.velocity != Vec3::ZERO {
+            let forward = *transform.forward();
+            let right = *transform.right();
+            transform.translation += controller.velocity.x * dt * right
+                + controller.velocity.y * dt * Vec3::Y
+                + controller.velocity.z * dt * forward;
+        }
     }
 }

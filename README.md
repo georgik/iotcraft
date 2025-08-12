@@ -13,14 +13,16 @@ IoTCraft is a multi-component Rust project showcasing MQTT-controlled IoT device
   - **Block manipulation system** - place, remove, and manage different block types (grass, dirt, stone)
   - **World persistence** - save and load entire voxel worlds to/from JSON files
   - **Script system** - automate building with command scripts
+  - **Interactive minimap** - Real-time world overview with player tracking
+  - **Multiplayer infrastructure** - 3D voxel-style player avatars with animations
   - Dynamic device spawning based on MQTT announcements
   - Interactive device control via mouse clicks (lamps: ON/OFF, doors: open/close via MQTT)
   - Drag-and-drop device positioning with persistent storage
   - **Door system** - 3D doors that rotate 90 degrees when opened/closed
-  - **Comprehensive console interface** for world and device management
+  - **Comprehensive console interface** - Enhanced with device listing and management commands
   - **Real-time diagnostics overlay** - Press F3 for detailed debug information
   - A rotating logo cube and thermometer indicator
-  - **Enhanced WASD + mouse camera controls** (fixed Luanti-like movement)
+  - **Enhanced WASD + mouse camera controls** - Physics-based walking mode as default
   - **Enhanced inventory system** - 9-slot hotbar with item management
   - Comprehensive MQTT logging and diagnostics
 
@@ -202,12 +204,34 @@ To test with an ESP32-C6 device:
 - `save_map <filename>` - Save entire world to JSON file
 - `load_map <filename>` - Load world from JSON file
 - `move <device_id> <x> <y> <z>` - Move a device to specific coordinates
+- `list` - Display all connected IoT devices with their positions
 - `blink` - Make all registered devices blink their LEDs
 - `spawn <device_id> <x> <y> <z>` - Manually spawn a lamp device for testing
 - `spawn_door <device_id> <x> <y> <z>` - Manually spawn a door device for testing
 - `load <script>` - Execute command scripts
 
 📖 **[Complete Console Commands Reference →](docs/console-commands.md)**
+
+### 🗺️ Interactive Minimap
+
+**Real-Time World Overview:**
+- Top-right corner overlay showing bird's-eye view of the world
+- Real-time player position tracking with green dot indicator
+- Dynamic block rendering with color-coded block types
+- Efficient chunk-based rendering for large worlds
+- Minimal performance impact with collision-aware updates
+
+**Navigation Features:**
+- Instant world overview for navigation planning
+- Visual representation of built structures
+- Player orientation and movement tracking
+
+### 👥 Multiplayer Infrastructure
+
+**Multiplayer-Ready Architecture:**
+- Scalable entity-component system for multiple players
+- Prepared infrastructure for future network multiplayer
+- Efficient avatar rendering and animation management
 
 ### 💾 Persistent Device Properties
 

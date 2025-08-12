@@ -1,7 +1,5 @@
 use super::{script_helpers::*, script_types::*};
-use crate::console::BlinkState;
 use bevy::prelude::*;
-use bevy_console::PrintConsoleLine;
 use log::info;
 
 pub struct ScriptPlugin;
@@ -12,8 +10,7 @@ impl Plugin for ScriptPlugin {
             .insert_resource(PendingCommands {
                 commands: Vec::new(),
             })
-            .add_systems(Update, script_execution_system)
-            .add_systems(Update, execute_pending_commands);
+            .add_systems(Update, script_execution_system);
     }
 }
 
@@ -52,16 +49,5 @@ pub fn script_execution_system(
                 info!("Script execution completed");
             }
         }
-    }
-}
-
-pub fn execute_pending_commands(
-    mut pending_commands: ResMut<PendingCommands>,
-    _print_console_line: EventWriter<PrintConsoleLine>,
-    _blink_state: ResMut<BlinkState>,
-) {
-    for command in pending_commands.commands.drain(..) {
-        info!("Executing queued command: {}", command);
-        // Additional command execution logic here.
     }
 }

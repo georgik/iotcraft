@@ -17,6 +17,11 @@ wall stone 0 0 0 5 3 0  # Create a wall from (0,0,0) to (5,3,0)
 remove 0 1 0         # Remove a block
 ```
 
+### Console and System
+```bash
+list                 # List connected devices
+```
+
 ### World Management
 ```bash
 save_map my_world.json     # Save current world
@@ -38,6 +43,12 @@ mqtt status                      # Check MQTT connection
 - **E/Q**: Fly up/down
 - **Shift**: Move faster
 - **Scroll**: Adjust speed
+
+## Minimap
+- **M**: Toggle minimap visibility
+- **Interactive**: Click on minimap to teleport to that location
+- **Real-time**: Shows blocks, devices, and player position
+- **Top-down view**: Overhead perspective of the world
 
 ## Block Types
 - **grass**: Green surface blocks
