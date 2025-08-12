@@ -230,33 +230,4 @@ fn find_surface_y(voxel_world: &crate::environment::VoxelWorld, x: i32, z: i32) 
     None
 }
 
-/// Helper function to add physics collider to a block entity (used by block creation systems)
-pub fn add_physics_to_block_if_needed(
-    commands: &mut Commands,
-    entity: Entity,
-    player_mode: &PlayerMode,
-    player_position: Option<Vec3>,
-    block_position: Vec3,
-    max_distance: f32,
-) {
-    // Only add physics in walking mode
-    if !matches!(*player_mode, PlayerMode::Walking) {
-        return;
-    }
-
-    // Check distance if player position is provided
-    if let Some(player_pos) = player_position {
-        let distance = player_pos.distance(block_position);
-        if distance > max_distance {
-            return;
-        }
-    }
-
-    // Add physics components
-    commands.entity(entity).insert((
-        RigidBody::Static,
-        // Use half-extents for cuboid colliders (CUBE_SIZE is 1.0, so half-extents are 0.5)
-        Collider::cuboid(CUBE_SIZE / 2.0, CUBE_SIZE / 2.0, CUBE_SIZE / 2.0),
-        HasPhysicsCollider,
-    ));
-}
+// Helper function removed as it was unused

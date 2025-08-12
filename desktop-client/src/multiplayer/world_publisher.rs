@@ -33,9 +33,6 @@ pub enum PublishMessage {
     UnpublishWorld {
         world_id: String,
     },
-    UpdateWorldInfo {
-        world_info: SharedWorldInfo,
-    },
     BroadcastChange {
         change: WorldChange,
     },
@@ -194,16 +191,6 @@ fn handle_publish_message(client: &Client, message: PublishMessage) {
             }
 
             info!("Unpublished world {}", world_id);
-        }
-        PublishMessage::UpdateWorldInfo { world_info } => {
-            let info_topic = format!("iotcraft/worlds/{}/info", world_info.world_id);
-            if let Ok(payload) = serde_json::to_string(&world_info) {
-                if let Err(e) = client.publish(&info_topic, QoS::AtLeastOnce, true, payload) {
-                    error!("Failed to update world info: {}", e);
-                } else {
-                    info!("Updated world info for {}", world_info.world_name);
-                }
-            }
         }
         PublishMessage::BroadcastChange { change } => {
             let change_topic = format!("iotcraft/worlds/{}/changes", change.world_id);

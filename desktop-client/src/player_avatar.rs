@@ -4,7 +4,6 @@ use bevy::prelude::*;
 #[derive(Component)]
 pub struct PlayerAvatar {
     pub player_id: String,
-    pub player_name: String,
 }
 
 /// Components for different body parts
@@ -25,9 +24,7 @@ pub struct AvatarLeg {
 }
 
 #[derive(Component)]
-pub struct AvatarEye {
-    pub is_right: bool,
-}
+pub struct AvatarEye;
 
 #[derive(Component)]
 pub struct AvatarHair;
@@ -181,7 +178,6 @@ pub fn spawn_player_avatar(
             GlobalTransform::default(),
             PlayerAvatar {
                 player_id: player_id.clone(),
-                player_name: player_name.clone(),
             },
             Name::new(format!("PlayerAvatar-{}", player_name)),
             Visibility::default(),
@@ -291,7 +287,7 @@ pub fn spawn_player_avatar(
             Mesh3d(eye_mesh.clone()),
             MeshMaterial3d(eye_material.clone()),
             Transform::from_translation(right_eye_offset),
-            AvatarEye { is_right: true },
+            AvatarEye,
             Name::new("RightEye"),
         ))
         .id();
@@ -303,7 +299,7 @@ pub fn spawn_player_avatar(
             Mesh3d(eye_mesh),
             MeshMaterial3d(eye_material),
             Transform::from_translation(left_eye_offset),
-            AvatarEye { is_right: false },
+            AvatarEye,
             Name::new("LeftEye"),
         ))
         .id();
@@ -416,22 +412,5 @@ fn animate_avatar_parts(
         }; // Opposite to arms and each other
         let sway = (time_secs * 2.0 + phase).sin() * 0.15;
         leg_transform.rotation = Quat::from_rotation_x(sway);
-    }
-}
-
-/// Update avatar position and rotation
-pub fn update_player_avatar_transform(
-    avatar_entity: Entity,
-    position: Vec3,
-    yaw: f32,
-    _pitch: f32, // Not used for now, but available for future head movement
-    commands: &mut Commands,
-    avatar_query: &Query<&Transform, With<PlayerAvatar>>,
-) {
-    // Update the main avatar entity's transform
-    if let Ok(_current_transform) = avatar_query.get(avatar_entity) {
-        commands.entity(avatar_entity).insert(
-            Transform::from_translation(position).with_rotation(Quat::from_rotation_y(yaw)),
-        );
     }
 }

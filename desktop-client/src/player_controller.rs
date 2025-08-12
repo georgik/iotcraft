@@ -22,7 +22,6 @@ impl Plugin for PlayerControllerPlugin {
 #[derive(Debug, Copy, Clone)]
 struct VoxelRayHit {
     distance: f32,
-    normal: Vec3,
 }
 
 /// Check for ground in the voxel world by casting a ray downward
@@ -50,7 +49,6 @@ fn check_voxel_ground(
             // Found a block! Return hit information
             return Some(VoxelRayHit {
                 distance: current_distance,
-                normal: Vec3::Y, // Assume upward-facing normal for ground
             });
         }
 
@@ -148,8 +146,6 @@ pub struct PlayerMovement {
     pub walk_speed: f32,
     pub run_speed: f32,
     pub jump_force: f32,
-    pub ground_friction: f32,
-    pub air_control: f32,
     pub gravity_scale: f32, // repurposed for vertical velocity
     pub is_grounded: bool,
     pub ground_check_distance: f32,
@@ -163,8 +159,6 @@ impl Default for PlayerMovement {
             walk_speed: 5.0,
             run_speed: 12.0,
             jump_force: 5.5, // Set to 5.5 for ~1.5 cube height jump (cube size = 1.0)
-            ground_friction: 0.9,
-            air_control: 0.3,
             gravity_scale: 0.0,
             is_grounded: true,           // Assume grounded initially
             ground_check_distance: 10.0, // Increased from 1.2 to 10.0 for better ground detection
@@ -193,47 +187,6 @@ fn handle_mode_switch(
             PlayerMode::Walking => PlayerMode::Flying,
         };
         info!("Switched to {:?} mode", *player_mode);
-    }
-}
-
-/// Enforces that the correct components are on the camera entity based on the PlayerMode.
-/// This runs every frame to prevent state corruption.
-fn enforce_player_mode_components(
-    mut commands: Commands,
-    player_mode: Res<PlayerMode>,
-    camera_query: Query<(Entity, Option<&PlayerMovement>), With<Camera>>,
-) {
-    let Ok((camera_entity, movement_component)) = camera_query.single() else {
-        return;
-    };
-
-    match *player_mode {
-        PlayerMode::Flying => {
-            // If in flying mode, ensure no physics or movement components exist.
-            if movement_component.is_some() {
-                commands
-                    .entity(camera_entity)
-                    .remove::<PlayerMovement>()
-                    .remove::<RigidBody>()
-                    .remove::<Collider>()
-                    .remove::<LinearVelocity>()
-                    .remove::<GravityScale>();
-                info!("Enforcing Flying mode: PlayerMovement and physics components removed.");
-            }
-        }
-        PlayerMode::Walking => {
-            // If in walking mode, ensure the PlayerMovement component exists.
-            if movement_component.is_none() {
-                let mut movement = PlayerMovement::default();
-                // Force the player to not be grounded initially so gravity will apply
-                movement.is_grounded = false;
-                movement.gravity_scale = 0.0;
-                commands.entity(camera_entity).insert(movement);
-                info!(
-                    "Enforcing Walking mode: PlayerMovement component added (not grounded initially)."
-                );
-            }
-        }
     }
 }
 
@@ -358,110 +311,6 @@ fn player_movement(
                 }
             }
         }
-    }
-}
-
-/// Handle movement in walking mode
-fn handle_walking_movement(
-    time: &Res<Time>,
-    keyboard_input: &Res<ButtonInput<KeyCode>>,
-    transform: &Transform,
-    velocity: &mut LinearVelocity,
-    movement: &mut PlayerMovement,
-    spatial_query: &SpatialQuery,
-    should_skip_jump: bool,
-) {
-    let dt = time.delta_secs();
-
-    // Ground check - cast a ray downward to check if player is on ground
-    // With the capsule (half-height 0.9, total height 1.8), adjust the ground check accordingly
-    let capsule_half_height = 0.9; // Half-height of the capsule
-    let ray_origin = transform.translation + Vec3::new(0.0, -capsule_half_height, 0.0); // Start from bottom of player capsule
-    let ray_direction = Dir3::NEG_Y;
-    let max_distance = movement.ground_check_distance - capsule_half_height; // Adjust for starting position
-
-    // Use a more robust ground check that excludes the player entity itself
-    let ground_check = spatial_query.cast_ray(
-        ray_origin,
-        ray_direction,
-        max_distance,
-        true, // solid: whether to include solid bodies
-        &SpatialQueryFilter::default(),
-    );
-
-    movement.is_grounded = ground_check.is_some();
-
-    // Debug ground check occasionally
-    if keyboard_input.just_pressed(KeyCode::KeyG) {
-        info!(
-            "Ground check: {:?} at {:?} distance {}",
-            movement.is_grounded, ray_origin, max_distance
-        );
-    }
-
-    // Handle input
-    let mut movement_input = Vec3::ZERO;
-
-    // Forward/backward movement (fixed direction)
-    if keyboard_input.pressed(KeyCode::KeyW) {
-        movement_input += transform.forward().as_vec3();
-    }
-    if keyboard_input.pressed(KeyCode::KeyS) {
-        movement_input -= transform.forward().as_vec3();
-    }
-
-    // Left/right movement
-    if keyboard_input.pressed(KeyCode::KeyA) {
-        movement_input -= transform.right().as_vec3();
-    }
-    if keyboard_input.pressed(KeyCode::KeyD) {
-        movement_input += transform.right().as_vec3();
-    }
-
-    // Normalize horizontal movement
-    if movement_input.length() > 0.0 {
-        movement_input = movement_input.normalize();
-    }
-
-    // Apply movement speed
-    let current_speed = if keyboard_input.pressed(KeyCode::ShiftLeft) {
-        movement.run_speed
-    } else {
-        movement.walk_speed
-    };
-
-    // Calculate horizontal movement
-    let control_factor = if movement.is_grounded {
-        1.0
-    } else {
-        movement.air_control
-    };
-
-    let target_horizontal_velocity = movement_input * current_speed;
-    let horizontal_velocity = Vec3::new(velocity.x, 0.0, velocity.z);
-
-    // Apply movement with control factor
-    let velocity_change =
-        (target_horizontal_velocity - horizontal_velocity) * control_factor * dt * 10.0;
-    velocity.x += velocity_change.x;
-    velocity.z += velocity_change.z;
-
-    // Apply friction when grounded
-    if movement.is_grounded && movement_input.length() == 0.0 {
-        velocity.x *= 1.0 - (movement.ground_friction * dt);
-        velocity.z *= 1.0 - (movement.ground_friction * dt);
-    }
-
-    // Limit falling speed to prevent excessive velocity buildup
-    const MAX_FALL_SPEED: f32 = -20.0;
-    if velocity.y < MAX_FALL_SPEED {
-        velocity.y = MAX_FALL_SPEED;
-    }
-
-    // Handle jumping - but don't jump if double spacebar was just processed or if not grounded
-    if keyboard_input.just_pressed(KeyCode::Space) && movement.is_grounded && !should_skip_jump {
-        velocity.y = movement.jump_force;
-        info!("Player jumped!");
     }
 }
 

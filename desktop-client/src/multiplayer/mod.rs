@@ -30,7 +30,7 @@ impl Default for WorldId {
 
 #[derive(Component)]
 pub struct RemotePlayer {
-    pub player_id: String,
+    // RemotePlayer component marker - no fields currently needed
 }
 
 #[derive(Component)]
@@ -86,7 +86,9 @@ impl Default for PositionTimer {
 }
 
 #[derive(Resource, Default)]
-struct InitialPoseSent(bool);
+struct InitialPoseSent;
+
+// Remove the field since it's not being used - this is just a marker resource
 
 fn now_ts() -> u64 {
     SystemTime::now()
@@ -403,9 +405,7 @@ fn apply_remote_poses(
             );
 
             // Add RemotePlayer component to the spawned avatar
-            commands.entity(avatar_entity).insert(RemotePlayer {
-                player_id: msg.player_id.clone(),
-            });
+            commands.entity(avatar_entity).insert(RemotePlayer {});
 
             info!(
                 "New remote player joined: {} ({}) with voxel avatar",

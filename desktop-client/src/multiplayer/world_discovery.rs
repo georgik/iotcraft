@@ -29,7 +29,6 @@ impl Default for WorldDiscovery {
 #[derive(Debug, Clone)]
 pub enum DiscoveryMessage {
     RefreshWorlds,
-    RequestWorldData { world_id: String },
 }
 
 #[derive(Debug, Clone)]
@@ -173,11 +172,6 @@ fn initialize_world_discovery(
                         let _ = response_tx.send(DiscoveryResponse::WorldListUpdated {
                             worlds: world_cache.clone(),
                         });
-                    }
-                    Ok(DiscoveryMessage::RequestWorldData { world_id }) => {
-                        // Request specific world data (this would trigger a separate request)
-                        info!("Requesting world data for: {}", world_id);
-                        // In a real implementation, we might need to request this specifically
                     }
                     Err(mpsc::TryRecvError::Empty) => {}
                     Err(mpsc::TryRecvError::Disconnected) => {

@@ -36,10 +36,6 @@ fn profile_path() -> PathBuf {
     dir
 }
 
-pub fn load_or_create_profile() -> PlayerProfile {
-    load_or_create_profile_with_override(None)
-}
-
 pub fn load_or_create_profile_with_override(player_id_override: Option<String>) -> PlayerProfile {
     let path = profile_path();
     let mut profile = if let Ok(content) = fs::read_to_string(&path) {
