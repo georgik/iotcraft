@@ -16,13 +16,9 @@ pub struct ConsolePlugin;
 
 impl Plugin for ConsolePlugin {
     fn build(&self, app: &mut App) {
-        app.insert_resource(BlinkState::default())
-            .add_systems(Update, handle_blink_command)
-            .add_systems(Update, handle_mqtt_command)
-            .add_systems(Update, handle_spawn_command)
-            .add_systems(Update, handle_spawn_door_command)
-            .add_systems(Update, handle_load_command)
-            .add_systems(Update, handle_move_command);
+        app.insert_resource(BlinkState::default());
+        // Note: Console commands are now registered in main.rs using .add_console_command()
+        // This plugin only provides the BlinkState resource and handler functions
     }
 }
 
@@ -239,5 +235,39 @@ pub fn handle_test_error_command(
 
         // The error message will appear in the UI indicator and in the console reply
         reply!(log, "ERROR: {}", message);
+    }
+}
+
+pub fn handle_list_command(
+    mut log: ConsoleCommand<ListCommand>,
+    device_query: Query<(&Transform, &DeviceEntity)>,
+) {
+    if let Some(Ok(_list_command)) = log.take() {
+        info!("Console command: list");
+
+        let device_count = device_query.iter().count();
+
+        if device_count == 0 {
+            reply!(log, "No connected devices found.");
+            info!("List command: no devices found");
+            return;
+        }
+
+        reply!(log, "Connected devices ({}):", device_count);
+
+        for (transform, device) in device_query.iter() {
+            let pos = transform.translation;
+            reply!(
+                log,
+                "- ID: {} | Type: {} | Position: ({:.2}, {:.2}, {:.2})",
+                device.device_id,
+                device.device_type,
+                pos.x,
+                pos.y,
+                pos.z
+            );
+        }
+
+        info!("Listed {} connected devices via console", device_count);
     }
 }

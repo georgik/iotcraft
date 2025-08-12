@@ -35,7 +35,7 @@ mod world;
 
 // Re-export types for easier access
 use config::MqttConfig;
-use console::console_types::{LookCommand, TeleportCommand};
+use console::console_types::{ListCommand, LookCommand, TeleportCommand};
 use console::*;
 use devices::*;
 use environment::*;
@@ -997,6 +997,7 @@ fn main() {
         )
         .add_console_command::<TeleportCommand, _>(handle_teleport_command)
         .add_console_command::<LookCommand, _>(handle_look_command)
+        .add_console_command::<ListCommand, _>(crate::console::console_systems::handle_list_command)
         .insert_resource(BlinkState::default())
         // .add_systems(Update, draw_cursor) // Disabled: InteractionPlugin handles cursor drawing
         .add_systems(

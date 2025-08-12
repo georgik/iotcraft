@@ -144,6 +144,25 @@ move esp32c6_aabbcc112233 5.0 0.5 3.0
 move test_lamp 0.0 1.0 0.0
 ```
 
+#### `list`
+Lists all connected devices with their IDs, types, and coordinates.
+
+**Parameters:**
+- None
+
+**Examples:**
+```
+list
+```
+
+**Sample Output:**
+```
+Connected devices (3):
+- ID: esp32c6_aabbcc112233 | Type: lamp | Position: (5.00, 0.50, 3.00)
+- ID: main_door | Type: door | Position: (10.00, 1.00, 0.00)
+- ID: temp_sensor_01 | Type: sensor | Position: (2.50, 1.20, -1.00)
+```
+
 #### `blink <action>`
 Controls the blinking state of all registered devices.
 

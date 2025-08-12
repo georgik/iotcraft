@@ -157,6 +157,12 @@ pub struct LookCommand {
     pub pitch: f32,
 }
 
+#[derive(Parser, ConsoleCommand)]
+#[command(name = "list")]
+pub struct ListCommand {
+    // No parameters - lists all connected devices
+}
+
 #[derive(Resource)]
 pub struct BlinkState {
     pub blinking: bool,
