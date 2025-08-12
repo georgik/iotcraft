@@ -43,8 +43,6 @@ impl Default for MinimapMode {
 #[derive(Resource, Default)]
 pub struct MinimapState {
     pub mode: MinimapMode,
-    pub size: f32,  // Size of the minimap as percentage of screen
-    pub scale: f32, // How many world units to show
 }
 
 /// Component to mark the minimap camera
@@ -73,7 +71,6 @@ pub struct MinimapTexture {
 pub struct MinimapGenerationTask {
     pub task: Task<Vec<u8>>,
     pub player_pos: Vec3,
-    pub player_rotation: Option<f32>,
 }
 
 /// Get color for different block types
@@ -109,8 +106,10 @@ fn generate_minimap_texture_sync(
     }
 
     // Pre-compute rotation values if needed (major performance optimization)
+    // Negate rotation to make forward direction appear at top of minimap
     let (cos_r, sin_r) = if let Some(rotation) = player_rotation {
-        (rotation.cos(), rotation.sin())
+        let corrected_rotation = -rotation;
+        (corrected_rotation.cos(), corrected_rotation.sin())
     } else {
         (1.0, 0.0) // No rotation for fixed north mode
     };
@@ -178,8 +177,6 @@ fn setup_minimap(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
     // Insert minimap state resource with player-oriented mode as default
     commands.insert_resource(MinimapState {
         mode: MinimapMode::PlayerOriented, // Start with player-oriented mode (performance is good now)
-        size: 0.2,                         // 20% of screen size
-        scale: 50.0,                       // Show 50x50 world units
     });
 
     // Create initial minimap texture (will be updated dynamically)
@@ -387,11 +384,9 @@ fn start_minimap_texture_generation(
         });
 
         // Add the task component to track completion
-        commands.entity(entity).insert(MinimapGenerationTask {
-            task,
-            player_pos,
-            player_rotation,
-        });
+        commands
+            .entity(entity)
+            .insert(MinimapGenerationTask { task, player_pos });
     }
 }
 

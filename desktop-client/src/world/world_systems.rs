@@ -4,9 +4,9 @@ use std::fs;
 use std::path::Path;
 
 use super::world_types::*;
-use crate::PendingCommands;
 use crate::camera_controllers::CameraController;
 use crate::environment::VoxelWorld;
+use crate::script::script_types::PendingCommands;
 
 pub struct WorldPlugin;
 

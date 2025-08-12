@@ -191,11 +191,11 @@ fn start_multiplayer_connections(
     let pub_host = host.clone();
     let pub_client_id = format!("{}-pub", client_id);
     let publish_topic_template = format!("iotcraft/worlds/{}/players", world.0);
-    let disconnect_topic = format!(
+    let _disconnect_topic = format!(
         "{}/{}/disconnect",
         publish_topic_template, profile.player_id
     );
-    let disconnect_payload = serde_json::to_string(&DisconnectMessage {
+    let _disconnect_payload = serde_json::to_string(&DisconnectMessage {
         player_id: profile.player_id.clone(),
         ts: now_ts(),
     })
@@ -213,7 +213,7 @@ fn start_multiplayer_connections(
             info!("Pose publisher connecting to {}:{}...", pub_host, port);
 
             let mut connected = false;
-            let mut reconnect = false;
+            let reconnect = false;
 
             // First, wait for connection to be established (blocking)
             let mut connection_established = false;
@@ -230,7 +230,6 @@ fn start_multiplayer_connections(
                     }
                     Err(e) => {
                         error!("Pose publisher connection error during setup: {:?}", e);
-                        reconnect = true;
                         break;
                     }
                 }
@@ -253,7 +252,6 @@ fn start_multiplayer_connections(
                     }
                     Ok(Err(e)) => {
                         error!("Pose publisher connection error: {:?}", e);
-                        reconnect = true;
                         break;
                     }
                     Err(rumqttc::TryRecvError::Empty) => {
@@ -261,7 +259,6 @@ fn start_multiplayer_connections(
                     }
                     Err(rumqttc::TryRecvError::Disconnected) => {
                         error!("Pose publisher connection lost");
-                        reconnect = true;
                         break;
                     }
                 }

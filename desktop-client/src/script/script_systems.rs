@@ -1,7 +1,5 @@
 use super::{script_helpers::*, script_types::*};
-use crate::console::BlinkState;
 use bevy::prelude::*;
-use bevy_console::PrintConsoleLine;
 use log::info;
 
 pub struct ScriptPlugin;

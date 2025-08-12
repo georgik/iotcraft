@@ -160,7 +160,7 @@ fn manage_block_physics_distance_based(
     }
 
     let added_count = nearby_blocks.len().min(remaining_slots);
-    for (entity, distance) in nearby_blocks.into_iter().take(remaining_slots) {
+    for (entity, _distance) in nearby_blocks.into_iter().take(remaining_slots) {
         commands.entity(entity).insert((
             RigidBody::Static,
             // Use half-extents for cuboid colliders (CUBE_SIZE is 1.0, so half-extents are 0.5)

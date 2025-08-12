@@ -115,13 +115,13 @@ fn initialize_world_publisher(
                     Ok(Ok(_)) => {}
                     Ok(Err(e)) => {
                         error!("World publisher connection error: {:?}", e);
-                        reconnect = true;
+                        let _ = reconnect; // Intentionally unused for now
                         break;
                     }
                     Err(rumqttc::TryRecvError::Empty) => {}
                     Err(rumqttc::TryRecvError::Disconnected) => {
                         error!("World publisher connection lost");
-                        reconnect = true;
+                        let _ = reconnect; // Intentionally unused for now
                         break;
                     }
                 }

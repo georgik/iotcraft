@@ -10,7 +10,6 @@ use clap::Parser;
 use log::{error, info};
 use rumqttc::{Client, Event, MqttOptions, Outgoing, QoS};
 use serde_json::json;
-use std::fs;
 use std::time::Duration;
 
 mod camera_controllers;
@@ -52,7 +51,6 @@ use multiplayer::{
 use physics_manager::PhysicsManagerPlugin;
 use player_avatar::PlayerAvatarPlugin;
 use player_controller::PlayerControllerPlugin;
-use profile::load_or_create_profile_with_override;
 use ui::{CrosshairPlugin, ErrorIndicatorPlugin, GameState, InventoryUiPlugin, MainMenuPlugin};
 use world::WorldPlugin;
 
@@ -97,118 +95,6 @@ struct Args {
     /// Player ID override for multiplayer testing (default: auto-generated)
     #[arg(short, long)]
     player_id: Option<String>,
-}
-
-// Script execution system
-#[derive(Resource)]
-struct ScriptExecutor {
-    commands: Vec<String>,
-    current_index: usize,
-    delay_timer: Timer,
-    startup_script: Option<String>,
-    execute_startup: bool,
-}
-
-#[derive(Resource)]
-struct PendingCommands {
-    commands: Vec<String>,
-}
-
-impl Default for ScriptExecutor {
-    fn default() -> Self {
-        Self {
-            commands: Vec::new(),
-            current_index: 0,
-            delay_timer: Timer::from_seconds(0.1, TimerMode::Repeating),
-            startup_script: None,
-            execute_startup: false,
-        }
-    }
-}
-
-fn execute_script(content: &str) -> Vec<String> {
-    content
-        .lines()
-        .map(|line| line.trim())
-        .filter(|line| !line.is_empty() && !line.starts_with('#'))
-        .map(|line| line.to_string())
-        .collect()
-}
-
-fn handle_load_command(
-    mut log: ConsoleCommand<LoadCommand>,
-    mut script_executor: ResMut<ScriptExecutor>,
-) {
-    if let Some(Ok(LoadCommand { filename })) = log.take() {
-        info!("Console command: load {}", filename);
-        match fs::read_to_string(&filename) {
-            Ok(content) => {
-                let commands = execute_script(&content);
-                script_executor.commands = commands;
-                script_executor.current_index = 0;
-                reply!(
-                    log,
-                    "Loaded {} commands from {}",
-                    script_executor.commands.len(),
-                    filename
-                );
-                info!("Loaded script file: {}", filename);
-            }
-            Err(e) => {
-                reply!(log, "Error loading script {}: {}", filename, e);
-            }
-        }
-    }
-}
-
-fn script_execution_system(
-    mut script_executor: ResMut<ScriptExecutor>,
-    time: Res<Time>,
-    mut pending_commands: ResMut<PendingCommands>,
-) {
-    // Handle startup script execution
-    if script_executor.execute_startup {
-        if let Some(ref startup_script) = script_executor.startup_script.clone() {
-            match fs::read_to_string(startup_script) {
-                Ok(content) => {
-                    let commands = execute_script(&content);
-                    script_executor.commands = commands;
-                    script_executor.current_index = 0;
-                    info!("Loaded startup script: {}", startup_script);
-                }
-                Err(e) => {
-                    error!("Error loading startup script {}: {}", startup_script, e);
-                }
-            }
-        }
-        script_executor.execute_startup = false;
-    }
-
-    // Execute commands from script
-    if !script_executor.commands.is_empty()
-        && script_executor.current_index < script_executor.commands.len()
-    {
-        script_executor.delay_timer.tick(time.delta());
-
-        if script_executor.delay_timer.just_finished() {
-            let command = &script_executor.commands[script_executor.current_index];
-
-            // Log the command execution
-            info!("Executing script command: {}", command);
-
-            // Queue the command for execution
-            pending_commands.commands.push(command.clone());
-
-            script_executor.current_index += 1;
-
-            // Check if we've finished executing all commands
-            if script_executor.current_index >= script_executor.commands.len() {
-                script_executor.commands.clear();
-                script_executor.current_index = 0;
-                info!("Script execution completed");
-            }
-        }
-    }
 }
 
 fn handle_place_block_command(
@@ -524,7 +410,7 @@ fn handle_load_map_command(
 }
 
 fn execute_pending_commands(
-    mut pending_commands: ResMut<PendingCommands>,
+    mut pending_commands: ResMut<crate::script::script_types::PendingCommands>,
     mut print_console_line: EventWriter<PrintConsoleLine>,
     mut blink_state: ResMut<BlinkState>,
     temperature: Res<TemperatureResource>,
@@ -1023,13 +909,8 @@ fn execute_pending_commands(
 
 fn main() {
     let args = Args::parse();
-    let mut script_executor = ScriptExecutor::default();
 
-    // Set up startup script if provided
-    if let Some(script_file) = args.script {
-        script_executor.startup_script = Some(script_file);
-        script_executor.execute_startup = true;
-    }
+    // Note: Script execution is now handled by the ScriptPlugin
 
     // Load MQTT configuration from CLI args and environment variables
     let mqtt_config = MqttConfig::from_env_with_override(args.mqtt_server);
@@ -1048,12 +929,10 @@ fn main() {
     app.insert_resource(localization_config)
         .insert_resource(ClearColor(Color::srgb(0.53, 0.81, 0.92)))
         .insert_resource(mqtt_config)
-        .insert_resource(load_or_create_profile_with_override(args.player_id))
-        // Initialize script resources early to prevent system dependency issues
-        .insert_resource(script_executor)
-        .insert_resource(PendingCommands {
-            commands: Vec::new(),
-        });
+        .insert_resource(profile::load_or_create_profile_with_override(
+            args.player_id,
+        ));
+    // Script resources are now handled by the ScriptPlugin
 
     // Add default plugins and initialize AssetServer
     app.add_plugins(DefaultPlugins);
@@ -1106,7 +985,6 @@ fn main() {
         .add_console_command::<SpawnDoorCommand, _>(
             crate::console::console_systems::handle_spawn_door_command,
         )
-        .add_console_command::<LoadCommand, _>(handle_load_command)
         .add_console_command::<MoveCommand, _>(crate::console::console_systems::handle_move_command)
         .add_console_command::<PlaceBlockCommand, _>(handle_place_block_command)
         .add_console_command::<RemoveBlockCommand, _>(handle_remove_block_command)

@@ -94,7 +94,7 @@ fn initialize_world_discovery(
             );
 
             let mut connected = false;
-            let mut subscribed = false;
+            let subscribed = false;
             let mut world_cache: HashMap<String, SharedWorldInfo> = HashMap::new();
 
             // Wait for connection and subscribe
@@ -123,7 +123,7 @@ fn initialize_world_discovery(
                         }
 
                         info!("Subscribed to world discovery topics");
-                        subscribed = true;
+                        let _ = subscribed; // Intentionally unused for now
                         break;
                     }
                     Ok(Event::Incoming(Incoming::Publish(p))) => {

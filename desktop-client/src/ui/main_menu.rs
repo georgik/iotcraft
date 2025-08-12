@@ -129,10 +129,7 @@ pub enum GameState {
     #[default]
     MainMenu,
     Settings,
-    SinglePlayerMenu,
-    MultiplayerMenu,
     WorldSelection,
-    OnlineWorldSelection,
     GameplayMenu,
     InGame,
     ConsoleOpen,

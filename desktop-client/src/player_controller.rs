@@ -265,12 +265,12 @@ fn player_movement(
     }
 
     // Handle multiple camera entities by taking the first one
-    let mut camera_entities: Vec<_> = camera_query.iter_mut().collect();
+    let camera_entities: Vec<_> = camera_query.iter_mut().collect();
     if camera_entities.is_empty() {
         return;
     }
 
-    let (camera_entity, transform, linear_velocity, player_movement) =
+    let (camera_entity, transform, _linear_velocity, player_movement) =
         camera_entities.into_iter().next().unwrap();
 
     // Debug logging every few seconds to understand what's happening
@@ -730,7 +730,7 @@ fn handle_physics_free_walking_movement(
     keyboard_input: &Res<ButtonInput<KeyCode>>,
     mut transform: Mut<Transform>,
     movement: &mut PlayerMovement,
-    spatial_query: &SpatialQuery,
+    _spatial_query: &SpatialQuery,
     voxel_world: &Res<crate::environment::VoxelWorld>,
     should_skip_jump: bool,
 ) {
@@ -790,7 +790,7 @@ fn handle_physics_free_walking_movement(
     let ground_check = check_voxel_ground(ray_origin, ray_direction, max_distance, voxel_world);
 
     // Update grounded state
-    let was_grounded = movement.is_grounded;
+    let _was_grounded = movement.is_grounded;
     if let Some(ground_hit) = ground_check {
         let ground_point = ray_origin + (ray_direction.as_vec3() * ground_hit.distance);
         let ground_y = ground_point.y;

@@ -2,10 +2,10 @@ use bevy::pbr::MeshMaterial3d;
 use bevy::prelude::*;
 
 use super::environment_types::*;
-use crate::PendingCommands;
 use crate::camera_controllers::CameraController;
 use crate::console::BlinkCube;
 use crate::mqtt::TemperatureResource;
+use crate::script::script_types::PendingCommands;
 
 pub struct EnvironmentPlugin;
 
