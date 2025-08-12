@@ -7,7 +7,7 @@ pub struct PlayerControllerPlugin;
 
 impl Plugin for PlayerControllerPlugin {
     fn build(&self, app: &mut App) {
-        app.insert_resource(PlayerMode::Flying).add_systems(
+        app.insert_resource(PlayerMode::Walking).add_systems(
             Update,
             (
                 handle_mode_switch,
@@ -27,7 +27,7 @@ pub enum PlayerMode {
 
 impl Default for PlayerMode {
     fn default() -> Self {
-        Self::Flying
+        Self::Walking
     }
 }
 
@@ -62,7 +62,7 @@ impl Default for PlayerMovement {
             is_grounded: false,
             ground_check_distance: 1.2, // Slightly more generous ground detection
             last_spacebar_press: None,
-            double_tap_window: 0.5, // 500ms window for double-tap
+            double_tap_window: 0.25, // 250ms window for double-tap (more precise)
         }
     }
 }
@@ -94,17 +94,10 @@ fn setup_player_physics(
     mut commands: Commands,
     player_mode: Res<PlayerMode>,
     camera_query: Query<Entity, With<Camera>>,
-    physics_body_query: Query<Entity, With<PlayerPhysicsBody>>,
 ) {
     let Ok(camera_entity) = camera_query.single() else {
         return;
     };
-
-    // Remove existing physics body if it exists
-    if let Ok(physics_entity) = physics_body_query.single() {
-        commands.entity(physics_entity).despawn();
-        info!("Removed existing physics body");
-    }
 
     match *player_mode {
         PlayerMode::Flying => {
@@ -114,8 +107,18 @@ fn setup_player_physics(
                 .remove::<RigidBody>()
                 .remove::<Collider>()
                 .remove::<PlayerMovement>()
-                .remove::<PlayerPhysicsBody>();
-            info!("Configured camera for flying mode");
+                .remove::<PlayerPhysicsBody>()
+                .remove::<LinearVelocity>() // Clear any residual velocity from physics mode
+                .remove::<AngularVelocity>() // Clear any residual angular velocity
+                .remove::<GravityScale>()
+                .remove::<LockedAxes>()
+                .remove::<Mass>()
+                .remove::<Restitution>()
+                .remove::<Friction>()
+                .remove::<LinearDamping>()
+                .remove::<AngularDamping>()
+                .remove::<ColliderDensity>();
+            info!("Configured camera for flying mode - cleared physics components");
         }
         PlayerMode::Walking => {
             // Add physics components to camera with optimized settings
@@ -170,13 +173,15 @@ fn player_movement(
         }
         PlayerMode::Walking => {
             if let (Some(mut velocity), Some(mut movement)) = (linear_velocity, player_movement) {
-                // Check for double spacebar to toggle flight mode (like Minecraft Creative)
-                if handle_double_spacebar_flight_toggle(
+                // Check for double spacebar to toggle flight mode
+                let (mode_changed, should_skip_jump) = handle_double_spacebar_flight_toggle(
                     &time,
                     &keyboard_input,
                     &mut movement,
                     &mut player_mode,
-                ) {
+                );
+
+                if mode_changed {
                     return; // Mode changed, let the next frame handle the new mode
                 }
 
@@ -187,6 +192,7 @@ fn player_movement(
                     &mut velocity,
                     &mut movement,
                     &spatial_query,
+                    should_skip_jump,
                 );
             }
         }
@@ -201,23 +207,34 @@ fn handle_walking_movement(
     velocity: &mut LinearVelocity,
     movement: &mut PlayerMovement,
     spatial_query: &SpatialQuery,
+    should_skip_jump: bool,
 ) {
     let dt = time.delta_secs();
 
     // Ground check - cast a ray downward to check if player is on ground
-    let ray_origin = transform.translation;
+    // Start the ray from slightly inside the player capsule to avoid issues with floating point precision
+    let ray_origin = transform.translation + Vec3::new(0.0, -0.7, 0.0); // Start from bottom of player capsule
     let ray_direction = Dir3::NEG_Y;
-    let max_distance = movement.ground_check_distance;
+    let max_distance = movement.ground_check_distance - 0.7; // Adjust for starting position
 
-    movement.is_grounded = spatial_query
-        .cast_ray(
-            ray_origin,
-            ray_direction,
-            max_distance,
-            true, // solid: whether to include solid bodies
-            &SpatialQueryFilter::default(),
-        )
-        .is_some();
+    // Use a more robust ground check that excludes the player entity itself
+    let ground_check = spatial_query.cast_ray(
+        ray_origin,
+        ray_direction,
+        max_distance,
+        true, // solid: whether to include solid bodies
+        &SpatialQueryFilter::default(),
+    );
+
+    movement.is_grounded = ground_check.is_some();
+
+    // Debug ground check occasionally
+    if keyboard_input.just_pressed(KeyCode::KeyG) {
+        info!(
+            "Ground check: {:?} at {:?} distance {}",
+            movement.is_grounded, ray_origin, max_distance
+        );
+    }
 
     // Handle input
     let mut movement_input = Vec3::ZERO;
@@ -278,20 +295,21 @@ fn handle_walking_movement(
         velocity.y = MAX_FALL_SPEED;
     }
 
-    // Handle jumping (but not if we're checking for double-tap)
-    if keyboard_input.just_pressed(KeyCode::Space) && movement.is_grounded {
+    // Handle jumping - but don't jump if double spacebar was just processed or if not grounded
+    if keyboard_input.just_pressed(KeyCode::Space) && movement.is_grounded && !should_skip_jump {
         velocity.y = movement.jump_force;
         info!("Player jumped!");
     }
 }
 
-/// Handle double spacebar press to toggle flight mode (like Minecraft Creative)
+/// Handle double spacebar press to toggle flight mode (similar to creative mode mechanics)
+/// Returns (mode_changed, should_skip_jump)
 fn handle_double_spacebar_flight_toggle(
     time: &Res<Time>,
     keyboard_input: &Res<ButtonInput<KeyCode>>,
     movement: &mut PlayerMovement,
     player_mode: &mut ResMut<PlayerMode>,
-) -> bool {
+) -> (bool, bool) {
     if keyboard_input.just_pressed(KeyCode::Space) {
         let current_time = time.elapsed_secs_f64();
 
@@ -300,14 +318,24 @@ fn handle_double_spacebar_flight_toggle(
             if time_diff <= movement.double_tap_window {
                 // Double tap detected! Toggle flight mode
                 **player_mode = PlayerMode::Flying;
-                info!("Double spacebar detected - switching to Flying mode!");
+                info!(
+                    "Double spacebar detected - switching to Flying mode! ({}ms apart)",
+                    (time_diff * 1000.0) as u32
+                );
                 movement.last_spacebar_press = None; // Reset to prevent triple-tap issues
-                return true;
+                return (true, true); // Mode changed, skip jump
             }
         }
 
-        movement.last_spacebar_press = Some(current_time);
+        // Only set last press time if player is grounded (to prevent air-tap detection)
+        if movement.is_grounded {
+            movement.last_spacebar_press = Some(current_time);
+            return (false, false); // No mode change, allow jump if grounded
+        } else {
+            // Don't register spacebar press when in air to prevent air jumping
+            return (false, true); // No mode change, skip jump (prevent air jump)
+        }
     }
 
-    false
+    (false, false) // No spacebar press
 }

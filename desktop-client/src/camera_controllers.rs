@@ -15,15 +15,20 @@ use bevy::{
 };
 use std::{f32::consts::*, fmt};
 
+/// Resource to track the previous player mode for camera velocity management
+#[derive(Resource, Default)]
+struct PreviousPlayerMode(Option<PlayerMode>);
+
 /// A freecam-style camera controller plugin.
 pub struct CameraControllerPlugin;
 
 impl Plugin for CameraControllerPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(
-            Update,
-            (sync_camera_controller_with_transform, run_camera_controller).chain(),
-        );
+        app.insert_resource(PreviousPlayerMode::default())
+            .add_systems(
+                Update,
+                (sync_camera_controller_with_transform, run_camera_controller).chain(),
+            );
     }
 }
 
@@ -172,6 +177,7 @@ fn run_camera_controller(
     key_input: Res<ButtonInput<KeyCode>>,
     game_state: Res<State<GameState>>,
     player_mode: Res<PlayerMode>,
+    mut previous_mode: ResMut<PreviousPlayerMode>,
     mut query: Query<(&mut Transform, &mut CameraController), With<Camera>>,
 ) {
     let dt = time.delta_secs();
@@ -262,6 +268,14 @@ fn run_camera_controller(
                 Quat::from_euler(EulerRot::ZYX, 0.0, controller.yaw, controller.pitch);
         }
     }
+
+    // Clear velocity when first entering flying mode to prevent physics carryover
+    // This prevents the "seeing only sky" issue when transitioning from walking to flying
+    if previous_mode.0 != Some(*player_mode) && *player_mode == PlayerMode::Flying {
+        controller.velocity = Vec3::ZERO;
+        info!("Cleared camera velocity when switching to flying mode");
+    }
+    previous_mode.0 = Some(*player_mode);
 
     // Only handle movement in flying mode - walking mode movement is handled by the physics system
     if *player_mode == PlayerMode::Flying {
