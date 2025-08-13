@@ -271,7 +271,8 @@ async fn main(spawner: Spawner) {
     let timer1 = TimerGroup::new(peripherals.TIMG0);
     let wifi_init = &*mk_static!(
         EspWifiController<'static>,
-        init(timer1.timer0, rng.clone(), peripherals.RADIO_CLK).unwrap()
+        //init(timer1.timer0, rng.clone(), peripherals.RADIO_CLK).unwrap()
+        init(timer1.timer0, rng.clone()).unwrap()
     );
     // let wifi_init = esp_wifi::init(timer1.timer0, rng, peripherals.RADIO_CLK)
     //     .expect("Failed to initialize WIFI/BLE controller");
