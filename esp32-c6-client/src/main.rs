@@ -29,8 +29,8 @@ use esp_wifi::{
     wifi::{ClientConfiguration, Configuration, WifiController, WifiEvent, WifiState},
 };
 
-use esp_hal::rmt::Rmt;
-use esp_hal_smartled::{SmartLedsAdapter, smart_led_buffer};
+use esp_hal::rmt::{ConstChannelAccess, Rmt};
+use esp_hal_smartled::{LedAdapterError, SmartLedsAdapter, smart_led_buffer};
 
 use smart_leds::{
     RGB8, SmartLedsWrite, brightness, gamma,
@@ -323,8 +323,13 @@ async fn main(spawner: Spawner) {
     let stack = mk_static!(Stack<'static>, stack_local);
     let device_id_static = mk_static!(heapless::String<64>, device_id);
 
+    let led_static = mk_static!(
+        SmartLedsAdapter<ConstChannelAccess<esp_hal::rmt::Tx, 0>, 25>,
+        led
+    );
+
     spawner
-        .spawn(hardware_task_runner(led, CHANNEL.receiver()))
+        .spawn(hardware_task_runner(led_static, CHANNEL.receiver()))
         .unwrap();
 
     spawner.spawn(connection(wifi_controller)).ok();
@@ -429,7 +434,7 @@ enum HardwareEvent {
 
 #[embassy_executor::task]
 async fn hardware_task_runner(
-    mut led: SmartLedsAdapter<esp_hal::rmt::Channel<esp_hal::Blocking, 0>, 25>,
+    mut led: &'static mut SmartLedsAdapter<ConstChannelAccess<esp_hal::rmt::Tx, 0>, 25>,
     receiver: embassy_sync::channel::Receiver<'static, CriticalSectionRawMutex, HardwareEvent, 1>,
 ) {
     let mut toggle_state: u8 = 0;
