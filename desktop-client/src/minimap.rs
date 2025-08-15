@@ -83,17 +83,37 @@ pub struct MinimapDevice {
     pub is_on: bool, // For lamps, this indicates if the lamp is on
 }
 
-/// Get color for different block types
-fn get_block_color(block_type: BlockType) -> [u8; 4] {
-    match block_type {
-        BlockType::Grass => [34, 139, 34, 255],   // Forest green
-        BlockType::Dirt => [139, 69, 19, 255],    // Saddle brown
-        BlockType::Stone => [128, 128, 128, 255], // Gray
-        BlockType::QuartzBlock => [245, 245, 220, 255], // Beige
-        BlockType::GlassPane => [173, 216, 230, 255], // Light blue (semi-transparent look)
-        BlockType::CyanTerracotta => [72, 209, 204, 255], // Medium turquoise
-        BlockType::Water => [64, 164, 223, 255],  // Water blue
-    }
+/// Get color for different block types with height-based shading
+/// Height affects the brightness - higher blocks are brighter, lower blocks are darker
+fn get_block_color(block_type: BlockType, height: i32) -> [u8; 4] {
+    // Base colors for each block type
+    let base_color = match block_type {
+        BlockType::Grass => [34, 139, 34],           // Forest green
+        BlockType::Dirt => [139, 69, 19],            // Saddle brown
+        BlockType::Stone => [128, 128, 128],         // Gray
+        BlockType::QuartzBlock => [245, 245, 220],   // Beige
+        BlockType::GlassPane => [173, 216, 230],     // Light blue (semi-transparent look)
+        BlockType::CyanTerracotta => [72, 209, 204], // Medium turquoise
+        BlockType::Water => [64, 164, 223],          // Water blue
+    };
+
+    // Apply height-based shading
+    // Height range we're checking is -5 to 20, so normalize to 0.0-1.0
+    let height_normalized = ((height + 5) as f32) / 25.0; // 25 = range from -5 to 20
+    let height_normalized = height_normalized.clamp(0.0, 1.0);
+
+    // Create a shading factor: lower blocks are darker (0.6x), higher blocks are brighter (1.4x)
+    let shading_factor = 0.6 + (height_normalized * 0.8); // Range: 0.6 to 1.4
+
+    // Apply the shading to each color component
+    let shaded_color = [
+        ((base_color[0] as f32 * shading_factor).clamp(0.0, 255.0)) as u8,
+        ((base_color[1] as f32 * shading_factor).clamp(0.0, 255.0)) as u8,
+        ((base_color[2] as f32 * shading_factor).clamp(0.0, 255.0)) as u8,
+        255, // Alpha always fully opaque
+    ];
+
+    shaded_color
 }
 
 /// Generate a 2D minimap texture from the voxel world (now async-compatible)
@@ -167,8 +187,8 @@ fn generate_minimap_texture_sync(
             }
 
             // Set pixel color based on the highest block found
-            if let Some((_height, block_type)) = highest_block {
-                let color = get_block_color(block_type);
+            if let Some((height, block_type)) = highest_block {
+                let color = get_block_color(block_type, height);
                 let pixel_index = ((y * texture_size + x) * 4) as usize;
 
                 if pixel_index + 3 < pixels.len() {
