@@ -33,9 +33,6 @@ pub struct RemotePlayer {
     // RemotePlayer component marker - no fields currently needed
 }
 
-#[derive(Component)]
-pub struct RemoteNameTag;
-
 #[derive(Serialize, Deserialize, Debug, Clone)]
 struct PoseMessage {
     player_id: String,
@@ -58,12 +55,24 @@ struct PoseRx(pub Mutex<mpsc::Receiver<PoseMessage>>);
 #[derive(Resource)]
 struct PoseTx(pub Mutex<mpsc::Sender<PoseMessage>>);
 
+#[derive(Resource, Default)]
+struct MultiplayerConnectionStatus {
+    pub connection_available: bool,
+}
+
+impl MultiplayerConnectionStatus {
+    pub fn is_multiplayer_enabled(&self) -> bool {
+        self.connection_available
+    }
+}
+
 pub struct MultiplayerPlugin;
 
 impl Plugin for MultiplayerPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(WorldId::default())
             .insert_resource(InitialPoseSent::default())
+            .insert_resource(MultiplayerConnectionStatus::default())
             .add_systems(Startup, start_multiplayer_connections)
             .add_systems(Update, (publish_local_pose, apply_remote_poses))
             .add_systems(Update, update_position_timer);
@@ -121,28 +130,68 @@ fn start_multiplayer_connections(
     let sub_client_id = format!("{}-sub", client_id);
     thread::spawn(move || {
         info!("Starting multiplayer pose subscriber...");
+
+        // Try to connect once; if it fails, disable multiplayer
+        let mut opts = MqttOptions::new(&sub_client_id, &sub_host, port);
+        opts.set_keep_alive(Duration::from_secs(30));
+        opts.set_clean_session(true);
+
+        let (client, mut conn) = Client::new(opts, 10);
+
+        // Test connection with a short timeout
+        let mut initial_connection_success = false;
+        let mut connection_attempts = 0;
+
+        info!("Attempting initial MQTT connection for multiplayer...");
+
+        for notification in conn.iter() {
+            match notification {
+                Ok(Event::Incoming(Incoming::ConnAck(_))) => {
+                    info!("Pose subscriber connected successfully - multiplayer enabled");
+                    initial_connection_success = true;
+
+                    // Subscribe to the topic
+                    if let Err(e) = client.subscribe(&subscribe_topic, QoS::AtLeastOnce) {
+                        error!("Failed to subscribe to poses: {}", e);
+                        break;
+                    } else {
+                        info!("Subscribed to poses: {}", subscribe_topic);
+                    }
+                    break; // Proceed to main loop
+                }
+                Err(e) => {
+                    error!("Initial MQTT connection failed: {:?}", e);
+                    connection_attempts += 1;
+                    if connection_attempts > 2 {
+                        // Quick initial retry limit
+                        break;
+                    }
+                }
+                Ok(_) => {}
+            }
+        }
+
+        if !initial_connection_success {
+            info!("MQTT connection not available - multiplayer disabled");
+            return; // Exit thread - multiplayer is disabled
+        }
+
+        // If we got here, initial connection worked - continue with normal multiplayer operation
         loop {
             let mut opts = MqttOptions::new(&sub_client_id, &sub_host, port);
             opts.set_keep_alive(Duration::from_secs(30));
-            opts.set_clean_session(true); // Use clean sessions to prevent receiving old pose messages
+            opts.set_clean_session(true);
 
             let (client, mut conn) = Client::new(opts, 10);
-
-            // Wait for connection before subscribing
             let mut subscribed = false;
-            let mut connection_attempts = 0;
 
-            // Handle connection events
             for notification in conn.iter() {
                 match notification {
                     Ok(Event::Incoming(Incoming::ConnAck(_))) => {
-                        info!("Pose subscriber connected successfully");
-                        // Now that we're connected, subscribe to wildcard topic
                         if let Err(e) = client.subscribe(&subscribe_topic, QoS::AtLeastOnce) {
                             error!("Failed to subscribe to poses: {}", e);
-                            break; // Reconnect
+                            break;
                         } else {
-                            info!("Subscribed to poses: {}", subscribe_topic);
                             subscribed = true;
                         }
                     }
@@ -154,8 +203,6 @@ fn start_multiplayer_connections(
                                         error!("Failed to send pose message to game thread");
                                         break;
                                     }
-                                } else {
-                                    error!("Failed to parse pose message: {}", s);
                                 }
                             }
                         }
@@ -163,28 +210,16 @@ fn start_multiplayer_connections(
                     Ok(Event::Incoming(Incoming::SubAck(_))) => {
                         info!("Pose subscription acknowledged by broker");
                     }
-                    Ok(_) => {} // Other events we don't care about
-                    Err(rumqttc::ConnectionError::NetworkTimeout) => {
-                        connection_attempts += 1;
-                        if connection_attempts > 3 {
-                            error!("Pose subscriber: Too many network timeouts, reconnecting...");
-                            break; // Reconnect
-                        } else {
-                            info!(
-                                "Pose subscriber: Network timeout (attempt {}), continuing...",
-                                connection_attempts
-                            );
-                            // Continue trying instead of immediately breaking
-                        }
-                    }
+                    Ok(_) => {}
                     Err(e) => {
                         error!("Pose subscriber connection error: {:?}", e);
-                        break; // Reconnect
+                        break;
                     }
                 }
             }
 
-            error!("Pose subscriber disconnected, reconnecting in 5 seconds...");
+            // Reconnect after delay
+            info!("Pose subscriber disconnected, reconnecting in 5 seconds...");
             thread::sleep(Duration::from_secs(5));
         }
     });
@@ -206,40 +241,71 @@ fn start_multiplayer_connections(
     thread::spawn(move || {
         info!("Starting multiplayer pose publisher...");
 
+        // Test initial connection
+        let mut opts = MqttOptions::new(&pub_client_id, &pub_host, port);
+        opts.set_keep_alive(Duration::from_secs(30));
+        opts.set_clean_session(true);
+
+        let (_client, mut conn) = Client::new(opts, 10);
+
+        let mut initial_connection_success = false;
+        let mut connection_attempts = 0;
+
+        // Try initial connection
+        for event in conn.iter() {
+            match event {
+                Ok(Event::Incoming(Incoming::ConnAck(_))) => {
+                    info!("Pose publisher connected successfully - multiplayer enabled");
+                    initial_connection_success = true;
+                    break;
+                }
+                Err(e) => {
+                    error!("Initial publisher connection failed: {:?}", e);
+                    connection_attempts += 1;
+                    if connection_attempts > 2 {
+                        break;
+                    }
+                }
+                Ok(_) => {}
+            }
+        }
+
+        if !initial_connection_success {
+            info!("MQTT connection not available - multiplayer publisher disabled");
+            return; // Exit thread - multiplayer is disabled
+        }
+
+        // Continue with normal multiplayer publishing
         loop {
             let mut opts = MqttOptions::new(&pub_client_id, &pub_host, port);
             opts.set_keep_alive(Duration::from_secs(30));
             opts.set_clean_session(true);
 
             let (client, mut conn) = Client::new(opts, 10);
-            info!("Pose publisher connecting to {}:{}...", pub_host, port);
-
             let mut connected = false;
             let reconnect = false;
 
-            // First, wait for connection to be established (blocking)
+            // Wait for connection
             let mut connection_established = false;
             for event in conn.iter() {
                 match event {
                     Ok(Event::Incoming(Incoming::ConnAck(_))) => {
-                        info!("Pose publisher connected successfully!");
                         connected = true;
                         connection_established = true;
-                        break; // Exit the blocking connection wait
-                    }
-                    Ok(other) => {
-                        info!("Publisher received connection event: {:?}", other);
-                    }
-                    Err(e) => {
-                        error!("Pose publisher connection error during setup: {:?}", e);
                         break;
                     }
+                    Err(e) => {
+                        error!("Pose publisher connection error: {:?}", e);
+                        break;
+                    }
+                    Ok(_) => {}
                 }
             }
 
             if !connection_established {
                 error!("Failed to establish publisher connection");
-                continue; // Reconnect
+                thread::sleep(Duration::from_secs(5));
+                continue;
             }
 
             // Now handle messages and additional events in non-blocking mode
@@ -313,8 +379,14 @@ fn publish_local_pose(
     mut timer: ResMut<PositionTimer>,
     pose_tx: Res<PoseTx>,
     camera_q: Query<&Transform, With<Camera>>,
+    connection_status: Res<MultiplayerConnectionStatus>,
 ) {
     if !timer.timer.just_finished() {
+        return;
+    }
+
+    // Don't publish poses if multiplayer is disabled
+    if !connection_status.is_multiplayer_enabled() {
         return;
     }
 
@@ -369,7 +441,13 @@ fn apply_remote_poses(
     >,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    connection_status: Res<MultiplayerConnectionStatus>,
 ) {
+    // Don't process remote poses if multiplayer is disabled
+    if !connection_status.is_multiplayer_enabled() {
+        return;
+    }
+
     let Ok(rx) = pose_rx.0.lock() else {
         return;
     };

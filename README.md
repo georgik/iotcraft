@@ -370,6 +370,178 @@ export MQTT_PORT="1883"
 }
 ```
 
+## 🤖 MCP (Model Context Protocol) Integration
+
+IoTCraft includes a comprehensive MCP server implementation that enables AI assistants to interact with the 3D voxel world and IoT devices through standardized tool calls.
+
+### MCP Server Features
+
+**World Building Tools:**
+- `create_wall` - Build walls between two 3D coordinates with specified block types
+- `place_block` - Place individual blocks at specific coordinates
+- `remove_block` - Remove blocks from the world
+
+**Device Management:**
+- `spawn_device` - Create new IoT devices (lamps, doors) in the 3D world
+- `control_device` - Send ON/OFF commands to devices via MQTT
+- `move_device` - Reposition devices in 3D space
+- `list_devices` - Get a list of all connected IoT devices with their status
+
+**World Navigation:**
+- `teleport_camera` - Move the camera/player to specific coordinates
+- `set_camera_angle` - Adjust camera orientation (yaw/pitch)
+
+**Data Persistence:**
+- `save_world` - Save the current world state to JSON files
+- `load_world` - Load previously saved world states
+
+**Information Retrieval:**
+- `get_world_status` - Get comprehensive world statistics (blocks, devices, uptime)
+- `get_sensor_data` - Retrieve real-time sensor data (temperature, device status)
+
+### MCP Server Setup
+
+**Starting the MCP Server:**
+```bash
+cd desktop-client
+cargo run --bin mcp_server
+```
+
+The MCP server runs on `localhost:8080` and provides a JSON-RPC interface compatible with MCP clients.
+
+**MCP Client Tools:**
+A test client is included for development and testing:
+```bash
+cd desktop-client
+cargo run --bin mcp_test_client
+```
+
+### Tool Examples
+
+**Building a Simple Structure:**
+```json
+{
+  "method": "tools/call",
+  "params": {
+    "name": "create_wall",
+    "arguments": {
+      "block_type": "stone",
+      "x1": 0, "y1": 0, "z1": 0,
+      "x2": 5, "y2": 3, "z2": 2
+    }
+  }
+}
+```
+
+**Spawning and Controlling Devices:**
+```json
+// Spawn a lamp device
+{
+  "method": "tools/call",
+  "params": {
+    "name": "spawn_device",
+    "arguments": {
+      "device_id": "kitchen_lamp_01",
+      "device_type": "lamp",
+      "x": 2.5, "y": 1.0, "z": -3.0
+    }
+  }
+}
+
+// Control the device
+{
+  "method": "tools/call",
+  "params": {
+    "name": "control_device",
+    "arguments": {
+      "device_id": "kitchen_lamp_01",
+      "command": "ON"
+    }
+  }
+}
+```
+
+**Getting World Information:**
+```json
+{
+  "method": "tools/call",
+  "params": {
+    "name": "get_world_status",
+    "arguments": {}
+  }
+}
+```
+
+### Integration Testing
+
+**Unit Tests:**
+The MCP implementation includes comprehensive unit tests:
+```bash
+cd desktop-client
+cargo test mcp_tests
+```
+
+**Integration Tests:**
+End-to-end MCP server tests:
+```bash
+cd desktop-client
+cargo test mcp_integration_tests
+```
+
+### MCP Architecture
+
+**Command Queue System:**
+- MCP tool calls are converted to internal console commands
+- Commands are queued and executed by the main game loop
+- Thread-safe communication between MCP server and game engine
+- Real-time synchronization with the 3D world state
+
+**Tool Categories:**
+- **Queued Tools** - Modify world state (building, device control)
+- **Direct Tools** - Read-only operations (status, sensor data)
+- **Hybrid Tools** - Navigation and camera control
+
+**Error Handling:**
+- Comprehensive parameter validation
+- JSON-RPC standard error codes
+- Detailed error messages for debugging
+- Graceful handling of invalid coordinates and device IDs
+
+### AI Assistant Integration
+
+The MCP server enables AI assistants to:
+- **Build complex structures** through natural language instructions
+- **Manage IoT devices** with conversational commands
+- **Navigate the 3D world** using spatial descriptions
+- **Retrieve real-time data** about world state and connected devices
+- **Automate repetitive tasks** through tool orchestration
+
+**Example AI Workflows:**
+- "Build a stone wall from (0,0,0) to (10,0,5)" → `create_wall` tool call
+- "Turn on all lamps in the kitchen" → `list_devices` + multiple `control_device` calls
+- "Move the camera to see the entire building" → `teleport_camera` + `set_camera_angle` calls
+- "Save this world as 'my_castle'" → `save_world` tool call
+
+### Technical Specifications
+
+**Protocol Support:**
+- JSON-RPC 2.0 over TCP
+- MCP protocol specification compliance
+- Asynchronous tool execution
+- Batch tool calls supported
+
+**Performance:**
+- Non-blocking tool execution
+- Efficient coordinate validation
+- Optimized world state queries
+- Minimal impact on game performance
+
+**Security:**
+- Parameter sanitization
+- Coordinate bounds validation
+- Device ID format verification
+- Safe file operation handling
+
 ## Credits
 
 ### Fonts

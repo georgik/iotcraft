@@ -20,8 +20,8 @@ impl Default for PlayerProfile {
 }
 
 fn uuid_like() -> String {
-    use rand::{RngCore, SeedableRng, rngs::StdRng};
-    let mut rng = StdRng::from_entropy();
+    use rand::{RngCore, rng};
+    let mut rng = rng();
     let mut bytes = [0u8; 8];
     rng.fill_bytes(&mut bytes);
     hex::encode(bytes)

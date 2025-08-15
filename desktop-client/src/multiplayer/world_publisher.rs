@@ -68,17 +68,47 @@ fn initialize_world_publisher(
     thread::spawn(move || {
         info!("Starting world publisher thread...");
 
+        // Test initial connection
+        let mut opts = MqttOptions::new("iotcraft-world-publisher", &mqtt_host, mqtt_port);
+        opts.set_keep_alive(Duration::from_secs(30));
+        opts.set_clean_session(true);
+
+        let (_client, mut conn) = Client::new(opts, 10);
+
+        let mut initial_connection_success = false;
+        let mut connection_attempts = 0;
+
+        // Try initial connection
+        for event in conn.iter() {
+            match event {
+                Ok(Event::Incoming(Incoming::ConnAck(_))) => {
+                    info!("World publisher connected successfully - world sharing enabled");
+                    initial_connection_success = true;
+                    break;
+                }
+                Err(e) => {
+                    error!("Initial world publisher connection failed: {:?}", e);
+                    connection_attempts += 1;
+                    if connection_attempts > 2 {
+                        break;
+                    }
+                }
+                Ok(_) => {}
+            }
+        }
+
+        if !initial_connection_success {
+            info!("MQTT connection not available - world publishing disabled");
+            return; // Exit thread - world publishing is disabled
+        }
+
+        // Continue with normal world publishing
         loop {
             let mut opts = MqttOptions::new("iotcraft-world-publisher", &mqtt_host, mqtt_port);
             opts.set_keep_alive(Duration::from_secs(30));
             opts.set_clean_session(true);
 
             let (client, mut conn) = Client::new(opts, 10);
-            info!(
-                "World publisher connecting to {}:{}...",
-                mqtt_host, mqtt_port
-            );
-
             let mut connected = false;
             let mut reconnect = false;
 
@@ -86,16 +116,15 @@ fn initialize_world_publisher(
             for event in conn.iter() {
                 match event {
                     Ok(Event::Incoming(Incoming::ConnAck(_))) => {
-                        info!("World publisher connected successfully!");
                         connected = true;
                         break;
                     }
-                    Ok(_) => {}
                     Err(e) => {
                         error!("World publisher connection error: {:?}", e);
                         reconnect = true;
                         break;
                     }
+                    Ok(_) => {}
                 }
             }
 

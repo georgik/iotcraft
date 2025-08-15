@@ -7,7 +7,7 @@ use bevy_console::{
 use bevy_console::{ConsoleConfiguration, ConsolePlugin};
 use camera_controllers::{CameraController, CameraControllerPlugin};
 use clap::Parser;
-use log::{error, info};
+use log::{error, info, warn};
 use rumqttc::{Client, Event, MqttOptions, Outgoing, QoS};
 use serde_json::json;
 use std::time::Duration;
@@ -21,10 +21,12 @@ mod fonts;
 mod interaction;
 mod inventory;
 mod localization;
+mod mcp;
 mod minimap;
 mod mqtt;
 mod script;
 mod ui;
+use mcp::mcp_types::CommandExecutedEvent;
 
 mod multiplayer;
 mod physics_manager;
@@ -95,6 +97,9 @@ struct Args {
     /// Player ID override for multiplayer testing (default: auto-generated)
     #[arg(short, long)]
     player_id: Option<String>,
+    /// Run in MCP (Model Context Protocol) server mode
+    #[arg(long)]
+    mcp: bool,
 }
 
 fn handle_place_block_command(
@@ -412,6 +417,7 @@ fn handle_load_map_command(
 fn execute_pending_commands(
     mut pending_commands: ResMut<crate::script::script_types::PendingCommands>,
     mut print_console_line: EventWriter<PrintConsoleLine>,
+    mut command_executed_events: EventWriter<CommandExecutedEvent>,
     mut blink_state: ResMut<BlinkState>,
     temperature: Res<TemperatureResource>,
     mqtt_config: Res<MqttConfig>,
@@ -421,14 +427,24 @@ fn execute_pending_commands(
     mut materials: ResMut<Assets<StandardMaterial>>,
     asset_server: Res<AssetServer>,
     query: Query<(Entity, &VoxelBlock)>,
+    device_query: Query<(&DeviceEntity, &Transform), Without<Camera>>,
     mut inventory: ResMut<PlayerInventory>,
     mut camera_query: Query<(&mut Transform, &mut CameraController), With<Camera>>,
 ) {
     for command in pending_commands.commands.drain(..) {
         info!("Executing queued command: {}", command);
 
+        // Check if command has a request ID (format: "command #request_id")
+        let (actual_command, request_id) = if let Some(hash_pos) = command.rfind(" #") {
+            let (cmd, id_part) = command.split_at(hash_pos);
+            let request_id = id_part.trim_start_matches(" #").to_string();
+            (cmd.to_string(), Some(request_id))
+        } else {
+            (command.clone(), None)
+        };
+
         // Parse command string and dispatch to appropriate handler
-        let parts: Vec<&str> = command.split_whitespace().collect();
+        let parts: Vec<&str> = actual_command.split_whitespace().collect();
         if parts.is_empty() {
             continue;
         }
@@ -503,36 +519,62 @@ fn execute_pending_commands(
                                 })
                                 .to_string();
 
-                                // Create a temporary client for simulation
-                                let mut mqtt_options = MqttOptions::new(
-                                    "spawn-client",
-                                    &mqtt_config.host,
-                                    mqtt_config.port,
-                                );
-                                mqtt_options.set_keep_alive(Duration::from_secs(5));
-                                let (client, mut connection) = Client::new(mqtt_options, 10);
+                                // Try to create a temporary client for simulation
+                                // If MQTT fails, still complete the spawn command
+                                match (|| -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+                                    let mut mqtt_options = MqttOptions::new(
+                                        "spawn-client",
+                                        &mqtt_config.host,
+                                        mqtt_config.port,
+                                    );
+                                    mqtt_options.set_keep_alive(Duration::from_secs(5));
+                                    // Note: set_connection_timeout doesn't exist, using default timeout
+                                    let (client, mut connection) = Client::new(mqtt_options, 10);
 
-                                client
-                                    .publish(
+                                    client.publish(
                                         "devices/announce",
                                         QoS::AtMostOnce,
                                         false,
                                         payload.as_bytes(),
-                                    )
-                                    .unwrap();
+                                    )?;
 
-                                // Drive the event loop to ensure the message is sent
-                                for notification in connection.iter() {
-                                    if let Ok(Event::Outgoing(Outgoing::Publish(_))) = notification
-                                    {
-                                        break;
+                                    // Try to drive the event loop briefly with timeout
+                                    let start_time = std::time::Instant::now();
+                                    const TIMEOUT_MS: u64 = 1000; // 1 second max
+
+                                    while start_time.elapsed().as_millis() < TIMEOUT_MS as u128 {
+                                        match connection.try_recv() {
+                                            Ok(Ok(Event::Outgoing(Outgoing::Publish(_)))) => {
+                                                info!("MQTT publish successful for spawn command");
+                                                return Ok(());
+                                            }
+                                            Ok(Ok(_)) => {}, // Other events, continue
+                                            Ok(Err(_)) | Err(_) => {
+                                                // No more events or connection error, wait a bit
+                                                std::thread::sleep(Duration::from_millis(50));
+                                            }
+                                        }
                                     }
+
+                                    // Timeout reached, but still continue
+                                    info!("MQTT publish timeout for spawn command, continuing anyway");
+                                    Ok(())
+                                })() {
+                                    Ok(_) => info!("MQTT spawn announcement completed"),
+                                    Err(e) => warn!("MQTT spawn announcement failed: {} (continuing anyway)", e),
                                 }
 
-                                print_console_line.write(PrintConsoleLine::new(format!(
-                                    "Spawn command sent for device {}",
-                                    device_id
-                                )));
+                                let result_msg =
+                                    format!("Spawn command sent for device {}", device_id);
+                                print_console_line.write(PrintConsoleLine::new(result_msg.clone()));
+
+                                // Emit command executed event if this was from MCP
+                                if let Some(req_id) = request_id.clone() {
+                                    command_executed_events.write(CommandExecutedEvent {
+                                        request_id: req_id,
+                                        result: result_msg,
+                                    });
+                                }
                             }
                         }
                     }
@@ -580,10 +622,17 @@ fn execute_pending_commands(
                                     }
                                 }
 
-                                print_console_line.write(PrintConsoleLine::new(format!(
-                                    "Spawn door command sent for device {}",
-                                    device_id
-                                )));
+                                let result_msg =
+                                    format!("Spawn door command sent for device {}", device_id);
+                                print_console_line.write(PrintConsoleLine::new(result_msg.clone()));
+
+                                // Emit command executed event if this was from MCP
+                                if let Some(req_id) = request_id.clone() {
+                                    command_executed_events.write(CommandExecutedEvent {
+                                        request_id: req_id,
+                                        result: result_msg,
+                                    });
+                                }
                             }
                         }
                     }
@@ -603,10 +652,18 @@ fn execute_pending_commands(
                                     "glass_pane" => BlockType::GlassPane,
                                     "cyan_terracotta" => BlockType::CyanTerracotta,
                                     _ => {
-                                        print_console_line.write(PrintConsoleLine::new(format!(
-                                            "Invalid block type: {}",
-                                            block_type_str
-                                        )));
+                                        let error_msg =
+                                            format!("Invalid block type: {}", block_type_str);
+                                        print_console_line
+                                            .write(PrintConsoleLine::new(error_msg.clone()));
+
+                                        // Emit error event if this was from MCP
+                                        if let Some(req_id) = request_id.clone() {
+                                            command_executed_events.write(CommandExecutedEvent {
+                                                request_id: req_id,
+                                                result: error_msg,
+                                            });
+                                        }
                                         continue;
                                     }
                                 };
@@ -642,10 +699,19 @@ fn execute_pending_commands(
                                     // Physics colliders are managed by PhysicsManagerPlugin based on distance and mode
                                 ));
 
-                                print_console_line.write(PrintConsoleLine::new(format!(
+                                let result_msg = format!(
                                     "Placed {} block at ({}, {}, {})",
                                     block_type_str, x, y, z
-                                )));
+                                );
+                                print_console_line.write(PrintConsoleLine::new(result_msg.clone()));
+
+                                // Emit command executed event if this was from MCP
+                                if let Some(req_id) = request_id.clone() {
+                                    command_executed_events.write(CommandExecutedEvent {
+                                        request_id: req_id,
+                                        result: result_msg,
+                                    });
+                                }
                             }
                         }
                     }
@@ -657,22 +723,26 @@ fn execute_pending_commands(
                         if let Ok(y) = parts[2].parse::<i32>() {
                             if let Ok(z) = parts[3].parse::<i32>() {
                                 let position = IVec3::new(x, y, z);
-                                if voxel_world.remove_block(&position).is_some() {
+                                let result_msg = if voxel_world.remove_block(&position).is_some() {
                                     // Remove the block entity
                                     for (entity, block) in query.iter() {
                                         if block.position == position {
                                             commands.entity(entity).despawn();
                                         }
                                     }
-                                    print_console_line.write(PrintConsoleLine::new(format!(
-                                        "Removed block at ({}, {}, {})",
-                                        x, y, z
-                                    )));
+                                    format!("Removed block at ({}, {}, {})", x, y, z)
                                 } else {
-                                    print_console_line.write(PrintConsoleLine::new(format!(
-                                        "No block found at ({}, {}, {})",
-                                        x, y, z
-                                    )));
+                                    format!("No block found at ({}, {}, {})", x, y, z)
+                                };
+
+                                print_console_line.write(PrintConsoleLine::new(result_msg.clone()));
+
+                                // Emit command executed event if this was from MCP
+                                if let Some(req_id) = request_id.clone() {
+                                    command_executed_events.write(CommandExecutedEvent {
+                                        request_id: req_id,
+                                        result: result_msg,
+                                    });
                                 }
                             }
                         }
@@ -817,10 +887,29 @@ fn execute_pending_commands(
                                                 );
                                             }
 
-                                            print_console_line.write(PrintConsoleLine::new(format!(
-                                                "Created a wall of {} from ({}, {}, {}) to ({}, {}, {})",
-                                                block_type_str, x1, y1, z1, x2, y2, z2
-                                            )));
+                                            let result_msg = format!(
+                                                "Created a wall of {} from ({}, {}, {}) to ({}, {}, {}) - {} blocks",
+                                                block_type_str,
+                                                x1,
+                                                y1,
+                                                z1,
+                                                x2,
+                                                y2,
+                                                z2,
+                                                blocks_added
+                                            );
+                                            print_console_line
+                                                .write(PrintConsoleLine::new(result_msg.clone()));
+
+                                            // Emit command executed event if this was from MCP
+                                            if let Some(req_id) = request_id.clone() {
+                                                command_executed_events.write(
+                                                    CommandExecutedEvent {
+                                                        request_id: req_id,
+                                                        result: result_msg,
+                                                    },
+                                                );
+                                            }
                                         }
                                     }
                                 }
@@ -897,6 +986,39 @@ fn execute_pending_commands(
                     }
                 }
             }
+            "list" => {
+                // Handle list devices command
+                let device_list: Vec<String> = device_query
+                    .iter()
+                    .map(|(device, transform)| {
+                        format!(
+                            "{}: {} at ({:.1}, {:.1}, {:.1})",
+                            device.device_id,
+                            device.device_type,
+                            transform.translation.x,
+                            transform.translation.y,
+                            transform.translation.z
+                        )
+                    })
+                    .collect();
+
+                let result_text = if device_list.is_empty() {
+                    "No devices found".to_string()
+                } else {
+                    format!("Devices:\n{}", device_list.join("\n"))
+                };
+
+                print_console_line.write(PrintConsoleLine::new(result_text.clone()));
+                info!("Executed list command, found {} devices", device_list.len());
+
+                // Emit command executed event if this was from MCP
+                if let Some(req_id) = request_id {
+                    command_executed_events.write(CommandExecutedEvent {
+                        request_id: req_id,
+                        result: result_text,
+                    });
+                }
+            }
             _ => {
                 print_console_line.write(PrintConsoleLine::new(format!(
                     "Unknown command: {}",
@@ -909,6 +1031,8 @@ fn execute_pending_commands(
 
 fn main() {
     let args = Args::parse();
+
+    // Logging is now handled by Bevy's LogPlugin in DefaultPlugins
 
     // Note: Script execution is now handled by the ScriptPlugin
 
@@ -969,8 +1093,18 @@ fn main() {
         .add_plugins(SharedWorldPlugin)
         .add_plugins(WorldPublisherPlugin)
         .add_plugins(WorldDiscoveryPlugin)
-        .add_plugins(PlayerAvatarPlugin)
-        .init_state::<GameState>()
+        .add_plugins(PlayerAvatarPlugin);
+
+    // Add CommandExecutedEvent unconditionally since it's used by execute_pending_commands
+    app.add_event::<CommandExecutedEvent>();
+
+    // Add MCP plugin only if --mcp flag is provided
+    if args.mcp {
+        info!("Starting in MCP server mode");
+        app.add_plugins(mcp::McpPlugin);
+    }
+
+    app.init_state::<GameState>()
         .insert_resource(ConsoleConfiguration {
             keys: vec![KeyCode::F12],
             left_pos: 200.0,

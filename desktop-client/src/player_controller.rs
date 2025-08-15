@@ -136,10 +136,6 @@ impl Default for PlayerMode {
     }
 }
 
-/// Component to mark the player's physics body
-#[derive(Component)]
-pub struct PlayerPhysicsBody;
-
 /// Component for player movement configuration
 #[derive(Component)]
 pub struct PlayerMovement {

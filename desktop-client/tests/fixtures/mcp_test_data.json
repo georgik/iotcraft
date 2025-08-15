@@ -1,0 +1,386 @@
+{
+  "initialize_request": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "initialize",
+    "params": {
+      "protocolVersion": "2024-11-05",
+      "capabilities": {},
+      "clientInfo": {
+        "name": "test_client",
+        "version": "1.0.0"
+      }
+    }
+  },
+  "initialize_response": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "result": {
+      "protocolVersion": "2024-11-05",
+      "capabilities": {
+        "tools": {
+          "listChanged": false
+        }
+      },
+      "serverInfo": {
+        "name": "iotcraft",
+        "version": "1.0.0"
+      }
+    }
+  },
+  "tools_list_request": {
+    "jsonrpc": "2.0",
+    "id": 2,
+    "method": "tools/list",
+    "params": {}
+  },
+  "create_wall_request": {
+    "jsonrpc": "2.0",
+    "id": 3,
+    "method": "tools/call",
+    "params": {
+      "name": "create_wall",
+      "arguments": {
+        "block_type": "stone",
+        "x1": 0,
+        "y1": 0,
+        "z1": 0,
+        "x2": 3,
+        "y2": 2,
+        "z2": 1
+      }
+    }
+  },
+  "create_wall_invalid_request": {
+    "jsonrpc": "2.0",
+    "id": 4,
+    "method": "tools/call",
+    "params": {
+      "name": "create_wall",
+      "arguments": {
+        "block_type": "stone",
+        "x1": 0,
+        "y1": 0,
+        "z1": 0
+      }
+    }
+  },
+  "place_block_request": {
+    "jsonrpc": "2.0",
+    "id": 5,
+    "method": "tools/call",
+    "params": {
+      "name": "place_block",
+      "arguments": {
+        "block_type": "grass",
+        "x": 10,
+        "y": 1,
+        "z": 5
+      }
+    }
+  },
+  "place_block_float_coords": {
+    "jsonrpc": "2.0",
+    "id": 6,
+    "method": "tools/call",
+    "params": {
+      "name": "place_block",
+      "arguments": {
+        "block_type": "dirt",
+        "x": 5.7,
+        "y": 2.3,
+        "z": -1.8
+      }
+    }
+  },
+  "remove_block_request": {
+    "jsonrpc": "2.0",
+    "id": 7,
+    "method": "tools/call",
+    "params": {
+      "name": "remove_block",
+      "arguments": {
+        "x": 10,
+        "y": 1,
+        "z": 5
+      }
+    }
+  },
+  "spawn_device_lamp_request": {
+    "jsonrpc": "2.0",
+    "id": 8,
+    "method": "tools/call",
+    "params": {
+      "name": "spawn_device",
+      "arguments": {
+        "device_id": "kitchen_lamp_01",
+        "device_type": "lamp",
+        "x": 3.5,
+        "y": 1.0,
+        "z": 2.0
+      }
+    }
+  },
+  "spawn_device_door_request": {
+    "jsonrpc": "2.0",
+    "id": 9,
+    "method": "tools/call",
+    "params": {
+      "name": "spawn_device",
+      "arguments": {
+        "device_id": "main_door",
+        "device_type": "door",
+        "x": 0.0,
+        "y": 1.0,
+        "z": 5.0
+      }
+    }
+  },
+  "spawn_device_missing_coords": {
+    "jsonrpc": "2.0",
+    "id": 10,
+    "method": "tools/call",
+    "params": {
+      "name": "spawn_device",
+      "arguments": {
+        "device_id": "test_lamp",
+        "device_type": "lamp"
+      }
+    }
+  },
+  "control_device_request": {
+    "jsonrpc": "2.0",
+    "id": 11,
+    "method": "tools/call",
+    "params": {
+      "name": "control_device",
+      "arguments": {
+        "device_id": "kitchen_lamp_01",
+        "command": "ON"
+      }
+    }
+  },
+  "move_device_request": {
+    "jsonrpc": "2.0",
+    "id": 12,
+    "method": "tools/call",
+    "params": {
+      "name": "move_device",
+      "arguments": {
+        "device_id": "kitchen_lamp_01",
+        "x": 5.0,
+        "y": 1.0,
+        "z": 3.0
+      }
+    }
+  },
+  "teleport_camera_request": {
+    "jsonrpc": "2.0",
+    "id": 13,
+    "method": "tools/call",
+    "params": {
+      "name": "teleport_camera",
+      "arguments": {
+        "x": 10.0,
+        "y": 20.0,
+        "z": -5.0
+      }
+    }
+  },
+  "set_camera_angle_request": {
+    "jsonrpc": "2.0",
+    "id": 14,
+    "method": "tools/call",
+    "params": {
+      "name": "set_camera_angle",
+      "arguments": {
+        "yaw": 45.0,
+        "pitch": -30.0
+      }
+    }
+  },
+  "save_world_request": {
+    "jsonrpc": "2.0",
+    "id": 15,
+    "method": "tools/call",
+    "params": {
+      "name": "save_world",
+      "arguments": {
+        "filename": "test_world.json"
+      }
+    }
+  },
+  "load_world_request": {
+    "jsonrpc": "2.0",
+    "id": 16,
+    "method": "tools/call",
+    "params": {
+      "name": "load_world",
+      "arguments": {
+        "filename": "test_world.json"
+      }
+    }
+  },
+  "list_devices_request": {
+    "jsonrpc": "2.0",
+    "id": 17,
+    "method": "tools/call",
+    "params": {
+      "name": "list_devices",
+      "arguments": {}
+    }
+  },
+  "get_world_status_request": {
+    "jsonrpc": "2.0",
+    "id": 18,
+    "method": "tools/call",
+    "params": {
+      "name": "get_world_status",
+      "arguments": {}
+    }
+  },
+  "get_sensor_data_request": {
+    "jsonrpc": "2.0",
+    "id": 19,
+    "method": "tools/call",
+    "params": {
+      "name": "get_sensor_data",
+      "arguments": {}
+    }
+  },
+  "unknown_tool_request": {
+    "jsonrpc": "2.0",
+    "id": 20,
+    "method": "tools/call",
+    "params": {
+      "name": "unknown_tool",
+      "arguments": {}
+    }
+  },
+  "malformed_request": {
+    "jsonrpc": "2.0",
+    "method": "tools/call",
+    "params": {
+      "name": "place_block"
+    }
+  },
+  "expected_command_translations": {
+    "list_devices": "list",
+    "control_device_on": "control kitchen_lamp_01 ON",
+    "control_device_off": "control kitchen_lamp_01 OFF",
+    "spawn_lamp": "spawn kitchen_lamp_01 3.5 1 2",
+    "spawn_door": "spawn_door main_door 0 1 5",
+    "place_block": "place grass 10 1 5",
+    "place_block_float": "place dirt 5 2 -1",
+    "remove_block": "remove 10 1 5",
+    "create_wall": "wall stone 0 0 0 3 2 1",
+    "move_device": "move kitchen_lamp_01 5 1 3",
+    "teleport_camera": "tp 10 20 -5",
+    "set_camera_angle": "look 45 -30",
+    "save_world": "save_map test_world.json",
+    "load_world": "load_map test_world.json"
+  },
+  "error_cases": {
+    "missing_required_params": [
+      {
+        "tool": "create_wall",
+        "args": {"block_type": "stone", "x1": 0},
+        "expected_error": "x2 parameter is required"
+      },
+      {
+        "tool": "place_block", 
+        "args": {"block_type": "grass"},
+        "expected_error": "x parameter is required"
+      },
+      {
+        "tool": "spawn_device",
+        "args": {"device_id": "test"},
+        "expected_error": "device_type parameter is required"
+      }
+    ],
+    "invalid_parameter_types": [
+      {
+        "tool": "place_block",
+        "args": {"block_type": "grass", "x": "not_a_number", "y": 1, "z": 1},
+        "expected_result": null
+      },
+      {
+        "tool": "create_wall",
+        "args": {"block_type": "stone", "x1": "invalid", "y1": 0, "z1": 0, "x2": 1, "y2": 1, "z2": 1},
+        "expected_result": null
+      }
+    ],
+    "invalid_device_types": [
+      {
+        "tool": "spawn_device",
+        "args": {"device_id": "test", "device_type": "invalid_type", "x": 1, "y": 1, "z": 1},
+        "expected_result": null
+      }
+    ]
+  },
+  "stress_test_cases": {
+    "large_wall": {
+      "tool": "create_wall",
+      "args": {
+        "block_type": "stone",
+        "x1": -50,
+        "y1": -10,
+        "z1": -25,
+        "x2": 50,
+        "y2": 10,
+        "z2": 25
+      },
+      "expected_blocks": 101 * 21 * 51
+    },
+    "negative_coordinates": {
+      "tool": "place_block",
+      "args": {
+        "block_type": "dirt",
+        "x": -1000,
+        "y": -500,
+        "z": -2000
+      }
+    },
+    "extreme_device_positions": {
+      "tool": "spawn_device",
+      "args": {
+        "device_id": "extreme_device",
+        "device_type": "lamp",
+        "x": 999999.9,
+        "y": -999999.9,
+        "z": 0.0
+      }
+    }
+  },
+  "edge_cases": {
+    "zero_size_wall": {
+      "tool": "create_wall",
+      "args": {
+        "block_type": "stone",
+        "x1": 5,
+        "y1": 5,
+        "z1": 5,
+        "x2": 5,
+        "y2": 5,
+        "z2": 5
+      },
+      "expected_blocks": 1
+    },
+    "empty_device_id": {
+      "tool": "spawn_device",
+      "args": {
+        "device_id": "",
+        "device_type": "lamp",
+        "x": 0,
+        "y": 0,
+        "z": 0
+      }
+    },
+    "very_long_filename": {
+      "tool": "save_world",
+      "args": {
+        "filename": "a_very_very_very_long_filename_that_might_cause_issues_with_filesystem_limits_and_should_be_tested_for_robustness_and_error_handling.json"
+      }
+    }
+  }
+}
