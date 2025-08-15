@@ -29,10 +29,12 @@ mod ui;
 use mcp::mcp_types::CommandExecutedEvent;
 
 mod multiplayer;
+mod physics;
 mod physics_manager;
 mod player_avatar;
 mod player_controller;
 mod profile;
+mod rendering;
 mod world;
 
 // Re-export types for easier access
