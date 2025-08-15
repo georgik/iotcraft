@@ -1032,8 +1032,7 @@ fn execute_pending_commands(
 fn main() {
     let args = Args::parse();
 
-    // Initialize logging (TCP-only MCP server doesn't interfere with stdout)
-    env_logger::init();
+    // Logging is now handled by Bevy's LogPlugin in DefaultPlugins
 
     // Note: Script execution is now handled by the ScriptPlugin
 
@@ -1095,6 +1094,9 @@ fn main() {
         .add_plugins(WorldPublisherPlugin)
         .add_plugins(WorldDiscoveryPlugin)
         .add_plugins(PlayerAvatarPlugin);
+
+    // Add CommandExecutedEvent unconditionally since it's used by execute_pending_commands
+    app.add_event::<CommandExecutedEvent>();
 
     // Add MCP plugin only if --mcp flag is provided
     if args.mcp {
