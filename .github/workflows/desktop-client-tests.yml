@@ -51,9 +51,6 @@ jobs:
       with:
         components: rustfmt, clippy
 
-    - name: Install cargo-nextest for better test reporting
-      uses: taiki-e/install-action@nextest
-        
     - name: Cache Rust dependencies
       uses: Swatinem/rust-cache@v2
       with:
@@ -71,15 +68,6 @@ jobs:
         cargo clippy --all-targets --all-features -- -D warnings
       continue-on-error: true
 
-    - name: Run unit tests with nextest
-      run: |
-        cd desktop-client
-        mkdir -p test-results
-        cargo nextest run --all-features --workspace \
-          --profile ci \
-          --junit-output test-results/nextest-junit.xml \
-          --verbose
-
     - name: Run unit tests (fallback)
       if: failure()
       run: |
@@ -87,43 +75,6 @@ jobs:
         mkdir -p test-results
         cargo test --all-features --workspace --verbose -- --format junit > test-results/cargo-junit.xml || true
         cargo test --all-features --workspace --verbose
-
-    - name: Generate test summary
-      if: always()
-      run: |
-        cd desktop-client
-        echo "## Test Results Summary" >> $GITHUB_STEP_SUMMARY
-        echo "" >> $GITHUB_STEP_SUMMARY
-        
-        if [ -f "test-results/nextest-junit.xml" ]; then
-          echo "✅ Tests completed using cargo-nextest" >> $GITHUB_STEP_SUMMARY
-        else
-          echo "⚠️ Tests completed using fallback cargo test" >> $GITHUB_STEP_SUMMARY
-        fi
-
-        echo "" >> $GITHUB_STEP_SUMMARY
-        echo "### Test Output" >> $GITHUB_STEP_SUMMARY
-        echo '```' >> $GITHUB_STEP_SUMMARY
-        cargo test --all-features --workspace --no-run --message-format=json 2>/dev/null | \
-          jq -r 'select(.reason == "compiler-artifact" and .target.kind[] == "test") | "Test: " + .target.name' >> $GITHUB_STEP_SUMMARY || echo "Test discovery failed" >> $GITHUB_STEP_SUMMARY
-        echo '```' >> $GITHUB_STEP_SUMMARY
-
-    - name: Upload test results
-      if: always()
-      uses: actions/upload-artifact@v4
-      with:
-        name: test-results
-        path: desktop-client/test-results/
-        retention-days: 30
-
-    - name: Publish test results
-      if: always()
-      uses: dorny/test-reporter@v1
-      with:
-        name: Unit Test Results
-        path: 'desktop-client/test-results/*.xml'
-        reporter: java-junit
-        fail-on-error: true
 
     - name: Check if build works
       run: |
