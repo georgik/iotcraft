@@ -612,11 +612,21 @@ fn handle_command_results(
                 event.request_id, event.result
             );
 
-            let response = json!({
-                "content": [{
-                    "type": "text",
-                    "text": event.result
-                }]
+            // Use proper McpToolResult struct for serialization
+            let tool_result = McpToolResult {
+                content: vec![McpContent::Text {
+                    text: event.result.clone(),
+                }],
+                is_error: Some(false),
+            };
+
+            let response = serde_json::to_value(tool_result).unwrap_or_else(|_| {
+                json!({
+                    "content": [{
+                        "type": "text",
+                        "text": event.result
+                    }]
+                })
             });
 
             if execution.response_sender.send(response).is_err() {

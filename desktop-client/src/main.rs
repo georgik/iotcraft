@@ -619,10 +619,18 @@ fn execute_pending_commands(
                                     "glass_pane" => BlockType::GlassPane,
                                     "cyan_terracotta" => BlockType::CyanTerracotta,
                                     _ => {
-                                        print_console_line.write(PrintConsoleLine::new(format!(
-                                            "Invalid block type: {}",
-                                            block_type_str
-                                        )));
+                                        let error_msg =
+                                            format!("Invalid block type: {}", block_type_str);
+                                        print_console_line
+                                            .write(PrintConsoleLine::new(error_msg.clone()));
+
+                                        // Emit error event if this was from MCP
+                                        if let Some(req_id) = request_id.clone() {
+                                            command_executed_events.write(CommandExecutedEvent {
+                                                request_id: req_id,
+                                                result: error_msg,
+                                            });
+                                        }
                                         continue;
                                     }
                                 };
@@ -658,10 +666,19 @@ fn execute_pending_commands(
                                     // Physics colliders are managed by PhysicsManagerPlugin based on distance and mode
                                 ));
 
-                                print_console_line.write(PrintConsoleLine::new(format!(
+                                let result_msg = format!(
                                     "Placed {} block at ({}, {}, {})",
                                     block_type_str, x, y, z
-                                )));
+                                );
+                                print_console_line.write(PrintConsoleLine::new(result_msg.clone()));
+
+                                // Emit command executed event if this was from MCP
+                                if let Some(req_id) = request_id.clone() {
+                                    command_executed_events.write(CommandExecutedEvent {
+                                        request_id: req_id,
+                                        result: result_msg,
+                                    });
+                                }
                             }
                         }
                     }
@@ -673,22 +690,26 @@ fn execute_pending_commands(
                         if let Ok(y) = parts[2].parse::<i32>() {
                             if let Ok(z) = parts[3].parse::<i32>() {
                                 let position = IVec3::new(x, y, z);
-                                if voxel_world.remove_block(&position).is_some() {
+                                let result_msg = if voxel_world.remove_block(&position).is_some() {
                                     // Remove the block entity
                                     for (entity, block) in query.iter() {
                                         if block.position == position {
                                             commands.entity(entity).despawn();
                                         }
                                     }
-                                    print_console_line.write(PrintConsoleLine::new(format!(
-                                        "Removed block at ({}, {}, {})",
-                                        x, y, z
-                                    )));
+                                    format!("Removed block at ({}, {}, {})", x, y, z)
                                 } else {
-                                    print_console_line.write(PrintConsoleLine::new(format!(
-                                        "No block found at ({}, {}, {})",
-                                        x, y, z
-                                    )));
+                                    format!("No block found at ({}, {}, {})", x, y, z)
+                                };
+
+                                print_console_line.write(PrintConsoleLine::new(result_msg.clone()));
+
+                                // Emit command executed event if this was from MCP
+                                if let Some(req_id) = request_id.clone() {
+                                    command_executed_events.write(CommandExecutedEvent {
+                                        request_id: req_id,
+                                        result: result_msg,
+                                    });
                                 }
                             }
                         }
@@ -833,10 +854,29 @@ fn execute_pending_commands(
                                                 );
                                             }
 
-                                            print_console_line.write(PrintConsoleLine::new(format!(
-                                                "Created a wall of {} from ({}, {}, {}) to ({}, {}, {})",
-                                                block_type_str, x1, y1, z1, x2, y2, z2
-                                            )));
+                                            let result_msg = format!(
+                                                "Created a wall of {} from ({}, {}, {}) to ({}, {}, {}) - {} blocks",
+                                                block_type_str,
+                                                x1,
+                                                y1,
+                                                z1,
+                                                x2,
+                                                y2,
+                                                z2,
+                                                blocks_added
+                                            );
+                                            print_console_line
+                                                .write(PrintConsoleLine::new(result_msg.clone()));
+
+                                            // Emit command executed event if this was from MCP
+                                            if let Some(req_id) = request_id.clone() {
+                                                command_executed_events.write(
+                                                    CommandExecutedEvent {
+                                                        request_id: req_id,
+                                                        result: result_msg,
+                                                    },
+                                                );
+                                            }
                                         }
                                     }
                                 }
