@@ -54,3 +54,12 @@ wall stone 26 1 -26 26 1 -21
 # Fill the inside with water at level 1 (above the grass ground)
 wall water 22 1 -25 25 1 -22
 
+# Give the player some starting items for building
+give grass 64
+give dirt 32
+give stone 32
+give quartz_block 16
+give glass_pane 8
+give cyan_terracotta 8
+give water 8
+

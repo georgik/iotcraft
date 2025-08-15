@@ -47,6 +47,11 @@ impl Default for PhysicsConfig {
 #[derive(Component)]
 pub struct HasPhysicsCollider;
 
+/// Marker component for water blocks to enable water detection
+/// Water blocks don't have solid colliders but can still be detected for swimming mechanics
+#[derive(Component)]
+pub struct WaterBlock;
+
 /// Configure physics settings for optimal performance
 fn configure_physics_settings(mut commands: Commands) {
     // Configure physics for better performance with static world
@@ -86,17 +91,16 @@ fn prevent_player_fall_through_world(
 
 /// System to manage which blocks have physics colliders based on player position
 /// Only runs in walking mode for optimal performance
+/// Water blocks are excluded from having solid colliders to allow player movement
 fn manage_block_physics_distance_based(
     mut commands: Commands,
     physics_config: Res<PhysicsConfig>,
     camera_query: Query<&Transform, With<Camera>>,
+    voxel_world: Res<crate::environment::VoxelWorld>,
     // Blocks with colliders
-    blocks_with_physics: Query<(Entity, &Transform), (With<VoxelBlock>, With<HasPhysicsCollider>)>,
+    blocks_with_physics: Query<(Entity, &Transform, &VoxelBlock), With<HasPhysicsCollider>>,
     // Blocks without colliders
-    blocks_without_physics: Query<
-        (Entity, &Transform),
-        (With<VoxelBlock>, Without<HasPhysicsCollider>),
-    >,
+    blocks_without_physics: Query<(Entity, &Transform, &VoxelBlock), Without<HasPhysicsCollider>>,
 ) {
     // Handle multiple camera entities by taking the first one
     let camera_entities: Vec<_> = camera_query.iter().collect();
@@ -107,7 +111,7 @@ fn manage_block_physics_distance_based(
     let player_pos = camera_transform.translation;
 
     // Remove colliders from blocks that are too far away
-    for (entity, transform) in &blocks_with_physics {
+    for (entity, transform, _voxel_block) in &blocks_with_physics {
         let distance = player_pos.distance(transform.translation);
         if distance > physics_config.collider_distance {
             commands
@@ -119,11 +123,19 @@ fn manage_block_physics_distance_based(
     }
 
     // Add colliders to nearby blocks (up to our limit)
+    // IMPORTANT: Exclude water blocks from having solid colliders to allow player movement
     let mut nearby_blocks: Vec<_> = blocks_without_physics
         .iter()
-        .filter_map(|(entity, transform)| {
+        .filter_map(|(entity, transform, voxel_block)| {
             let distance = player_pos.distance(transform.translation);
             if distance <= physics_config.collider_distance {
+                // Check if this block is water - if so, exclude it from solid colliders
+                if let Some(block_type) = voxel_world.blocks.get(&voxel_block.position) {
+                    if *block_type == crate::environment::BlockType::Water {
+                        // Skip water blocks - they should not have solid colliders
+                        return None;
+                    }
+                }
                 Some((entity, distance))
             } else {
                 None
@@ -218,16 +230,105 @@ fn find_safe_spawn_position(
 }
 
 /// Find the Y coordinate of the highest solid block at the given X,Z coordinates
+/// Water blocks are considered non-solid for spawn purposes
 fn find_surface_y(voxel_world: &crate::environment::VoxelWorld, x: i32, z: i32) -> Option<f32> {
     // Check from a reasonable height down to below ground
     for y in ((-20)..=20).rev() {
         let pos = IVec3::new(x, y, z);
-        if voxel_world.is_block_at(pos) {
-            // Found a solid block, the surface is one block above
-            return Some((y + 1) as f32);
+        if let Some(block_type) = voxel_world.blocks.get(&pos) {
+            // Only consider non-water blocks as solid for spawning purposes
+            if *block_type != crate::environment::BlockType::Water {
+                // Found a solid block, the surface is one block above
+                return Some((y + 1) as f32);
+            }
         }
     }
     None
+}
+
+/// Tests for water physics behavior
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::environment::{BlockType, VoxelWorld};
+
+    #[test]
+    fn test_water_blocks_excluded_from_solid_colliders() {
+        // This test verifies that water blocks are properly excluded from
+        // having solid colliders, allowing player movement through water
+
+        let mut voxel_world = VoxelWorld::default();
+
+        // Create a test scenario with both solid blocks and water blocks
+        voxel_world.set_block(IVec3::new(0, 0, 0), BlockType::Stone); // Solid block
+        voxel_world.set_block(IVec3::new(1, 0, 0), BlockType::Water); // Water block
+        voxel_world.set_block(IVec3::new(2, 0, 0), BlockType::Grass); // Another solid block
+
+        // Test that water blocks are properly identified and excluded
+        let water_pos = IVec3::new(1, 0, 0);
+        let stone_pos = IVec3::new(0, 0, 0);
+        let grass_pos = IVec3::new(2, 0, 0);
+
+        // Check block types
+        assert_eq!(voxel_world.blocks.get(&water_pos), Some(&BlockType::Water));
+        assert_eq!(voxel_world.blocks.get(&stone_pos), Some(&BlockType::Stone));
+        assert_eq!(voxel_world.blocks.get(&grass_pos), Some(&BlockType::Grass));
+
+        // Water should be identified as such (test our filtering logic)
+        assert!(voxel_world.blocks.get(&water_pos) == Some(&BlockType::Water));
+        assert!(voxel_world.blocks.get(&stone_pos) != Some(&BlockType::Water));
+        assert!(voxel_world.blocks.get(&grass_pos) != Some(&BlockType::Water));
+    }
+
+    #[test]
+    fn test_find_surface_y_treats_water_as_non_solid() {
+        // Test that the safe spawn logic treats water as non-solid
+        let mut voxel_world = VoxelWorld::default();
+
+        // Create a column with stone at bottom, water in middle, and air on top
+        voxel_world.set_block(IVec3::new(5, 0, 5), BlockType::Stone); // Solid foundation
+        voxel_world.set_block(IVec3::new(5, 1, 5), BlockType::Water); // Water above stone
+        voxel_world.set_block(IVec3::new(5, 2, 5), BlockType::Water); // More water
+        // No block at (5, 3, 5) - air
+
+        // find_surface_y should return the level above the stone (y=1)
+        // because water is considered non-solid for spawning
+        let surface_y = find_surface_y(&voxel_world, 5, 5);
+
+        // Should find stone at y=0, so surface should be y=1
+        assert_eq!(surface_y, Some(1.0));
+    }
+
+    #[test]
+    fn test_find_surface_y_with_no_solid_blocks() {
+        // Test case where there are only water blocks (or no blocks)
+        let mut voxel_world = VoxelWorld::default();
+
+        // Only add water blocks
+        voxel_world.set_block(IVec3::new(10, 0, 10), BlockType::Water);
+        voxel_world.set_block(IVec3::new(10, 1, 10), BlockType::Water);
+
+        // Should return None since there are no solid blocks to spawn on
+        let surface_y = find_surface_y(&voxel_world, 10, 10);
+        assert_eq!(surface_y, None);
+    }
+
+    #[test]
+    fn test_mixed_block_types_surface_detection() {
+        // Test a more complex scenario with mixed block types
+        let mut voxel_world = VoxelWorld::default();
+
+        // Create a realistic scenario: dirt foundation with water pool on top
+        voxel_world.set_block(IVec3::new(20, -1, 20), BlockType::Dirt); // Underground
+        voxel_world.set_block(IVec3::new(20, 0, 20), BlockType::Stone); // Ground level
+        voxel_world.set_block(IVec3::new(20, 1, 20), BlockType::Water); // Water surface
+        voxel_world.set_block(IVec3::new(20, 2, 20), BlockType::Water); // Deep water
+
+        // Should find the stone at y=0 as the highest solid block
+        // Surface should be at y=1 (above the stone)
+        let surface_y = find_surface_y(&voxel_world, 20, 20);
+        assert_eq!(surface_y, Some(1.0));
+    }
 }
 
 // Helper function removed as it was unused

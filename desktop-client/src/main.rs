@@ -411,7 +411,7 @@ fn handle_load_map_command(
                         }
                     };
 
-                    commands.spawn((
+                    let mut entity_commands = commands.spawn((
                         Mesh3d(cube_mesh.clone()),
                         MeshMaterial3d(material),
                         Transform::from_translation(Vec3::new(
@@ -424,6 +424,11 @@ fn handle_load_map_command(
                         },
                         // Physics colliders are managed by PhysicsManagerPlugin based on distance and mode
                     ));
+
+                    // Add WaterBlock component for water blocks to enable water detection
+                    if *block_type == BlockType::Water {
+                        entity_commands.insert(crate::physics_manager::WaterBlock);
+                    }
                 }
 
                 reply!(
