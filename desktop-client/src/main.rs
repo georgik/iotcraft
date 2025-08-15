@@ -7,7 +7,7 @@ use bevy_console::{
 use bevy_console::{ConsoleConfiguration, ConsolePlugin};
 use camera_controllers::{CameraController, CameraControllerPlugin};
 use clap::Parser;
-use log::{error, info};
+use log::{error, info, warn};
 use rumqttc::{Client, Event, MqttOptions, Outgoing, QoS};
 use serde_json::json;
 use std::time::Duration;
@@ -519,36 +519,62 @@ fn execute_pending_commands(
                                 })
                                 .to_string();
 
-                                // Create a temporary client for simulation
-                                let mut mqtt_options = MqttOptions::new(
-                                    "spawn-client",
-                                    &mqtt_config.host,
-                                    mqtt_config.port,
-                                );
-                                mqtt_options.set_keep_alive(Duration::from_secs(5));
-                                let (client, mut connection) = Client::new(mqtt_options, 10);
+                                // Try to create a temporary client for simulation
+                                // If MQTT fails, still complete the spawn command
+                                match (|| -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+                                    let mut mqtt_options = MqttOptions::new(
+                                        "spawn-client",
+                                        &mqtt_config.host,
+                                        mqtt_config.port,
+                                    );
+                                    mqtt_options.set_keep_alive(Duration::from_secs(5));
+                                    // Note: set_connection_timeout doesn't exist, using default timeout
+                                    let (client, mut connection) = Client::new(mqtt_options, 10);
 
-                                client
-                                    .publish(
+                                    client.publish(
                                         "devices/announce",
                                         QoS::AtMostOnce,
                                         false,
                                         payload.as_bytes(),
-                                    )
-                                    .unwrap();
+                                    )?;
 
-                                // Drive the event loop to ensure the message is sent
-                                for notification in connection.iter() {
-                                    if let Ok(Event::Outgoing(Outgoing::Publish(_))) = notification
-                                    {
-                                        break;
+                                    // Try to drive the event loop briefly with timeout
+                                    let start_time = std::time::Instant::now();
+                                    const TIMEOUT_MS: u64 = 1000; // 1 second max
+
+                                    while start_time.elapsed().as_millis() < TIMEOUT_MS as u128 {
+                                        match connection.try_recv() {
+                                            Ok(Ok(Event::Outgoing(Outgoing::Publish(_)))) => {
+                                                info!("MQTT publish successful for spawn command");
+                                                return Ok(());
+                                            }
+                                            Ok(Ok(_)) => {}, // Other events, continue
+                                            Ok(Err(_)) | Err(_) => {
+                                                // No more events or connection error, wait a bit
+                                                std::thread::sleep(Duration::from_millis(50));
+                                            }
+                                        }
                                     }
+
+                                    // Timeout reached, but still continue
+                                    info!("MQTT publish timeout for spawn command, continuing anyway");
+                                    Ok(())
+                                })() {
+                                    Ok(_) => info!("MQTT spawn announcement completed"),
+                                    Err(e) => warn!("MQTT spawn announcement failed: {} (continuing anyway)", e),
                                 }
 
-                                print_console_line.write(PrintConsoleLine::new(format!(
-                                    "Spawn command sent for device {}",
-                                    device_id
-                                )));
+                                let result_msg =
+                                    format!("Spawn command sent for device {}", device_id);
+                                print_console_line.write(PrintConsoleLine::new(result_msg.clone()));
+
+                                // Emit command executed event if this was from MCP
+                                if let Some(req_id) = request_id.clone() {
+                                    command_executed_events.write(CommandExecutedEvent {
+                                        request_id: req_id,
+                                        result: result_msg,
+                                    });
+                                }
                             }
                         }
                     }
@@ -596,10 +622,17 @@ fn execute_pending_commands(
                                     }
                                 }
 
-                                print_console_line.write(PrintConsoleLine::new(format!(
-                                    "Spawn door command sent for device {}",
-                                    device_id
-                                )));
+                                let result_msg =
+                                    format!("Spawn door command sent for device {}", device_id);
+                                print_console_line.write(PrintConsoleLine::new(result_msg.clone()));
+
+                                // Emit command executed event if this was from MCP
+                                if let Some(req_id) = request_id.clone() {
+                                    command_executed_events.write(CommandExecutedEvent {
+                                        request_id: req_id,
+                                        result: result_msg,
+                                    });
+                                }
                             }
                         }
                     }

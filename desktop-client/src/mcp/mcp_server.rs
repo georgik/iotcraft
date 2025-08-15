@@ -413,7 +413,7 @@ fn handle_tool_call_request(params: Value, pending_commands: &mut PendingCommand
 }
 
 /// Check if a tool should be queued as a command instead of executed directly
-fn should_queue_as_command(tool_name: &str) -> bool {
+pub fn should_queue_as_command(tool_name: &str) -> bool {
     matches!(
         tool_name,
         "list_devices"
@@ -431,7 +431,7 @@ fn should_queue_as_command(tool_name: &str) -> bool {
 }
 
 /// Convert MCP tool call to console command string
-fn convert_tool_call_to_command(tool_name: &str, arguments: &Value) -> Option<String> {
+pub fn convert_tool_call_to_command(tool_name: &str, arguments: &Value) -> Option<String> {
     match tool_name {
         "list_devices" => {
             // List devices command
@@ -458,25 +458,28 @@ fn convert_tool_call_to_command(tool_name: &str, arguments: &Value) -> Option<St
         }
         "place_block" => {
             let block_type = arguments.get("block_type")?.as_str()?;
-            let x = arguments.get("x")?.as_i64()?;
-            let y = arguments.get("y")?.as_i64()?;
-            let z = arguments.get("z")?.as_i64()?;
+            // Handle both integer and floating point coordinates by converting to f64 first
+            let x = arguments.get("x")?.as_f64()? as i64;
+            let y = arguments.get("y")?.as_f64()? as i64;
+            let z = arguments.get("z")?.as_f64()? as i64;
             Some(format!("place {} {} {} {}", block_type, x, y, z))
         }
         "remove_block" => {
-            let x = arguments.get("x")?.as_i64()?;
-            let y = arguments.get("y")?.as_i64()?;
-            let z = arguments.get("z")?.as_i64()?;
+            // Handle both integer and floating point coordinates by converting to f64 first
+            let x = arguments.get("x")?.as_f64()? as i64;
+            let y = arguments.get("y")?.as_f64()? as i64;
+            let z = arguments.get("z")?.as_f64()? as i64;
             Some(format!("remove {} {} {}", x, y, z))
         }
         "create_wall" => {
             let block_type = arguments.get("block_type")?.as_str()?;
-            let x1 = arguments.get("x1")?.as_i64()?;
-            let y1 = arguments.get("y1")?.as_i64()?;
-            let z1 = arguments.get("z1")?.as_i64()?;
-            let x2 = arguments.get("x2")?.as_i64()?;
-            let y2 = arguments.get("y2")?.as_i64()?;
-            let z2 = arguments.get("z2")?.as_i64()?;
+            // Handle both integer and floating point coordinates by converting to f64 first
+            let x1 = arguments.get("x1")?.as_f64()? as i64;
+            let y1 = arguments.get("y1")?.as_f64()? as i64;
+            let z1 = arguments.get("z1")?.as_f64()? as i64;
+            let x2 = arguments.get("x2")?.as_f64()? as i64;
+            let y2 = arguments.get("y2")?.as_f64()? as i64;
+            let z2 = arguments.get("z2")?.as_f64()? as i64;
             Some(format!(
                 "wall {} {} {} {} {} {} {}",
                 block_type, x1, y1, z1, x2, y2, z2

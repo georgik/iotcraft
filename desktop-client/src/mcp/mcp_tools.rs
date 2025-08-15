@@ -93,15 +93,15 @@ pub fn create_default_tools() -> Vec<McpTool> {
                         "description": "Type of block to place"
                     },
                     "x": {
-                        "type": "integer",
+                        "type": "number",
                         "description": "X coordinate"
                     },
                     "y": {
-                        "type": "integer",
+                        "type": "number",
                         "description": "Y coordinate"
                     },
                     "z": {
-                        "type": "integer",
+                        "type": "number",
                         "description": "Z coordinate"
                     }
                 },
@@ -115,15 +115,15 @@ pub fn create_default_tools() -> Vec<McpTool> {
                 "type": "object",
                 "properties": {
                     "x": {
-                        "type": "integer",
+                        "type": "number",
                         "description": "X coordinate"
                     },
                     "y": {
-                        "type": "integer",
+                        "type": "number",
                         "description": "Y coordinate"
                     },
                     "z": {
-                        "type": "integer",
+                        "type": "number",
                         "description": "Z coordinate"
                     }
                 },
@@ -143,27 +143,27 @@ pub fn create_default_tools() -> Vec<McpTool> {
                         "description": "Type of block to use for the wall"
                     },
                     "x1": {
-                        "type": "integer",
+                        "type": "number",
                         "description": "Starting X coordinate"
                     },
                     "y1": {
-                        "type": "integer",
+                        "type": "number",
                         "description": "Starting Y coordinate"
                     },
                     "z1": {
-                        "type": "integer",
+                        "type": "number",
                         "description": "Starting Z coordinate"
                     },
                     "x2": {
-                        "type": "integer",
+                        "type": "number",
                         "description": "Ending X coordinate"
                     },
                     "y2": {
-                        "type": "integer",
+                        "type": "number",
                         "description": "Ending Y coordinate"
                     },
                     "z2": {
-                        "type": "integer",
+                        "type": "number",
                         "description": "Ending Z coordinate"
                     }
                 },
@@ -210,23 +210,23 @@ fn execute_place_block(args: Value, _world: &World) -> Result<McpToolResult, Mcp
         data: None,
     })?;
 
-    let x = args["x"].as_i64().ok_or_else(|| McpError {
+    let x = args["x"].as_f64().ok_or_else(|| McpError {
         code: -32602,
         message: "x parameter is required".to_string(),
         data: None,
-    })? as i32;
+    })?;
 
-    let y = args["y"].as_i64().ok_or_else(|| McpError {
+    let y = args["y"].as_f64().ok_or_else(|| McpError {
         code: -32602,
         message: "y parameter is required".to_string(),
         data: None,
-    })? as i32;
+    })?;
 
-    let z = args["z"].as_i64().ok_or_else(|| McpError {
+    let z = args["z"].as_f64().ok_or_else(|| McpError {
         code: -32602,
         message: "z parameter is required".to_string(),
         data: None,
-    })? as i32;
+    })?;
 
     // Note: In a real implementation, this would queue the command for execution
     // in the main Bevy thread via a command channel
@@ -234,7 +234,7 @@ fn execute_place_block(args: Value, _world: &World) -> Result<McpToolResult, Mcp
     Ok(McpToolResult {
         content: vec![McpContent::Text {
             text: format!(
-                "Queued placement of {} block at ({}, {}, {})",
+                "Queued placement of {} block at ({:.1}, {:.1}, {:.1})",
                 block_type, x, y, z
             ),
         }],
@@ -243,27 +243,27 @@ fn execute_place_block(args: Value, _world: &World) -> Result<McpToolResult, Mcp
 }
 
 fn execute_remove_block(args: Value, _world: &World) -> Result<McpToolResult, McpError> {
-    let x = args["x"].as_i64().ok_or_else(|| McpError {
+    let x = args["x"].as_f64().ok_or_else(|| McpError {
         code: -32602,
         message: "x parameter is required".to_string(),
         data: None,
-    })? as i32;
+    })?;
 
-    let y = args["y"].as_i64().ok_or_else(|| McpError {
+    let y = args["y"].as_f64().ok_or_else(|| McpError {
         code: -32602,
         message: "y parameter is required".to_string(),
         data: None,
-    })? as i32;
+    })?;
 
-    let z = args["z"].as_i64().ok_or_else(|| McpError {
+    let z = args["z"].as_f64().ok_or_else(|| McpError {
         code: -32602,
         message: "z parameter is required".to_string(),
         data: None,
-    })? as i32;
+    })?;
 
     Ok(McpToolResult {
         content: vec![McpContent::Text {
-            text: format!("Queued removal of block at ({}, {}, {})", x, y, z),
+            text: format!("Queued removal of block at ({:.1}, {:.1}, {:.1})", x, y, z),
         }],
         is_error: Some(false),
     })
@@ -276,48 +276,58 @@ fn execute_create_wall(args: Value, _world: &World) -> Result<McpToolResult, Mcp
         data: None,
     })?;
 
-    let x1 = args["x1"].as_i64().ok_or_else(|| McpError {
+    let x1 = args["x1"].as_f64().ok_or_else(|| McpError {
         code: -32602,
         message: "x1 parameter is required".to_string(),
         data: None,
-    })? as i32;
+    })?;
 
-    let y1 = args["y1"].as_i64().ok_or_else(|| McpError {
+    let y1 = args["y1"].as_f64().ok_or_else(|| McpError {
         code: -32602,
         message: "y1 parameter is required".to_string(),
         data: None,
-    })? as i32;
+    })?;
 
-    let z1 = args["z1"].as_i64().ok_or_else(|| McpError {
+    let z1 = args["z1"].as_f64().ok_or_else(|| McpError {
         code: -32602,
         message: "z1 parameter is required".to_string(),
         data: None,
-    })? as i32;
+    })?;
 
-    let x2 = args["x2"].as_i64().ok_or_else(|| McpError {
+    let x2 = args["x2"].as_f64().ok_or_else(|| McpError {
         code: -32602,
         message: "x2 parameter is required".to_string(),
         data: None,
-    })? as i32;
+    })?;
 
-    let y2 = args["y2"].as_i64().ok_or_else(|| McpError {
+    let y2 = args["y2"].as_f64().ok_or_else(|| McpError {
         code: -32602,
         message: "y2 parameter is required".to_string(),
         data: None,
-    })? as i32;
+    })?;
 
-    let z2 = args["z2"].as_i64().ok_or_else(|| McpError {
+    let z2 = args["z2"].as_f64().ok_or_else(|| McpError {
         code: -32602,
         message: "z2 parameter is required".to_string(),
         data: None,
-    })? as i32;
+    })?;
 
-    let volume = (x2 - x1 + 1) * (y2 - y1 + 1) * (z2 - z1 + 1);
+    // For volume calculation, we'll round to integers since blocks occupy discrete positions
+    let x1_rounded = x1.floor() as i32;
+    let y1_rounded = y1.floor() as i32;
+    let z1_rounded = z1.floor() as i32;
+    let x2_rounded = x2.floor() as i32;
+    let y2_rounded = y2.floor() as i32;
+    let z2_rounded = z2.floor() as i32;
+
+    let volume = (x2_rounded - x1_rounded + 1).max(0)
+        * (y2_rounded - y1_rounded + 1).max(0)
+        * (z2_rounded - z1_rounded + 1).max(0);
 
     Ok(McpToolResult {
         content: vec![McpContent::Text {
             text: format!(
-                "Queued creation of {} wall from ({}, {}, {}) to ({}, {}, {}) - {} blocks",
+                "Queued creation of {} wall from ({:.1}, {:.1}, {:.1}) to ({:.1}, {:.1}, {:.1}) - {} blocks",
                 block_type, x1, y1, z1, x2, y2, z2, volume
             ),
         }],
