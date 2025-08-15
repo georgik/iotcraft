@@ -28,9 +28,8 @@ impl Plugin for McpPlugin {
             sender: req_tx,
         });
 
-        // Add event types
-        app.add_event::<McpToolExecutionEvent>()
-            .add_event::<CommandExecutedEvent>();
+        // Add event types (CommandExecutedEvent is added unconditionally in main.rs)
+        app.add_event::<McpToolExecutionEvent>();
 
         // Initialize pending tool executions resource
         app.init_resource::<PendingToolExecutions>();
