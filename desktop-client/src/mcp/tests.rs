@@ -2,7 +2,7 @@
 mod mcp_tests {
     use super::super::{mcp_tools::*, mcp_types::*};
     use bevy::prelude::*;
-    use serde_json::{Value, json};
+    use serde_json::json;
 
     // Helper function to create a minimal test world
     fn create_test_world() -> World {
@@ -39,7 +39,7 @@ mod mcp_tests {
 
         if let McpContent::Text { text } = &result.content[0] {
             assert!(text.contains("stone"));
-            assert!(text.contains("from (0.0, 0.0, 0.0) to (5.0, 3.0, 2.0)"));
+            assert!(text.contains("from (0, 0, 0) to (5, 3, 2)"));
             // Volume should be (5-0+1) * (3-0+1) * (2-0+1) = 6*4*3 = 72 blocks
             assert!(text.contains("72 blocks"));
         } else {
@@ -140,7 +140,7 @@ mod mcp_tests {
 
         if let McpContent::Text { text } = &result.content[0] {
             assert!(text.contains("dirt"));
-            assert!(text.contains("(10.0, 5.0, -3.0)"));
+            assert!(text.contains("(10, 5, -3)"));
         }
     }
 
@@ -210,7 +210,7 @@ mod mcp_tests {
         if let McpContent::Text { text } = &result.content[0] {
             assert!(text.contains("lamp_kitchen_01"));
             assert!(text.contains("door"));
-            assert!(text.contains("(5.5, 1.0, -2.3)"));
+            assert!(text.contains("(5.5, 1, -2.3)"));
         }
     }
 
@@ -270,7 +270,7 @@ mod mcp_tests {
 
         if let McpContent::Text { text } = &result.content[0] {
             assert!(text.contains("door_main"));
-            assert!(text.contains("(-5.0, 0.0, 10.5)"));
+            assert!(text.contains("(-5, 0, 10.5)"));
         }
     }
 

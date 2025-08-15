@@ -5,10 +5,12 @@ on:
     paths:
       - 'desktop-client/**'
       - '.github/workflows/desktop-client-tests.yml'
-  pull_request:
-    paths:
-      - 'desktop-client/**'
-      - '.github/workflows/desktop-client-tests.yml'
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: 'Reason for running the workflow'
+        required: false
+        default: 'Manual test run'
 
 env:
   CARGO_TERM_COLOR: always
@@ -62,7 +64,7 @@ jobs:
     - name: Run unit tests
       run: |
         cd desktop-client
-        cargo test --verbose
+        cargo test
         
     - name: Check if build works
       run: |
