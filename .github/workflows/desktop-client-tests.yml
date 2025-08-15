@@ -60,9 +60,8 @@ jobs:
       run: |
         cd desktop-client
         cargo fmt --all -- --check
-      continue-on-error: true
 
-    - name: Run unit tests (fallback)
+    - name: Run unit tests
       run: |
         cd desktop-client
         mkdir -p test-results
