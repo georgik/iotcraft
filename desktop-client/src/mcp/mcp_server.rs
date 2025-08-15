@@ -29,7 +29,6 @@ impl Plugin for McpPlugin {
         });
 
         // Add event types (CommandExecutedEvent is added unconditionally in main.rs)
-        app.add_event::<McpToolExecutionEvent>();
 
         // Initialize pending tool executions resource
         app.init_resource::<PendingToolExecutions>();
@@ -229,10 +228,6 @@ async fn handle_json_rpc_request(
 
     // Package the request for the Bevy system
     let mcp_request = McpRequest {
-        id: id
-            .as_ref()
-            .map(|v| v.to_string())
-            .unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
         method: method.to_string(),
         params,
         response_sender: response_tx,
@@ -289,7 +284,6 @@ async fn handle_json_rpc_request(
 /// System to process MCP requests in Bevy's main thread
 fn process_mcp_requests(
     request_channel: ResMut<McpRequestChannel>,
-    _tool_execution_events: EventWriter<McpToolExecutionEvent>,
     tool_registry: Res<McpToolRegistry>,
     mut pending_commands: ResMut<PendingCommands>,
     mut pending_executions: ResMut<PendingToolExecutions>,
@@ -365,49 +359,6 @@ fn handle_tools_list_request(tool_registry: &McpToolRegistry) -> Value {
 
     json!({
         "tools": tool_registry.tools
-    })
-}
-
-/// Handle tools/call request
-fn handle_tool_call_request(params: Value, pending_commands: &mut PendingCommands) -> Value {
-    debug!("Handling tool call request: {}", params);
-
-    let tool_name = match params.get("name").and_then(|n| n.as_str()) {
-        Some(name) => name,
-        None => {
-            return json!({
-                "error": {
-                    "code": error_codes::INVALID_PARAMS,
-                    "message": "Tool name is required"
-                }
-            });
-        }
-    };
-
-    let arguments = params.get("arguments").cloned().unwrap_or(json!({}));
-
-    // For certain tools, we queue commands instead of executing immediately
-    // This maintains compatibility with the existing command system
-    if should_queue_as_command(tool_name) {
-        let command = convert_tool_call_to_command(tool_name, &arguments);
-        if let Some(cmd) = command {
-            pending_commands.commands.push(cmd);
-            return json!({
-                "content": [{
-                    "type": "text",
-                    "text": format!("Queued command for tool '{}'", tool_name)
-                }]
-            });
-        }
-    }
-
-    // For now, we only support queued commands as most tools need world access
-    // Read-only tools could be implemented here in the future
-    json!({
-        "error": {
-            "code": error_codes::METHOD_NOT_FOUND,
-            "message": format!("Tool '{}' must be queued for execution", tool_name)
-        }
     })
 }
 
@@ -574,9 +525,6 @@ fn handle_async_tool_call_request(
             pending_executions.executions.insert(
                 request_id.clone(),
                 PendingToolExecution {
-                    request_id: request_id.clone(),
-                    tool_name: tool_name.to_string(),
-                    command: cmd.clone(),
                     response_sender: request.response_sender,
                 },
             );

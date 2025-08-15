@@ -81,17 +81,64 @@ fn initialize_world_discovery(
     thread::spawn(move || {
         info!("Starting world discovery thread...");
 
+        // Test initial connection
+        let mut opts = MqttOptions::new("iotcraft-world-discovery", &mqtt_host, mqtt_port);
+        opts.set_keep_alive(Duration::from_secs(30));
+        opts.set_clean_session(false);
+
+        let (client, mut conn) = Client::new(opts, 10);
+
+        let mut initial_connection_success = false;
+        let mut connection_attempts = 0;
+
+        // Try initial connection
+        for event in conn.iter() {
+            match event {
+                Ok(Event::Incoming(Incoming::ConnAck(_))) => {
+                    info!("World discovery connected successfully - world sharing enabled");
+                    initial_connection_success = true;
+
+                    // Subscribe to world discovery topics
+                    if let Err(e) = client.subscribe("iotcraft/worlds/+/info", QoS::AtLeastOnce) {
+                        error!("Failed to subscribe to world info: {}", e);
+                        break;
+                    }
+                    if let Err(e) = client.subscribe("iotcraft/worlds/+/data", QoS::AtLeastOnce) {
+                        error!("Failed to subscribe to world data: {}", e);
+                        break;
+                    }
+                    if let Err(e) = client.subscribe("iotcraft/worlds/+/changes", QoS::AtLeastOnce)
+                    {
+                        error!("Failed to subscribe to world changes: {}", e);
+                        break;
+                    }
+
+                    info!("Subscribed to world discovery topics");
+                    break;
+                }
+                Err(e) => {
+                    error!("Initial world discovery connection failed: {:?}", e);
+                    connection_attempts += 1;
+                    if connection_attempts > 2 {
+                        break;
+                    }
+                }
+                Ok(_) => {}
+            }
+        }
+
+        if !initial_connection_success {
+            info!("MQTT connection not available - world discovery disabled");
+            return; // Exit thread - world discovery is disabled
+        }
+
+        // Continue with normal world discovery
         loop {
             let mut opts = MqttOptions::new("iotcraft-world-discovery", &mqtt_host, mqtt_port);
             opts.set_keep_alive(Duration::from_secs(30));
             opts.set_clean_session(false);
 
             let (client, mut conn) = Client::new(opts, 10);
-            info!(
-                "World discovery connecting to {}:{}...",
-                mqtt_host, mqtt_port
-            );
-
             let mut connected = false;
             let subscribed = false;
             let mut world_cache: HashMap<String, SharedWorldInfo> = HashMap::new();
@@ -100,10 +147,9 @@ fn initialize_world_discovery(
             for event in conn.iter() {
                 match event {
                     Ok(Event::Incoming(Incoming::ConnAck(_))) => {
-                        info!("World discovery connected successfully!");
                         connected = true;
 
-                        // Subscribe to world discovery topics
+                        // Subscribe to topics
                         if let Err(e) = client.subscribe("iotcraft/worlds/+/info", QoS::AtLeastOnce)
                         {
                             error!("Failed to subscribe to world info: {}", e);
@@ -121,7 +167,6 @@ fn initialize_world_discovery(
                             break;
                         }
 
-                        info!("Subscribed to world discovery topics");
                         let _ = subscribed; // Intentionally unused for now
                         break;
                     }
@@ -129,7 +174,6 @@ fn initialize_world_discovery(
                         if !subscribed {
                             continue;
                         }
-
                         handle_discovery_message(&p, &mut world_cache, &response_tx);
                     }
                     Ok(_) => {}

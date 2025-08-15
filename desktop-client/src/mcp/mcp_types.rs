@@ -8,16 +8,12 @@ pub const MCP_VERSION: &str = "2024-11-05";
 /// Resource to manage MCP server state
 #[derive(Resource)]
 pub struct McpServerState {
-    pub active_connections: usize,
     pub server_task: Option<bevy::tasks::Task<()>>,
 }
 
 impl Default for McpServerState {
     fn default() -> Self {
-        Self {
-            active_connections: 0,
-            server_task: None,
-        }
+        Self { server_task: None }
     }
 }
 
@@ -28,28 +24,12 @@ pub struct McpRequestChannel {
     pub sender: async_channel::Sender<McpRequest>,
 }
 
-/// Channel for sending MCP responses back to clients
-#[derive(Resource)]
-pub struct McpResponseChannel {
-    pub sender: tokio::sync::mpsc::UnboundedSender<McpResponse>,
-    pub receiver: tokio::sync::mpsc::UnboundedReceiver<McpResponse>,
-}
-
 /// MCP Request message
 #[derive(Debug)]
 pub struct McpRequest {
-    pub id: String,
     pub method: String,
     pub params: serde_json::Value,
     pub response_sender: tokio::sync::oneshot::Sender<serde_json::Value>,
-}
-
-/// MCP Response message
-#[derive(Debug, Clone)]
-pub struct McpResponse {
-    pub id: String,
-    pub result: Option<serde_json::Value>,
-    pub error: Option<McpError>,
 }
 
 /// MCP Error
@@ -183,15 +163,6 @@ pub enum McpContent {
     Resource { resource: McpResource },
 }
 
-/// Event for MCP tool execution requests
-#[derive(Event)]
-pub struct McpToolExecutionEvent {
-    pub request_id: String,
-    pub tool_name: String,
-    pub arguments: serde_json::Value,
-    pub response_sender: tokio::sync::oneshot::Sender<Result<McpToolResult, McpError>>,
-}
-
 /// Resource to hold MQTT client for MCP tools
 #[derive(Resource)]
 pub struct McpMqttClient {
@@ -201,9 +172,6 @@ pub struct McpMqttClient {
 /// Pending MCP tool execution request
 #[derive(Debug)]
 pub struct PendingToolExecution {
-    pub request_id: String,
-    pub tool_name: String,
-    pub command: String,
     pub response_sender: tokio::sync::oneshot::Sender<serde_json::Value>,
 }
 
