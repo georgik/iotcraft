@@ -77,6 +77,12 @@ pub struct CreateWorldEvent {
     pub description: String,
 }
 
+/// Event to request deleting a world
+#[derive(Event)]
+pub struct DeleteWorldEvent {
+    pub world_name: String,
+}
+
 impl Default for WorldMetadata {
     fn default() -> Self {
         Self {

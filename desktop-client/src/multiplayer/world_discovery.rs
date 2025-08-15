@@ -452,6 +452,7 @@ fn load_shared_world_data(
             crate::environment::BlockType::QuartzBlock => "textures/quartz_block.webp",
             crate::environment::BlockType::GlassPane => "textures/glass_pane.webp",
             crate::environment::BlockType::CyanTerracotta => "textures/cyan_terracotta.webp",
+            crate::environment::BlockType::Water => "textures/water.webp",
         };
         let texture: Handle<Image> = asset_server.load(texture_path);
         let material = materials.add(StandardMaterial {
@@ -515,6 +516,7 @@ fn apply_world_change(
                 crate::environment::BlockType::QuartzBlock => "textures/quartz_block.webp",
                 crate::environment::BlockType::GlassPane => "textures/glass_pane.webp",
                 crate::environment::BlockType::CyanTerracotta => "textures/cyan_terracotta.webp",
+                crate::environment::BlockType::Water => "textures/water.webp",
             };
             let texture: Handle<Image> = asset_server.load(texture_path);
             let material = materials.add(StandardMaterial {

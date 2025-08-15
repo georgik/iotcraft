@@ -32,6 +32,7 @@ pub enum BlockType {
     QuartzBlock,
     GlassPane,
     CyanTerracotta,
+    Water,
 }
 
 /// Resource to manage the voxel world state

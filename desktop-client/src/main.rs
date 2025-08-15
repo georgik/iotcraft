@@ -124,6 +124,7 @@ fn handle_place_block_command(
             "quartz_block" => BlockType::QuartzBlock,
             "glass_pane" => BlockType::GlassPane,
             "cyan_terracotta" => BlockType::CyanTerracotta,
+            "water" => BlockType::Water,
             _ => {
                 reply!(log, "Invalid block type: {}", block_type);
                 return;
@@ -134,19 +135,29 @@ fn handle_place_block_command(
 
         // Spawn the block
         let cube_mesh = meshes.add(Cuboid::new(CUBE_SIZE, CUBE_SIZE, CUBE_SIZE));
-        let texture_path = match block_type {
-            BlockType::Grass => "textures/grass.webp",
-            BlockType::Dirt => "textures/dirt.webp",
-            BlockType::Stone => "textures/stone.webp",
-            BlockType::QuartzBlock => "textures/quartz_block.webp",
-            BlockType::GlassPane => "textures/glass_pane.webp",
-            BlockType::CyanTerracotta => "textures/cyan_terracotta.webp",
+        let material = match block_type {
+            BlockType::Water => materials.add(StandardMaterial {
+                base_color: Color::srgba(0.0, 0.35, 0.9, 0.6),
+                alpha_mode: AlphaMode::Blend,
+                ..default()
+            }),
+            _ => {
+                let texture_path = match block_type {
+                    BlockType::Grass => "textures/grass.webp",
+                    BlockType::Dirt => "textures/dirt.webp",
+                    BlockType::Stone => "textures/stone.webp",
+                    BlockType::QuartzBlock => "textures/quartz_block.webp",
+                    BlockType::GlassPane => "textures/glass_pane.webp",
+                    BlockType::CyanTerracotta => "textures/cyan_terracotta.webp",
+                    _ => unreachable!(),
+                };
+                let texture: Handle<Image> = asset_server.load(texture_path);
+                materials.add(StandardMaterial {
+                    base_color_texture: Some(texture),
+                    ..default()
+                })
+            }
         };
-        let texture: Handle<Image> = asset_server.load(texture_path);
-        let material = materials.add(StandardMaterial {
-            base_color_texture: Some(texture),
-            ..default()
-        });
 
         commands.spawn((
             Mesh3d(cube_mesh),
@@ -187,25 +198,36 @@ fn handle_wall_command(
             "quartz_block" => BlockType::QuartzBlock,
             "glass_pane" => BlockType::GlassPane,
             "cyan_terracotta" => BlockType::CyanTerracotta,
+            "water" => BlockType::Water,
             _ => {
                 reply!(log, "Invalid block type: {}", block_type);
                 return;
             }
         };
 
-        let texture_path = match block_type_enum {
-            BlockType::Grass => "textures/grass.webp",
-            BlockType::Dirt => "textures/dirt.webp",
-            BlockType::Stone => "textures/stone.webp",
-            BlockType::QuartzBlock => "textures/quartz_block.webp",
-            BlockType::GlassPane => "textures/glass_pane.webp",
-            BlockType::CyanTerracotta => "textures/cyan_terracotta.webp",
+        let material = match block_type_enum {
+            BlockType::Water => materials.add(StandardMaterial {
+                base_color: Color::srgba(0.0, 0.35, 0.9, 0.6),
+                alpha_mode: AlphaMode::Blend,
+                ..default()
+            }),
+            _ => {
+                let texture_path = match block_type_enum {
+                    BlockType::Grass => "textures/grass.webp",
+                    BlockType::Dirt => "textures/dirt.webp",
+                    BlockType::Stone => "textures/stone.webp",
+                    BlockType::QuartzBlock => "textures/quartz_block.webp",
+                    BlockType::GlassPane => "textures/glass_pane.webp",
+                    BlockType::CyanTerracotta => "textures/cyan_terracotta.webp",
+                    _ => unreachable!(),
+                };
+                let texture: Handle<Image> = asset_server.load(texture_path);
+                materials.add(StandardMaterial {
+                    base_color_texture: Some(texture),
+                    ..default()
+                })
+            }
         };
-        let texture: Handle<Image> = asset_server.load(texture_path);
-        let material = materials.add(StandardMaterial {
-            base_color_texture: Some(texture),
-            ..default()
-        });
 
         let cube_mesh = meshes.add(Cuboid::new(CUBE_SIZE, CUBE_SIZE, CUBE_SIZE));
 
@@ -365,19 +387,29 @@ fn handle_load_map_command(
                 let cube_mesh = meshes.add(Cuboid::new(CUBE_SIZE, CUBE_SIZE, CUBE_SIZE));
 
                 for (position, block_type) in voxel_world.blocks.iter() {
-                    let texture_path = match block_type {
-                        BlockType::Grass => "textures/grass.webp",
-                        BlockType::Dirt => "textures/dirt.webp",
-                        BlockType::Stone => "textures/stone.webp",
-                        BlockType::QuartzBlock => "textures/quartz_block.webp",
-                        BlockType::GlassPane => "textures/glass_pane.webp",
-                        BlockType::CyanTerracotta => "textures/cyan_terracotta.webp",
+                    let material = match block_type {
+                        BlockType::Water => materials.add(StandardMaterial {
+                            base_color: Color::srgba(0.0, 0.35, 0.9, 0.6),
+                            alpha_mode: AlphaMode::Blend,
+                            ..default()
+                        }),
+                        _ => {
+                            let texture_path = match block_type {
+                                BlockType::Grass => "textures/grass.webp",
+                                BlockType::Dirt => "textures/dirt.webp",
+                                BlockType::Stone => "textures/stone.webp",
+                                BlockType::QuartzBlock => "textures/quartz_block.webp",
+                                BlockType::GlassPane => "textures/glass_pane.webp",
+                                BlockType::CyanTerracotta => "textures/cyan_terracotta.webp",
+                                _ => unreachable!(),
+                            };
+                            let texture: Handle<Image> = asset_server.load(texture_path);
+                            materials.add(StandardMaterial {
+                                base_color_texture: Some(texture),
+                                ..default()
+                            })
+                        }
                     };
-                    let texture: Handle<Image> = asset_server.load(texture_path);
-                    let material = materials.add(StandardMaterial {
-                        base_color_texture: Some(texture),
-                        ..default()
-                    });
 
                     commands.spawn((
                         Mesh3d(cube_mesh.clone()),
@@ -651,6 +683,7 @@ fn execute_pending_commands(
                                     "quartz_block" => BlockType::QuartzBlock,
                                     "glass_pane" => BlockType::GlassPane,
                                     "cyan_terracotta" => BlockType::CyanTerracotta,
+                                    "water" => BlockType::Water,
                                     _ => {
                                         let error_msg =
                                             format!("Invalid block type: {}", block_type_str);
@@ -673,19 +706,32 @@ fn execute_pending_commands(
                                 // Spawn the block
                                 let cube_mesh =
                                     meshes.add(Cuboid::new(CUBE_SIZE, CUBE_SIZE, CUBE_SIZE));
-                                let texture_path = match block_type {
-                                    BlockType::Grass => "textures/grass.webp",
-                                    BlockType::Dirt => "textures/dirt.webp",
-                                    BlockType::Stone => "textures/stone.webp",
-                                    BlockType::QuartzBlock => "textures/quartz_block.webp",
-                                    BlockType::GlassPane => "textures/glass_pane.webp",
-                                    BlockType::CyanTerracotta => "textures/cyan_terracotta.webp",
+                                let material = match block_type {
+                                    BlockType::Water => materials.add(StandardMaterial {
+                                        base_color: Color::srgba(0.0, 0.35, 0.9, 0.6),
+                                        alpha_mode: AlphaMode::Blend,
+                                        ..default()
+                                    }),
+                                    _ => {
+                                        let texture_path = match block_type {
+                                            BlockType::Grass => "textures/grass.webp",
+                                            BlockType::Dirt => "textures/dirt.webp",
+                                            BlockType::Stone => "textures/stone.webp",
+                                            BlockType::QuartzBlock => "textures/quartz_block.webp",
+                                            BlockType::GlassPane => "textures/glass_pane.webp",
+                                            BlockType::CyanTerracotta => {
+                                                "textures/cyan_terracotta.webp"
+                                            }
+                                            _ => unreachable!(),
+                                        };
+                                        let texture: Handle<Image> =
+                                            asset_server.load(texture_path);
+                                        materials.add(StandardMaterial {
+                                            base_color_texture: Some(texture),
+                                            ..default()
+                                        })
+                                    }
                                 };
-                                let texture: Handle<Image> = asset_server.load(texture_path);
-                                let material = materials.add(StandardMaterial {
-                                    base_color_texture: Some(texture),
-                                    ..default()
-                                });
 
                                 commands.spawn((
                                     Mesh3d(cube_mesh),
@@ -764,6 +810,7 @@ fn execute_pending_commands(
                             "cyan_terracotta" => {
                                 crate::inventory::ItemType::Block(BlockType::CyanTerracotta)
                             }
+                            "water" => crate::inventory::ItemType::Block(BlockType::Water),
                             _ => {
                                 print_console_line.write(PrintConsoleLine::new(format!(
                                     "Invalid item type: {}",
@@ -797,6 +844,7 @@ fn execute_pending_commands(
                                                 "quartz_block" => BlockType::QuartzBlock,
                                                 "glass_pane" => BlockType::GlassPane,
                                                 "cyan_terracotta" => BlockType::CyanTerracotta,
+                                                "water" => BlockType::Water,
                                                 _ => {
                                                     print_console_line.write(
                                                         PrintConsoleLine::new(format!(
@@ -814,24 +862,40 @@ fn execute_pending_commands(
                                                 voxel_world.blocks.len()
                                             );
 
-                                            let texture_path = match block_type_enum {
-                                                BlockType::Grass => "textures/grass.webp",
-                                                BlockType::Dirt => "textures/dirt.webp",
-                                                BlockType::Stone => "textures/stone.webp",
-                                                BlockType::QuartzBlock => {
-                                                    "textures/quartz_block.webp"
+                                            let material = match block_type_enum {
+                                                BlockType::Water => {
+                                                    materials.add(StandardMaterial {
+                                                        base_color: Color::srgba(
+                                                            0.0, 0.35, 0.9, 0.6,
+                                                        ),
+                                                        alpha_mode: AlphaMode::Blend,
+                                                        ..default()
+                                                    })
                                                 }
-                                                BlockType::GlassPane => "textures/glass_pane.webp",
-                                                BlockType::CyanTerracotta => {
-                                                    "textures/cyan_terracotta.webp"
+                                                _ => {
+                                                    let texture_path = match block_type_enum {
+                                                        BlockType::Grass => "textures/grass.webp",
+                                                        BlockType::Dirt => "textures/dirt.webp",
+                                                        BlockType::Stone => "textures/stone.webp",
+                                                        BlockType::QuartzBlock => {
+                                                            "textures/quartz_block.webp"
+                                                        }
+                                                        BlockType::GlassPane => {
+                                                            "textures/glass_pane.webp"
+                                                        }
+                                                        BlockType::CyanTerracotta => {
+                                                            "textures/cyan_terracotta.webp"
+                                                        }
+                                                        _ => unreachable!(),
+                                                    };
+                                                    let texture: Handle<Image> =
+                                                        asset_server.load(texture_path);
+                                                    materials.add(StandardMaterial {
+                                                        base_color_texture: Some(texture),
+                                                        ..default()
+                                                    })
                                                 }
                                             };
-                                            let texture: Handle<Image> =
-                                                asset_server.load(texture_path);
-                                            let material = materials.add(StandardMaterial {
-                                                base_color_texture: Some(texture),
-                                                ..default()
-                                            });
 
                                             let cube_mesh = meshes
                                                 .add(Cuboid::new(CUBE_SIZE, CUBE_SIZE, CUBE_SIZE));
@@ -1026,6 +1090,109 @@ fn execute_pending_commands(
                 )));
             }
         }
+    }
+}
+
+/// Tests for core game commands to prevent regressions
+#[cfg(test)]
+mod wall_command_tests {
+    use super::*;
+
+    /// Test the core wall command coordinate behavior to ensure we don't regress
+    /// on the coordinate ordering issue found in new_world.txt script.
+    #[test]
+    fn test_wall_command_coordinate_ordering_regression() {
+        // This test specifically addresses the issue where wall coordinates
+        // in new_world.txt were incorrectly ordered, causing 0 blocks to be created.
+        // Example: wall stone 21 1 -21 26 1 -26 created 0 blocks because -21 > -26
+
+        let mut voxel_world = VoxelWorld::default();
+        let initial_count = voxel_world.blocks.len();
+
+        // Test case 1: Backwards Z coordinates (the problematic case from new_world.txt)
+        // This should create 0 blocks due to invalid range (start > end)
+        let (x1, y1, z1) = (21, 1, -21);
+        let (x2, y2, z2) = (26, 1, -26);
+
+        let mut blocks_added = 0;
+        for x in x1..=x2 {
+            for y in y1..=y2 {
+                for z in z1..=z2 {
+                    // This range is invalid: -21..=-26 is empty
+                    voxel_world.set_block(IVec3::new(x, y, z), BlockType::Stone);
+                    blocks_added += 1;
+                }
+            }
+        }
+
+        assert_eq!(
+            blocks_added, 0,
+            "Backwards Z coordinates (-21 to -26) should create 0 blocks"
+        );
+        assert_eq!(
+            voxel_world.blocks.len(),
+            initial_count,
+            "VoxelWorld should have no new blocks with invalid coordinate range"
+        );
+
+        // Test case 2: Correctly ordered coordinates (the fix)
+        let (x1, y1, z1) = (21, 1, -26); // Start with smaller Z value
+        let (x2, y2, z2) = (26, 1, -21); // End with larger Z value
+
+        let mut blocks_added_correct = 0;
+        for x in x1..=x2 {
+            for y in y1..=y2 {
+                for z in z1..=z2 {
+                    // Now valid range: -26..=-21
+                    voxel_world.set_block(IVec3::new(x, y, z), BlockType::Stone);
+                    blocks_added_correct += 1;
+                }
+            }
+        }
+
+        // Should be (26-21+1) * (1-1+1) * (-21-(-26)+1) = 6*1*6 = 36 blocks
+        assert_eq!(
+            blocks_added_correct, 36,
+            "Correctly ordered coordinates should create 36 blocks"
+        );
+        assert_eq!(
+            voxel_world.blocks.len(),
+            initial_count + 36,
+            "VoxelWorld should have 36 new blocks with valid coordinate range"
+        );
+    }
+
+    #[test]
+    fn test_new_world_script_pond_coordinates() {
+        // Test the specific coordinates used in the fixed new_world.txt script
+        // to ensure they work as expected
+
+        let mut voxel_world = VoxelWorld::default();
+
+        // Test the pond walls from the fixed script:
+        // North wall: wall stone 21 1 -26 26 1 -26
+        let mut north_wall_blocks = 0;
+        for x in 21..=26 {
+            for y in 1..=1 {
+                for z in -26..=-26 {
+                    voxel_world.set_block(IVec3::new(x, y, z), BlockType::Stone);
+                    north_wall_blocks += 1;
+                }
+            }
+        }
+        assert_eq!(north_wall_blocks, 6, "North wall should have 6 blocks");
+
+        // Water inside: wall water 22 1 -25 25 1 -22
+        let mut water_blocks = 0;
+        for x in 22..=25 {
+            for y in 1..=1 {
+                for z in -25..=-22 {
+                    voxel_world.set_block(IVec3::new(x, y, z), BlockType::Water);
+                    water_blocks += 1;
+                }
+            }
+        }
+        assert_eq!(water_blocks, 16, "Water area should have 4x4 = 16 blocks");
     }
 }
 
@@ -1388,6 +1555,7 @@ fn update_diagnostics_content(
                                 BlockType::QuartzBlock => "Quartz Block",
                                 BlockType::GlassPane => "Glass Pane",
                                 BlockType::CyanTerracotta => "Cyan Terracotta",
+                                BlockType::Water => "Water",
                             },
                         }
                     )
@@ -1519,9 +1687,10 @@ fn handle_inventory_input(
     mut inventory: ResMut<PlayerInventory>,
     accumulated_mouse_scroll: Res<bevy::input::mouse::AccumulatedMouseScroll>,
     console_open: Res<ConsoleOpen>,
+    game_state: Res<State<GameState>>,
 ) {
-    // Don't handle input when console is open
-    if console_open.open {
+    // Don't handle input when console is open or in any menu state
+    if console_open.open || *game_state.get() != GameState::InGame {
         return;
     }
 

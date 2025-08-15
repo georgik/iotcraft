@@ -170,6 +170,7 @@ pub fn place_block_system(
                     BlockType::QuartzBlock => "textures/quartz_block.webp",
                     BlockType::GlassPane => "textures/glass_pane.webp",
                     BlockType::CyanTerracotta => "textures/cyan_terracotta.webp",
+                    BlockType::Water => "textures/water.webp",
                 };
                 let texture: Handle<Image> = asset_server.load(texture_path);
                 let material = materials.add(StandardMaterial {
@@ -220,6 +221,7 @@ pub fn handle_give_command(
             "quartz_block" => BlockType::QuartzBlock,
             "glass_pane" => BlockType::GlassPane,
             "cyan_terracotta" => BlockType::CyanTerracotta,
+            "water" => BlockType::Water,
             _ => {
                 reply!(log, "Invalid item type: {}", item_type);
                 return;
