@@ -9,7 +9,7 @@ bevy_console = "0.14.1"
 clap = { version = "4.0", features = ["derive"] }
 rumqttc = "0.24.0"
 rumqttd = "0.19.0"
-tokio = "1.45.1"
+tokio = { version = "1.45.1", features = ["rt-multi-thread", "macros"] }
 tracing = "0.1.41"
 tracing-subscriber = "0.3.19"
 log = "0.4.27"
@@ -25,3 +25,16 @@ fluent-bundle = "0.16.0"
 fluent-syntax = "0.12.0"
 unic-langid = "0.9.6"
 avian3d = "0.3.1"
+# MCP (Model Context Protocol) support
+tokio-util = { version = "0.7", features = ["codec"] }
+futures = "0.3"
+anyhow = "1.0"
+uuid = { version = "1.0", features = ["v4"] }
+bytes = "1.0"
+env_logger = "0.11.6"
+# HTTP server support for mcp-remote
+axum = "0.7"
+tower = "0.4"
+tower-http = { version = "0.5", features = ["cors"] }
+# Async channels for Bevy-compatible communication
+async-channel = "2.0"

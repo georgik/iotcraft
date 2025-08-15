@@ -21,10 +21,12 @@ mod fonts;
 mod interaction;
 mod inventory;
 mod localization;
+mod mcp;
 mod minimap;
 mod mqtt;
 mod script;
 mod ui;
+use mcp::mcp_types::CommandExecutedEvent;
 
 mod multiplayer;
 mod physics_manager;
@@ -95,6 +97,9 @@ struct Args {
     /// Player ID override for multiplayer testing (default: auto-generated)
     #[arg(short, long)]
     player_id: Option<String>,
+    /// Run in MCP (Model Context Protocol) server mode
+    #[arg(long)]
+    mcp: bool,
 }
 
 fn handle_place_block_command(
@@ -412,6 +417,7 @@ fn handle_load_map_command(
 fn execute_pending_commands(
     mut pending_commands: ResMut<crate::script::script_types::PendingCommands>,
     mut print_console_line: EventWriter<PrintConsoleLine>,
+    mut command_executed_events: EventWriter<CommandExecutedEvent>,
     mut blink_state: ResMut<BlinkState>,
     temperature: Res<TemperatureResource>,
     mqtt_config: Res<MqttConfig>,
@@ -421,14 +427,24 @@ fn execute_pending_commands(
     mut materials: ResMut<Assets<StandardMaterial>>,
     asset_server: Res<AssetServer>,
     query: Query<(Entity, &VoxelBlock)>,
+    device_query: Query<(&DeviceEntity, &Transform), Without<Camera>>,
     mut inventory: ResMut<PlayerInventory>,
     mut camera_query: Query<(&mut Transform, &mut CameraController), With<Camera>>,
 ) {
     for command in pending_commands.commands.drain(..) {
         info!("Executing queued command: {}", command);
 
+        // Check if command has a request ID (format: "command #request_id")
+        let (actual_command, request_id) = if let Some(hash_pos) = command.rfind(" #") {
+            let (cmd, id_part) = command.split_at(hash_pos);
+            let request_id = id_part.trim_start_matches(" #").to_string();
+            (cmd.to_string(), Some(request_id))
+        } else {
+            (command.clone(), None)
+        };
+
         // Parse command string and dispatch to appropriate handler
-        let parts: Vec<&str> = command.split_whitespace().collect();
+        let parts: Vec<&str> = actual_command.split_whitespace().collect();
         if parts.is_empty() {
             continue;
         }
@@ -897,6 +913,39 @@ fn execute_pending_commands(
                     }
                 }
             }
+            "list" => {
+                // Handle list devices command
+                let device_list: Vec<String> = device_query
+                    .iter()
+                    .map(|(device, transform)| {
+                        format!(
+                            "{}: {} at ({:.1}, {:.1}, {:.1})",
+                            device.device_id,
+                            device.device_type,
+                            transform.translation.x,
+                            transform.translation.y,
+                            transform.translation.z
+                        )
+                    })
+                    .collect();
+
+                let result_text = if device_list.is_empty() {
+                    "No devices found".to_string()
+                } else {
+                    format!("Devices:\n{}", device_list.join("\n"))
+                };
+
+                print_console_line.write(PrintConsoleLine::new(result_text.clone()));
+                info!("Executed list command, found {} devices", device_list.len());
+
+                // Emit command executed event if this was from MCP
+                if let Some(req_id) = request_id {
+                    command_executed_events.write(CommandExecutedEvent {
+                        request_id: req_id,
+                        result: result_text,
+                    });
+                }
+            }
             _ => {
                 print_console_line.write(PrintConsoleLine::new(format!(
                     "Unknown command: {}",
@@ -909,6 +958,9 @@ fn execute_pending_commands(
 
 fn main() {
     let args = Args::parse();
+
+    // Initialize logging (TCP-only MCP server doesn't interfere with stdout)
+    env_logger::init();
 
     // Note: Script execution is now handled by the ScriptPlugin
 
@@ -969,8 +1021,15 @@ fn main() {
         .add_plugins(SharedWorldPlugin)
         .add_plugins(WorldPublisherPlugin)
         .add_plugins(WorldDiscoveryPlugin)
-        .add_plugins(PlayerAvatarPlugin)
-        .init_state::<GameState>()
+        .add_plugins(PlayerAvatarPlugin);
+
+    // Add MCP plugin only if --mcp flag is provided
+    if args.mcp {
+        info!("Starting in MCP server mode");
+        app.add_plugins(mcp::McpPlugin);
+    }
+
+    app.init_state::<GameState>()
         .insert_resource(ConsoleConfiguration {
             keys: vec![KeyCode::F12],
             left_pos: 200.0,
