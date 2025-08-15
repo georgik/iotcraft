@@ -62,10 +62,6 @@ pub struct LampControlMessage {
     pub source: String, // "player_interaction"
 }
 
-/// Visual indicator for the player's "hand" or interaction cursor
-#[derive(Component)]
-pub struct PlayerHand;
-
 /// Material handles for lamp states
 #[derive(Resource)]
 pub struct LampMaterials {

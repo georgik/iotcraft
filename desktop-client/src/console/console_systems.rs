@@ -9,18 +9,8 @@ use super::console_types::*;
 use crate::config::MqttConfig;
 use crate::devices::{DeviceEntity, device_positioning::DevicePositionUpdateEvent};
 
-pub struct ConsolePlugin;
-
-impl Plugin for ConsolePlugin {
-    fn build(&self, app: &mut App) {
-        app.insert_resource(BlinkState::default());
-        // Note: Console commands are now registered in main.rs using .add_console_command()
-        // This plugin only provides the BlinkState resource and handler functions
-    }
-}
-
-// Console handler functions are now implemented in main.rs
-// This module only provides the ConsolePlugin and shared types
+// Console handler functions are implemented in main.rs
+// This module only provides shared types and handler functions
 
 pub fn handle_spawn_door_command(
     mut log: ConsoleCommand<SpawnDoorCommand>,

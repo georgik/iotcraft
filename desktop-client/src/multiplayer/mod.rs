@@ -33,9 +33,6 @@ pub struct RemotePlayer {
     // RemotePlayer component marker - no fields currently needed
 }
 
-#[derive(Component)]
-pub struct RemoteNameTag;
-
 #[derive(Serialize, Deserialize, Debug, Clone)]
 struct PoseMessage {
     player_id: String,

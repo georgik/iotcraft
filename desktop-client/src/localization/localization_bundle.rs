@@ -41,8 +41,15 @@ impl LocalizationBundle {
         Ok(())
     }
 
-    /// Get localized text for a key
-    pub fn get_text(&self, language: Language, key: &str, args: &[(String, String)]) -> String {
+    /// Get localized text for a key with fallback language support
+    pub fn get_text_with_fallback(
+        &self,
+        language: Language,
+        fallback_language: Language,
+        key: &str,
+        args: &[(String, String)],
+    ) -> String {
+        // Try primary language first
         if let Some(translations) = self.translations.get(&language) {
             if let Some(template) = translations.get(key) {
                 // Simple template substitution for arguments
@@ -55,8 +62,30 @@ impl LocalizationBundle {
             }
         }
 
-        // Fallback: return the key itself if translation is not found
-        warn!("Missing translation for key: {}", key);
+        // Try fallback language if primary language doesn't have the key
+        if language != fallback_language {
+            if let Some(translations) = self.translations.get(&fallback_language) {
+                if let Some(template) = translations.get(key) {
+                    // Simple template substitution for arguments
+                    let mut result = template.clone();
+                    for (arg_key, arg_value) in args {
+                        let placeholder = format!("{{${}}}", arg_key);
+                        result = result.replace(&placeholder, arg_value);
+                    }
+                    warn!(
+                        "Using fallback language {:?} for key: {}",
+                        fallback_language, key
+                    );
+                    return result;
+                }
+            }
+        }
+
+        // Ultimate fallback: return the key itself if translation is not found
+        warn!(
+            "Missing translation for key: {} in both {:?} and fallback {:?}",
+            key, language, fallback_language
+        );
         key.to_string()
     }
 
@@ -93,10 +122,20 @@ mod tests {
             .expect("Failed to load English");
 
         // Test basic key retrieval
-        let text = bundle.get_text(Language::EnglishUS, "menu-enter-world", &[]);
+        let text = bundle.get_text_with_fallback(
+            Language::EnglishUS,
+            Language::EnglishUS,
+            "menu-enter-world",
+            &[],
+        );
         assert_eq!(text, "Enter the world");
 
-        let text = bundle.get_text(Language::EnglishUS, "menu-quit-application", &[]);
+        let text = bundle.get_text_with_fallback(
+            Language::EnglishUS,
+            Language::EnglishUS,
+            "menu-quit-application",
+            &[],
+        );
         assert_eq!(text, "Quit Application");
     }
 
@@ -109,7 +148,12 @@ mod tests {
 
         // Test with arguments
         let args = vec![("time".to_string(), "2023-12-25 15:30".to_string())];
-        let text = bundle.get_text(Language::EnglishUS, "world-last-played", &args);
+        let text = bundle.get_text_with_fallback(
+            Language::EnglishUS,
+            Language::EnglishUS,
+            "world-last-played",
+            &args,
+        );
         assert_eq!(text, "Last played: 2023-12-25 15:30");
     }
 
@@ -118,7 +162,12 @@ mod tests {
         let bundle = LocalizationBundle::default();
 
         // Should return the key when translation is not found
-        let text = bundle.get_text(Language::EnglishUS, "non-existent-key", &[]);
+        let text = bundle.get_text_with_fallback(
+            Language::EnglishUS,
+            Language::EnglishUS,
+            "non-existent-key",
+            &[],
+        );
         assert_eq!(text, "non-existent-key");
     }
 }

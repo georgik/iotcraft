@@ -3,14 +3,14 @@ use bevy::prelude::*;
 
 /// Helper functions for working with localization resources
 impl LocalizationBundle {
-    /// Get text using the current language from config
+    /// Get text using the current language from config with fallback support
     pub fn get_current_text(
         &self,
         config: &LocalizationConfig,
         key: &str,
         args: &[(String, String)],
     ) -> String {
-        self.get_text(config.current_language, key, args)
+        self.get_text_with_fallback(config.current_language, config.fallback_language, key, args)
     }
 }
 
