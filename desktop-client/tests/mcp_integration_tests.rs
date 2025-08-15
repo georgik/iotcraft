@@ -9,7 +9,7 @@ use tokio::net::TcpStream;
 async fn test_mcp_server_initialize() {
     // These tests require the MCP server to be running
     // Skip if server is not available
-    let Ok(mut stream) = TcpStream::connect("127.0.0.1:8080").await else {
+    let Ok(stream) = TcpStream::connect("127.0.0.1:8080").await else {
         println!("Skipping MCP integration tests - server not available at 127.0.0.1:8080");
         return;
     };
@@ -60,7 +60,7 @@ async fn test_mcp_server_initialize() {
 
 #[tokio::test]
 async fn test_mcp_tools_list() {
-    let Ok(mut stream) = TcpStream::connect("127.0.0.1:8080").await else {
+    let Ok(stream) = TcpStream::connect("127.0.0.1:8080").await else {
         println!("Skipping MCP integration tests - server not available");
         return;
     };
@@ -114,7 +114,7 @@ async fn test_mcp_tools_list() {
 
 #[tokio::test]
 async fn test_mcp_tool_call_create_wall() {
-    let Ok(mut stream) = TcpStream::connect("127.0.0.1:8080").await else {
+    let Ok(stream) = TcpStream::connect("127.0.0.1:8080").await else {
         println!("Skipping MCP integration tests - server not available");
         return;
     };
@@ -182,7 +182,7 @@ async fn test_mcp_tool_call_create_wall() {
 
 #[tokio::test]
 async fn test_mcp_tool_call_with_invalid_parameters() {
-    let Ok(mut stream) = TcpStream::connect("127.0.0.1:8080").await else {
+    let Ok(stream) = TcpStream::connect("127.0.0.1:8080").await else {
         println!("Skipping MCP integration tests - server not available");
         return;
     };
@@ -251,7 +251,7 @@ async fn test_mcp_tool_call_with_invalid_parameters() {
 
 #[tokio::test]
 async fn test_mcp_multiple_tool_calls() {
-    let Ok(mut stream) = TcpStream::connect("127.0.0.1:8080").await else {
+    let Ok(stream) = TcpStream::connect("127.0.0.1:8080").await else {
         println!("Skipping MCP integration tests - server not available");
         return;
     };
@@ -319,7 +319,7 @@ async fn test_mcp_multiple_tool_calls() {
 /// This is not a unit test but a utility for manual testing
 #[allow(dead_code)]
 async fn manual_mcp_test_session() -> Result<(), Box<dyn std::error::Error>> {
-    let mut stream = TcpStream::connect("127.0.0.1:8080").await?;
+    let stream = TcpStream::connect("127.0.0.1:8080").await?;
     let (reader, mut writer) = stream.into_split();
     let mut reader = BufReader::new(reader);
 
