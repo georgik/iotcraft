@@ -92,6 +92,7 @@ fn get_block_color(block_type: BlockType) -> [u8; 4] {
         BlockType::QuartzBlock => [245, 245, 220, 255], // Beige
         BlockType::GlassPane => [173, 216, 230, 255], // Light blue (semi-transparent look)
         BlockType::CyanTerracotta => [72, 209, 204, 255], // Medium turquoise
+        BlockType::Water => [64, 164, 223, 255],  // Water blue
     }
 }
 

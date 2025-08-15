@@ -83,6 +83,7 @@ fn update_inventory_ui(
                                 BlockType::QuartzBlock => "textures/quartz_block.webp",
                                 BlockType::GlassPane => "textures/glass_pane.webp",
                                 BlockType::CyanTerracotta => "textures/cyan_terracotta.webp",
+                                BlockType::Water => "textures/water.webp",
                             },
                         };
 
@@ -195,6 +196,10 @@ mod tests {
             get_block_texture_path(&BlockType::CyanTerracotta),
             "textures/cyan_terracotta.webp"
         );
+        assert_eq!(
+            get_block_texture_path(&BlockType::Water),
+            "textures/water.webp"
+        );
     }
 }
 
@@ -208,5 +213,6 @@ pub fn get_block_texture_path(block_type: &BlockType) -> &'static str {
         BlockType::QuartzBlock => "textures/quartz_block.webp",
         BlockType::GlassPane => "textures/glass_pane.webp",
         BlockType::CyanTerracotta => "textures/cyan_terracotta.webp",
+        BlockType::Water => "textures/water.webp",
     }
 }

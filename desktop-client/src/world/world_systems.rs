@@ -15,6 +15,7 @@ impl Plugin for WorldPlugin {
         app.add_event::<LoadWorldEvent>()
             .add_event::<SaveWorldEvent>()
             .add_event::<CreateWorldEvent>()
+            .add_event::<DeleteWorldEvent>()
             .init_resource::<DiscoveredWorlds>()
             .add_systems(Startup, discover_worlds)
             .add_systems(
@@ -23,6 +24,7 @@ impl Plugin for WorldPlugin {
                     handle_load_world_events,
                     handle_create_world_events,
                     handle_save_world_events,
+                    handle_delete_world_events,
                 ),
             );
     }
@@ -193,6 +195,9 @@ fn handle_load_world_events(
                                         }
                                         crate::environment::BlockType::CyanTerracotta => {
                                             "textures/cyan_terracotta.webp"
+                                        }
+                                        crate::environment::BlockType::Water => {
+                                            "textures/water.webp"
                                         }
                                     };
                                     let texture: Handle<Image> = asset_server.load(texture_path);
@@ -476,4 +481,48 @@ fn create_empty_world(
             version: "1.0.0".to_string(),
         },
     });
+}
+
+/// Handles world deletion events
+fn handle_delete_world_events(
+    mut delete_events: EventReader<DeleteWorldEvent>,
+    mut discovered_worlds: ResMut<DiscoveredWorlds>,
+    _commands: Commands,
+    mut game_state: ResMut<NextState<crate::ui::main_menu::GameState>>,
+) {
+    for event in delete_events.read() {
+        info!("Deleting world: {}", event.world_name);
+
+        // Find the world in discovered worlds
+        if let Some(world_index) = discovered_worlds
+            .worlds
+            .iter()
+            .position(|w| w.name == event.world_name)
+        {
+            let world_info = &discovered_worlds.worlds[world_index];
+            let world_path = &world_info.path;
+
+            // Remove the world directory and all its contents
+            match std::fs::remove_dir_all(world_path) {
+                Ok(_) => {
+                    info!("Successfully deleted world directory: {:?}", world_path);
+                    // Remove from discovered worlds list
+                    discovered_worlds.worlds.remove(world_index);
+                    info!(
+                        "Removed world '{}' from discovered worlds list",
+                        event.world_name
+                    );
+
+                    // Refresh the world selection menu by going back to main menu and returning
+                    // This ensures the UI updates immediately
+                    game_state.set(crate::ui::main_menu::GameState::MainMenu);
+                }
+                Err(e) => {
+                    error!("Failed to delete world directory {:?}: {}", world_path, e);
+                }
+            }
+        } else {
+            warn!("World '{}' not found for deletion", event.world_name);
+        }
+    }
 }

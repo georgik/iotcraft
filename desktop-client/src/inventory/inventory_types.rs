@@ -83,6 +83,7 @@ impl ItemType {
                 BlockType::QuartzBlock => "Quartz Block",
                 BlockType::GlassPane => "Glass Pane",
                 BlockType::CyanTerracotta => "Cyan Terracotta",
+                BlockType::Water => "Water Block",
             },
         }
     }

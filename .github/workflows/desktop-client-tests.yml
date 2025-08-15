@@ -60,16 +60,8 @@ jobs:
       run: |
         cd desktop-client
         cargo fmt --all -- --check
-      continue-on-error: true
 
-    - name: Run clippy
-      run: |
-        cd desktop-client
-        cargo clippy --all-targets --all-features -- -D warnings
-      continue-on-error: true
-
-    - name: Run unit tests (fallback)
-      if: failure()
+    - name: Run unit tests
       run: |
         cd desktop-client
         mkdir -p test-results

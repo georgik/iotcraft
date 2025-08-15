@@ -3,7 +3,9 @@ use crate::localization::{
     Language, LanguageChangeEvent, LocalizationBundle, LocalizationConfig, LocalizedText,
     get_localized_text,
 };
-use crate::world::{CreateWorldEvent, DiscoveredWorlds, LoadWorldEvent, SaveWorldEvent};
+use crate::world::{
+    CreateWorldEvent, DeleteWorldEvent, DiscoveredWorlds, LoadWorldEvent, SaveWorldEvent,
+};
 use bevy::{app::AppExit, prelude::*};
 
 /// Plugin for the main menu
@@ -33,6 +35,7 @@ impl Plugin for MainMenuPlugin {
                     settings_menu_interaction.run_if(in_state(GameState::Settings)),
                     language_button_interaction.run_if(in_state(GameState::Settings)),
                     world_selection_interaction.run_if(in_state(GameState::WorldSelection)),
+                    delete_world_interaction.run_if(in_state(GameState::WorldSelection)),
                     gameplay_menu_interaction.run_if(in_state(GameState::GameplayMenu)),
                     handle_escape_key,
                 ),
@@ -94,6 +97,10 @@ pub struct CreateWorldButton;
 /// Component for a button that selects a world
 #[derive(Component)]
 pub struct SelectWorldButton(pub String);
+
+/// Component for a button that deletes a world
+#[derive(Component)]
+pub struct DeleteWorldButton(pub String);
 
 /// Component for the Return to Game button
 #[derive(Component)]
@@ -431,64 +438,7 @@ fn setup_world_selection_menu(
                 TextColor(Color::WHITE),
             ));
 
-            // Worlds list
-            for world_info in &discovered_worlds.worlds {
-                // Format the last played time nicely
-                let last_played = if let Ok(datetime) =
-                    chrono::DateTime::parse_from_rfc3339(&world_info.metadata.last_played)
-                {
-                    datetime.format("%Y-%m-%d %H:%M").to_string()
-                } else {
-                    "Unknown".to_string()
-                };
-
-                parent
-                    .spawn((
-                        Button,
-                        Node {
-                            width: Val::Px(400.0),
-                            height: Val::Px(60.0),
-                            justify_content: JustifyContent::SpaceBetween,
-                            align_items: AlignItems::Center,
-                            padding: UiRect::all(Val::Px(10.0)),
-                            ..default()
-                        },
-                        BackgroundColor(Color::srgb(0.15, 0.15, 0.15)),
-                        SelectWorldButton(world_info.name.clone()),
-                    ))
-                    .with_children(|parent| {
-                        // World name on the left
-                        parent.spawn((
-                            Text::new(world_info.name.clone()),
-                            TextFont {
-                                font: fonts.regular.clone(),
-                                font_size: 18.0,
-                                font_smoothing: bevy::text::FontSmoothing::default(),
-                                line_height: bevy::text::LineHeight::default(),
-                            },
-                            TextColor(Color::WHITE),
-                        ));
-
-                        // Last played time on the right
-                        parent.spawn((
-                            Text::new(get_localized_text(
-                                &localization_bundle,
-                                &localization_config,
-                                "world-last-played",
-                                &[("time".to_string(), last_played)],
-                            )),
-                            TextFont {
-                                font: fonts.regular.clone(),
-                                font_size: 14.0,
-                                font_smoothing: bevy::text::FontSmoothing::default(),
-                                line_height: bevy::text::LineHeight::default(),
-                            },
-                            TextColor(Color::srgb(0.8, 0.8, 0.8)),
-                        ));
-                    });
-            }
-
-            // Create New World button
+            // Create New World button (moved to top)
             parent
                 .spawn((
                     Button,
@@ -497,18 +447,144 @@ fn setup_world_selection_menu(
                         height: Val::Px(50.0),
                         justify_content: JustifyContent::Center,
                         align_items: AlignItems::Center,
+                        margin: UiRect::bottom(Val::Px(20.0)),
                         ..default()
                     },
-                    BackgroundColor(Color::srgb(0.15, 0.15, 0.15)),
+                    BackgroundColor(Color::srgb(0.2, 0.5, 0.2)),
                     CreateWorldButton,
                 ))
                 .with_children(|parent| {
-                    parent.spawn(Text::new(get_localized_text(
-                        &localization_bundle,
-                        &localization_config,
-                        "menu-create-new-world",
-                        &[],
-                    )));
+                    parent.spawn((
+                        Text::new(get_localized_text(
+                            &localization_bundle,
+                            &localization_config,
+                            "menu-create-new-world",
+                            &[],
+                        )),
+                        TextFont {
+                            font: fonts.regular.clone(),
+                            font_size: 18.0,
+                            font_smoothing: bevy::text::FontSmoothing::default(),
+                            line_height: bevy::text::LineHeight::default(),
+                        },
+                        TextColor(Color::WHITE),
+                    ));
+                });
+
+            // Scrollable worlds list container
+            parent
+                .spawn(Node {
+                    width: Val::Px(500.0),
+                    height: Val::Px(400.0),
+                    flex_direction: FlexDirection::Column,
+                    overflow: Overflow::clip_y(),
+                    border: UiRect::all(Val::Px(2.0)),
+                    padding: UiRect::all(Val::Px(10.0)),
+                    ..default()
+                })
+                .insert(BorderColor(Color::srgb(0.3, 0.3, 0.3)))
+                .insert(BackgroundColor(Color::srgba(0.1, 0.1, 0.1, 0.8)))
+                .with_children(|parent| {
+                    // Worlds list
+                    for world_info in &discovered_worlds.worlds {
+                        // Format the last played time nicely
+                        let last_played = if let Ok(datetime) =
+                            chrono::DateTime::parse_from_rfc3339(&world_info.metadata.last_played)
+                        {
+                            datetime.format("%Y-%m-%d %H:%M").to_string()
+                        } else {
+                            "Unknown".to_string()
+                        };
+
+                        // World entry container
+                        parent
+                            .spawn(Node {
+                                width: Val::Percent(100.0),
+                                height: Val::Px(60.0),
+                                flex_direction: FlexDirection::Row,
+                                align_items: AlignItems::Center,
+                                margin: UiRect::bottom(Val::Px(5.0)),
+                                ..default()
+                            })
+                            .with_children(|parent| {
+                                // Main world selection button (takes most space)
+                                parent
+                                    .spawn((
+                                        Button,
+                                        Node {
+                                            width: Val::Percent(85.0),
+                                            height: Val::Percent(100.0),
+                                            justify_content: JustifyContent::SpaceBetween,
+                                            align_items: AlignItems::Center,
+                                            padding: UiRect::all(Val::Px(10.0)),
+                                            ..default()
+                                        },
+                                        BackgroundColor(Color::srgb(0.15, 0.15, 0.15)),
+                                        SelectWorldButton(world_info.name.clone()),
+                                    ))
+                                    .with_children(|parent| {
+                                        // Left side - world name
+                                        parent.spawn((
+                                            Text::new(world_info.name.clone()),
+                                            TextFont {
+                                                font: fonts.regular.clone(),
+                                                font_size: 18.0,
+                                                font_smoothing: bevy::text::FontSmoothing::default(
+                                                ),
+                                                line_height: bevy::text::LineHeight::default(),
+                                            },
+                                            TextColor(Color::WHITE),
+                                        ));
+
+                                        // Right side - last played time
+                                        parent.spawn((
+                                            Text::new(get_localized_text(
+                                                &localization_bundle,
+                                                &localization_config,
+                                                "world-last-played",
+                                                &[("time".to_string(), last_played)],
+                                            )),
+                                            TextFont {
+                                                font: fonts.regular.clone(),
+                                                font_size: 12.0,
+                                                font_smoothing: bevy::text::FontSmoothing::default(
+                                                ),
+                                                line_height: bevy::text::LineHeight::default(),
+                                            },
+                                            TextColor(Color::srgb(0.7, 0.7, 0.7)),
+                                        ));
+                                    });
+
+                                // Delete button (small)
+                                parent
+                                    .spawn((
+                                        Button,
+                                        Node {
+                                            width: Val::Px(30.0),
+                                            height: Val::Px(30.0),
+                                            justify_content: JustifyContent::Center,
+                                            align_items: AlignItems::Center,
+                                            margin: UiRect::left(Val::Px(5.0)),
+                                            ..default()
+                                        },
+                                        BackgroundColor(Color::srgb(0.6, 0.2, 0.2)),
+                                        DeleteWorldButton(world_info.name.clone()),
+                                    ))
+                                    .with_children(|parent| {
+                                        parent.spawn((
+                                            Text::new("×"),
+                                            TextFont {
+                                                font: fonts.regular.clone(),
+                                                font_size: 20.0,
+                                                font_smoothing: bevy::text::FontSmoothing::default(
+                                                ),
+                                                line_height: bevy::text::LineHeight::default(),
+                                            },
+                                            TextColor(Color::WHITE),
+                                        ));
+                                    });
+                            });
+                    }
                 });
         });
 }
@@ -575,6 +651,33 @@ fn world_selection_interaction(
             }
             Interaction::None => {
                 *color = Color::srgb(0.15, 0.15, 0.15).into();
+            }
+        }
+    }
+}
+
+fn delete_world_interaction(
+    mut delete_world_query: Query<
+        (&Interaction, &mut BackgroundColor, &DeleteWorldButton),
+        (Changed<Interaction>, With<DeleteWorldButton>),
+    >,
+    mut delete_world_events: EventWriter<DeleteWorldEvent>,
+) {
+    for (interaction, mut color, delete_button) in delete_world_query.iter_mut() {
+        match *interaction {
+            Interaction::Pressed => {
+                *color = Color::srgb(0.8, 0.3, 0.3).into();
+                // For now, delete immediately. In a full implementation, you'd want a confirmation dialog.
+                info!("Deleting world: {}", delete_button.0);
+                delete_world_events.write(DeleteWorldEvent {
+                    world_name: delete_button.0.clone(),
+                });
+            }
+            Interaction::Hovered => {
+                *color = Color::srgb(0.8, 0.4, 0.4).into();
+            }
+            Interaction::None => {
+                *color = Color::srgb(0.6, 0.2, 0.2).into();
             }
         }
     }

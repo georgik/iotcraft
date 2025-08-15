@@ -121,6 +121,156 @@ mod mcp_tests {
     }
 
     #[test]
+    fn test_wall_command_coordinate_validation() {
+        // Additional test specifically for the coordinate validation logic
+        // This ensures the range calculation works as expected in different scenarios
+
+        // Single block placement (all coordinates equal)
+        let args_single = json!({
+            "block_type": "dirt",
+            "x1": 0,
+            "y1": 5,
+            "z1": -10,
+            "x2": 0,   // Same as x1
+            "y2": 5,   // Same as y1
+            "z2": -10  // Same as z1
+        });
+
+        let world = create_test_world();
+        let result = execute_mcp_tool("create_wall", args_single, &world);
+        assert!(result.is_ok(), "Single block placement should work");
+        let result = result.unwrap();
+
+        if let McpContent::Text { text } = &result.content[0] {
+            // Single block should result in exactly 1 block
+            assert!(
+                text.contains("1 blocks") || text.contains("1 block"),
+                "Single coordinate should create 1 block, got: {}",
+                text
+            );
+        }
+
+        // Line of blocks (one dimension varies)
+        let args_line = json!({
+            "block_type": "stone",
+            "x1": 10,
+            "y1": 0,
+            "z1": 0,
+            "x2": 15,  // 6 blocks in X direction
+            "y2": 0,   // Same Y
+            "z2": 0    // Same Z
+        });
+
+        let result_line = execute_mcp_tool("create_wall", args_line, &world);
+        assert!(result_line.is_ok(), "Line placement should work");
+        let result_line = result_line.unwrap();
+
+        if let McpContent::Text { text } = &result_line.content[0] {
+            // Should be (15-10+1) * (0-0+1) * (0-0+1) = 6*1*1 = 6 blocks
+            assert!(
+                text.contains("6 blocks"),
+                "Line should create 6 blocks, got: {}",
+                text
+            );
+        }
+    }
+
+    #[test]
+    fn test_create_wall_coordinate_ordering_edge_case() {
+        // This test covers the scenario that was found in the new_world.txt script
+        // where coordinates were incorrectly ordered (e.g., z1=-21, z2=-26)
+        //
+        // NOTE: The MCP system appears to automatically handle coordinate ordering
+        // by internally correcting backwards coordinates, which is user-friendly behavior.
+        // This test validates that both correctly ordered and backwards coordinates
+        // produce the same expected result.
+
+        // Test case 1: Backwards Z coordinates (MCP auto-corrects these)
+        let args_backwards_z = json!({
+            "block_type": "stone",
+            "x1": 21,
+            "y1": 1,
+            "z1": -21,  // This is LARGER than z2
+            "x2": 26,
+            "y2": 1,
+            "z2": -26   // This is SMALLER than z1 - MCP should auto-correct
+        });
+
+        let world = create_test_world();
+        let result = execute_mcp_tool("create_wall", args_backwards_z, &world);
+
+        assert!(
+            result.is_ok(),
+            "create_wall should handle backwards coordinates gracefully"
+        );
+        let result = result.unwrap();
+
+        if let McpContent::Text { text } = &result.content[0] {
+            // MCP should auto-correct coordinates and create the expected volume
+            // (26-21+1) * (1-1+1) * (|-21-(-26)|+1) = 6*1*6 = 36 blocks
+            assert!(
+                text.contains("36 blocks"),
+                "MCP should auto-correct backwards coordinates to create 36 blocks, got: {}",
+                text
+            );
+        }
+
+        // Test case 2: Correctly ordered coordinates (should work the same way)
+        let args_correct = json!({
+            "block_type": "stone",
+            "x1": 21,
+            "y1": 1,
+            "z1": -26,  // Correctly smaller value first
+            "x2": 26,
+            "y2": 1,
+            "z2": -21   // Correctly larger value second
+        });
+
+        let result_correct = execute_mcp_tool("create_wall", args_correct, &world);
+        assert!(
+            result_correct.is_ok(),
+            "create_wall should work with correctly ordered coordinates"
+        );
+        let result_correct = result_correct.unwrap();
+
+        if let McpContent::Text { text } = &result_correct.content[0] {
+            // With correct coordinates, we should get the same result as the auto-corrected backwards case
+            assert!(
+                text.contains("36 blocks"),
+                "Correctly ordered coordinates should create 36 blocks, got: {}",
+                text
+            );
+        }
+
+        // Test case 3: All coordinates backwards (MCP should auto-correct these too)
+        let args_all_backwards = json!({
+            "block_type": "water",
+            "x1": 5,   // larger
+            "y1": 2,   // larger
+            "z1": 1,   // larger
+            "x2": 0,   // smaller
+            "y2": 0,   // smaller
+            "z2": -1   // smaller
+        });
+
+        let result_all_backwards = execute_mcp_tool("create_wall", args_all_backwards, &world);
+        assert!(
+            result_all_backwards.is_ok(),
+            "create_wall should handle all backwards coordinates"
+        );
+        let result_all_backwards = result_all_backwards.unwrap();
+
+        if let McpContent::Text { text } = &result_all_backwards.content[0] {
+            // MCP should auto-correct all coordinates: (5-0+1) * (2-0+1) * (1-(-1)+1) = 6*3*3 = 54 blocks
+            assert!(
+                text.contains("54 blocks"),
+                "MCP should auto-correct all backwards coordinates to create 54 blocks, got: {}",
+                text
+            );
+        }
+    }
+
+    #[test]
     fn test_place_block_valid_parameters() {
         let args = json!({
             "block_type": "dirt",

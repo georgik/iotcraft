@@ -7,8 +7,8 @@
 tp -8 3 15
 look -34 -3
 
-# Create a large grass plain (50x50 area)
-wall grass -25 0 -25 25 0 25
+# Create a large grass plain (80x80 area)
+wall grass -40 0 -40 40 0 40
 
 # Create some hills around the plain
 # Hill 1 - Southeast
@@ -38,6 +38,22 @@ place glass_pane -10 1 -10
 place cyan_terracotta 5 1 -5
 place cyan_terracotta -5 1 5
 
+# Create a contained water pond in the corner of the map
+# First create stone walls for containment (1 block high)
+# Note: coordinates must be ordered from smaller to larger values
+
+# North wall (z=-26)
+wall stone 21 1 -26 26 1 -26
+# South wall (z=-21)  
+wall stone 21 1 -21 26 1 -21
+# West wall (x=21)
+wall stone 21 1 -26 21 1 -21
+# East wall (x=26)
+wall stone 26 1 -26 26 1 -21
+
+# Fill the inside with water at level 1 (above the grass ground)
+wall water 22 1 -25 25 1 -22
+
 # Give the player some starting items for building
 give grass 64
 give dirt 32
@@ -45,3 +61,5 @@ give stone 32
 give quartz_block 16
 give glass_pane 8
 give cyan_terracotta 8
+give water 8
+
