@@ -1,3 +1,4 @@
+pub mod mqtt_async;
 pub mod mqtt_helpers;
 pub mod mqtt_systems;
 pub mod mqtt_types;

@@ -116,6 +116,7 @@ fn handle_load_world_events(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     asset_server: Res<AssetServer>,
+    shared_materials: Option<Res<crate::shared_materials::SharedBlockMaterials>>,
     mut error_resource: ResMut<crate::ui::error_indicator::ErrorResource>,
     time: Res<Time>,
 ) {
@@ -171,7 +172,7 @@ fn handle_load_world_events(
                                 }
                                 info!("Loaded {} blocks into VoxelWorld", voxel_world.blocks.len());
 
-                                // Spawn visual blocks for all loaded blocks
+                                // Spawn visual blocks for all loaded blocks using shared materials
                                 let mut spawned_blocks = 0;
                                 for (pos, block_type) in voxel_world.blocks.iter() {
                                     let cube_mesh = meshes.add(Cuboid::new(
@@ -179,32 +180,61 @@ fn handle_load_world_events(
                                         crate::environment::CUBE_SIZE,
                                         crate::environment::CUBE_SIZE,
                                     ));
-                                    let texture_path = match block_type {
-                                        crate::environment::BlockType::Grass => {
-                                            "textures/grass.webp"
-                                        }
-                                        crate::environment::BlockType::Dirt => "textures/dirt.webp",
-                                        crate::environment::BlockType::Stone => {
-                                            "textures/stone.webp"
-                                        }
-                                        crate::environment::BlockType::QuartzBlock => {
-                                            "textures/quartz_block.webp"
-                                        }
-                                        crate::environment::BlockType::GlassPane => {
-                                            "textures/glass_pane.webp"
-                                        }
-                                        crate::environment::BlockType::CyanTerracotta => {
-                                            "textures/cyan_terracotta.webp"
-                                        }
-                                        crate::environment::BlockType::Water => {
-                                            "textures/water.webp"
-                                        }
+
+                                    // Use SharedBlockMaterials if available, otherwise fall back to creating new materials
+                                    let material = if let Some(shared_materials) =
+                                        shared_materials.as_ref()
+                                    {
+                                        shared_materials.get_material(*block_type)
+                                            .unwrap_or_else(|| {
+                                                // Fallback to creating individual material
+                                                let texture_path = match block_type {
+                                                    crate::environment::BlockType::Grass => "textures/grass.webp",
+                                                    crate::environment::BlockType::Dirt => "textures/dirt.webp",
+                                                    crate::environment::BlockType::Stone => "textures/stone.webp",
+                                                    crate::environment::BlockType::QuartzBlock => "textures/quartz_block.webp",
+                                                    crate::environment::BlockType::GlassPane => "textures/glass_pane.webp",
+                                                    crate::environment::BlockType::CyanTerracotta => "textures/cyan_terracotta.webp",
+                                                    crate::environment::BlockType::Water => "textures/water.webp",
+                                                };
+                                                let texture: Handle<Image> = asset_server.load(texture_path);
+                                                materials.add(StandardMaterial {
+                                                    base_color_texture: Some(texture),
+                                                    ..default()
+                                                })
+                                            })
+                                    } else {
+                                        // Fallback when shared materials not available
+                                        let texture_path = match block_type {
+                                            crate::environment::BlockType::Grass => {
+                                                "textures/grass.webp"
+                                            }
+                                            crate::environment::BlockType::Dirt => {
+                                                "textures/dirt.webp"
+                                            }
+                                            crate::environment::BlockType::Stone => {
+                                                "textures/stone.webp"
+                                            }
+                                            crate::environment::BlockType::QuartzBlock => {
+                                                "textures/quartz_block.webp"
+                                            }
+                                            crate::environment::BlockType::GlassPane => {
+                                                "textures/glass_pane.webp"
+                                            }
+                                            crate::environment::BlockType::CyanTerracotta => {
+                                                "textures/cyan_terracotta.webp"
+                                            }
+                                            crate::environment::BlockType::Water => {
+                                                "textures/water.webp"
+                                            }
+                                        };
+                                        let texture: Handle<Image> =
+                                            asset_server.load(texture_path);
+                                        materials.add(StandardMaterial {
+                                            base_color_texture: Some(texture),
+                                            ..default()
+                                        })
                                     };
-                                    let texture: Handle<Image> = asset_server.load(texture_path);
-                                    let material = materials.add(StandardMaterial {
-                                        base_color_texture: Some(texture),
-                                        ..default()
-                                    });
 
                                     commands.spawn((
                                         Mesh3d(cube_mesh),
