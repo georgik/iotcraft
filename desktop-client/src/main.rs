@@ -35,6 +35,7 @@ mod player_avatar;
 mod player_controller;
 mod profile;
 mod rendering;
+mod shared_materials;
 mod world;
 
 // Re-export types for easier access
@@ -55,6 +56,7 @@ use multiplayer::{
 use physics_manager::PhysicsManagerPlugin;
 use player_avatar::PlayerAvatarPlugin;
 use player_controller::PlayerControllerPlugin;
+use shared_materials::SharedMaterialsPlugin;
 use ui::{CrosshairPlugin, ErrorIndicatorPlugin, GameState, InventoryUiPlugin, MainMenuPlugin};
 use world::WorldPlugin;
 
@@ -1250,6 +1252,7 @@ fn main() {
         .add_plugins(CameraControllerPlugin)
         .add_plugins(PlayerControllerPlugin) // Add player controller for walking/flying modes
         .add_plugins(script::script_systems::ScriptPlugin) // Add script plugin early for PendingCommands resource
+        .add_plugins(SharedMaterialsPlugin) // Add shared materials for optimized rendering
         .add_plugins(ConsolePlugin)
         .add_plugins(DevicePlugin)
         .add_plugins(DevicePositioningPlugin)

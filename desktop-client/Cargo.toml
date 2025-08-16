@@ -42,3 +42,12 @@ async-channel = "2.5"
 rayon = "1.8" # Parallel processing
 bytemuck = { version = "1.16", features = ["derive"] } # GPU data alignment
 tempfile = "3.8" # For testing async file operations
+
+# Enable max optimizations for dependencies (incl. Bevy), but not for our code
+# This keeps recompilations fast while making Bevy run at good performance
+[profile.dev.package."*"]
+opt-level = 3
+
+# Enable a small amount of optimization for our own code if needed
+[profile.dev]
+opt-level = 1
