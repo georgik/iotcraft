@@ -56,7 +56,7 @@ struct PoseRx(pub Mutex<mpsc::Receiver<PoseMessage>>);
 struct PoseTx(pub Mutex<mpsc::Sender<PoseMessage>>);
 
 #[derive(Resource, Default)]
-struct MultiplayerConnectionStatus {
+pub struct MultiplayerConnectionStatus {
     pub connection_available: bool,
 }
 
@@ -119,6 +119,12 @@ fn start_multiplayer_connections(
     commands.insert_resource(PoseRx(Mutex::new(pose_rx)));
     commands.insert_resource(PoseTx(Mutex::new(outgoing_tx)));
     commands.insert_resource(PositionTimer::default());
+
+    // Enable multiplayer since MQTT is available (we know this because device announcements work)
+    commands.insert_resource(MultiplayerConnectionStatus {
+        connection_available: true,
+    });
+    info!("Multiplayer enabled - MQTT broker is available");
 
     let subscribe_topic = format!("iotcraft/worlds/{}/players/+/pose", world.0);
     let host = mqtt.host.clone();

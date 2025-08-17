@@ -29,10 +29,12 @@ mod ui;
 use mcp::mcp_types::CommandExecutedEvent;
 
 mod multiplayer;
-mod physics_manager;
+mod physics;
 mod player_avatar;
 mod player_controller;
 mod profile;
+mod rendering;
+mod shared_materials;
 mod world;
 
 // Re-export types for easier access
@@ -50,9 +52,10 @@ use mqtt::{MqttPlugin, *};
 use multiplayer::{
     MultiplayerPlugin, SharedWorldPlugin, WorldDiscoveryPlugin, WorldPublisherPlugin,
 };
-use physics_manager::PhysicsManagerPlugin;
+use physics::PhysicsManagerPlugin;
 use player_avatar::PlayerAvatarPlugin;
 use player_controller::PlayerControllerPlugin;
+use shared_materials::SharedMaterialsPlugin;
 use ui::{CrosshairPlugin, ErrorIndicatorPlugin, GameState, InventoryUiPlugin, MainMenuPlugin};
 use world::WorldPlugin;
 
@@ -427,7 +430,7 @@ fn handle_load_map_command(
 
                     // Add WaterBlock component for water blocks to enable water detection
                     if *block_type == BlockType::Water {
-                        entity_commands.insert(crate::physics_manager::WaterBlock);
+                        entity_commands.insert(crate::physics::WaterBlock);
                     }
                 }
 
@@ -1248,6 +1251,7 @@ fn main() {
         .add_plugins(CameraControllerPlugin)
         .add_plugins(PlayerControllerPlugin) // Add player controller for walking/flying modes
         .add_plugins(script::script_systems::ScriptPlugin) // Add script plugin early for PendingCommands resource
+        .add_plugins(SharedMaterialsPlugin) // Add shared materials for optimized rendering
         .add_plugins(ConsolePlugin)
         .add_plugins(DevicePlugin)
         .add_plugins(DevicePositioningPlugin)
@@ -1525,6 +1529,12 @@ fn update_diagnostics_content(
     voxel_world: Res<VoxelWorld>,
     inventory: Res<PlayerInventory>,
     device_query: Query<&DeviceEntity>,
+    player_avatar_query: Query<
+        (&Transform, &crate::player_avatar::PlayerAvatar),
+        With<crate::multiplayer::RemotePlayer>,
+    >,
+    local_profile: Res<crate::profile::PlayerProfile>,
+    temperature: Res<TemperatureResource>,
     time: Res<Time>,
 ) {
     if !diagnostics_visible.visible {
@@ -1571,6 +1581,35 @@ fn update_diagnostics_content(
                 "Empty".to_string()
             };
 
+            // Get multiplayer player information
+            let remote_player_count = player_avatar_query.iter().count();
+            let mut player_list = Vec::new();
+            player_list.push(format!(
+                "  {} (Local): X={:.1} Y={:.1} Z={:.1}",
+                local_profile.player_name, translation.x, translation.y, translation.z
+            ));
+
+            for (player_transform, player_avatar) in player_avatar_query.iter() {
+                let pos = player_transform.translation;
+                player_list.push(format!(
+                    "  {} (Remote): X={:.1} Y={:.1} Z={:.1}",
+                    player_avatar.player_id, pos.x, pos.y, pos.z
+                ));
+            }
+
+            let players_text = if player_list.len() <= 1 {
+                "  No other players connected".to_string()
+            } else {
+                player_list.join("\n")
+            };
+
+            // Get MQTT broker connection status using temperature resource as indicator
+            let mqtt_connection_status = if temperature.value.is_some() {
+                "✅ Connected (MQTT broker available)"
+            } else {
+                "🔄 Connecting to MQTT broker..."
+            };
+
             let uptime = time.elapsed_secs();
             let minutes = (uptime / 60.0) as u32;
             let seconds = (uptime % 60.0) as u32;
@@ -1583,6 +1622,11 @@ fn update_diagnostics_content(
                 Position: X={:.2}  Y={:.2}  Z={:.2}\n\
                 Rotation: Yaw={:.1}°  Pitch={:.1}°\n\
                 Selected Slot: {} ({})\n\
+                \n\
+                - MULTIPLAYER INFORMATION\n\
+                MQTT Broker: {}\n\
+                Connected Players: {} (1 local + {} remote)\n\
+                {}\n\
                 \n\
                 - WORLD INFORMATION\n\
                 Total Blocks: {}\n\
@@ -1601,6 +1645,9 @@ fn update_diagnostics_content(
                 translation.x, translation.y, translation.z,
                 yaw_degrees, pitch_degrees,
                 selected_slot, selected_item,
+                mqtt_connection_status,
+                remote_player_count + 1, remote_player_count,
+                players_text,
                 block_count,
                 device_count,
                 minutes, seconds,
