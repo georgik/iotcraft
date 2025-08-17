@@ -55,9 +55,6 @@ struct PoseRx(pub Mutex<mpsc::Receiver<PoseMessage>>);
 #[derive(Resource)]
 struct PoseTx(pub Mutex<mpsc::Sender<PoseMessage>>);
 
-#[derive(Resource)]
-struct ConnectionStatusRx(pub Mutex<mpsc::Receiver<bool>>);
-
 #[derive(Resource, Default)]
 pub struct MultiplayerConnectionStatus {
     pub connection_available: bool,

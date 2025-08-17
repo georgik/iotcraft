@@ -102,7 +102,6 @@ struct DeviceLocation {
 struct DeviceState {
     properties: DeviceProperties,
     light_state: bool, // true = ON, false = OFF
-    door_state: bool,  // true = open, false = closed
 }
 
 impl Default for DeviceState {
@@ -114,7 +113,6 @@ impl Default for DeviceState {
                 z: 2.0,
             },
             light_state: false,
-            door_state: false,
         }
     }
 }
@@ -286,7 +284,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             z: args.z,
         },
         light_state: false,
-        door_state: false,
     };
 
     let device_state = Arc::new(RwLock::new(initial_state));

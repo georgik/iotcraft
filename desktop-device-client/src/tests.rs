@@ -44,7 +44,6 @@ mod tests {
         assert_eq!(state.properties.y, 0.5);
         assert_eq!(state.properties.z, 2.0);
         assert!(!state.light_state);
-        assert!(!state.door_state);
     }
 
     #[test]
