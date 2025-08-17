@@ -1,3 +1,2 @@
-pub mod optimized_rendering;
-
-pub use optimized_rendering::*;
+// Module for rendering-related functionality
+// greedy meshing implementation is in the world module

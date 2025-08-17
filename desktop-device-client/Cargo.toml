@@ -1,0 +1,24 @@
+[package]
+name = "desktop-device-client"
+version = "0.1.0"
+edition = "2021"
+authors = ["IoTCraft Team"]
+description = "Desktop MQTT device client that simulates ESP32 device functionality"
+
+[dependencies]
+tokio = { version = "1.0", features = ["full", "signal"] }
+rumqttc = { version = "0.24.0", features = ["use-rustls"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+uuid = { version = "1.0", features = ["v4"] }
+log = "0.4"
+env_logger = "0.10"
+clap = { version = "4.0", features = ["derive"] }
+rand = "0.8"
+tokio-util = { version = "0.7", features = ["time"] }
+whoami = "1.5"
+hex = "0.4"
+
+[[bin]]
+name = "desktop-device-client"
+path = "src/main.rs"

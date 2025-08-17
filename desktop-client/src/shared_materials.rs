@@ -25,11 +25,6 @@ impl SharedBlockMaterials {
         self.materials.get(&block_type).cloned()
     }
 
-    /// Get the shared mesh for blocks
-    pub fn get_mesh(&self) -> Handle<Mesh> {
-        self.shared_mesh.clone()
-    }
-
     /// Initialize all block materials and the shared mesh
     pub fn initialize(
         &mut self,
@@ -80,20 +75,6 @@ impl SharedBlockMaterials {
             "SharedBlockMaterials initialized with {} materials",
             self.materials.len()
         );
-    }
-
-    /// Get material with fallback to default if not found
-    pub fn get_material_or_default(&self, block_type: BlockType) -> Handle<StandardMaterial> {
-        self.materials.get(&block_type).cloned().unwrap_or_else(|| {
-            warn!(
-                "No material found for block type {:?}, using grass as fallback",
-                block_type
-            );
-            self.materials
-                .get(&BlockType::Grass)
-                .cloned()
-                .unwrap_or_default()
-        })
     }
 }
 

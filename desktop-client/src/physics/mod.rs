@@ -1,3 +1,3 @@
-pub mod parallel_physics;
+pub mod physics_manager;
 
-pub use parallel_physics::*;
+pub use physics_manager::*;
