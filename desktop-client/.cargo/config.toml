@@ -1,0 +1,31 @@
+[alias]
+xtask = "run --package xtask --"
+
+# Platform-specific linker configuration
+# Use system linker on macOS since lld doesn't support macOS platform
+[target.aarch64-apple-darwin]
+rustflags = ["-C", "linker=/usr/bin/ld"]
+
+[target.x86_64-apple-darwin] 
+rustflags = ["-C", "linker=/usr/bin/ld"]
+
+# Use LLD on other platforms for faster builds
+[target.x86_64-unknown-linux-gnu]
+rustflags = ["-C", "link-arg=-fuse-ld=lld"]
+
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "link-arg=/DEBUG:NONE"]
+
+[target.wasm32-unknown-unknown]
+rustflags = [
+    "-C", "target-feature=+bulk-memory,+mutable-globals",
+    "--cfg", "getrandom_backend=\"wasm_js\"",
+]
+
+# Web-specific configuration
+[unstable]
+host-config = true
+
+# WASM-specific settings for getrandom
+[target.wasm32-unknown-unknown.env]
+RUST_LOG = "info"

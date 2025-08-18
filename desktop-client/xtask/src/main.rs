@@ -166,7 +166,29 @@ async fn copy_wasm_files(output_path: &Path) -> Result<()> {
 }
 
 async fn generate_html(output_path: &Path, _is_release: bool) -> Result<()> {
-    let html_content = r#"<!DOCTYPE html>
+    // Try to use template from web/index.html, otherwise generate default
+    let template_path = Path::new("web/index.html");
+    
+    let html_content = if template_path.exists() {
+        // Use existing template
+        fs::read_to_string(template_path)
+            .await
+            .context("Failed to read web/index.html template")?
+    } else {
+        // Generate default HTML if template doesn't exist
+        generate_default_html()
+    };
+
+    let html_path = output_path.join("index.html");
+    fs::write(html_path, html_content)
+        .await
+        .context("Failed to write index.html")?;
+
+    Ok(())
+}
+
+fn generate_default_html() -> String {
+    r#"<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -277,14 +299,7 @@ async fn generate_html(output_path: &Path, _is_release: bool) -> Result<()> {
         run();
     </script>
 </body>
-</html>"#;
-
-    let html_path = output_path.join("index.html");
-    fs::write(html_path, html_content)
-        .await
-        .context("Failed to write index.html")?;
-
-    Ok(())
+</html>"#.to_string()
 }
 
 async fn copy_assets(output_path: &Path) -> Result<()> {
