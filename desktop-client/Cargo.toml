@@ -4,21 +4,19 @@ version = "0.1.0"
 edition = "2024"
 default-run = "iotcraft-dekstop-client"
 
+[lib]
+name = "iotcraft_desktop_client"
+crate-type = ["cdylib", "rlib"]
+
 [dependencies]
+# Core dependencies that work on both desktop and web
 bevy = { version = "0.16.1", features = ["webp"] }
 bevy_console = "0.14.1"
-clap = { version = "4.5", features = ["derive"] }
-rumqttc = "0.24.0"
-rumqttd = "0.19.0"
-tokio = { version = "1.47", features = ["rt-multi-thread", "macros", "fs", "net"] }
 tracing = "0.1"
-tracing-subscriber = "0.3"
 log = "0.4"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 chrono = { version = "0.4", features = ["serde"] }
-dirs = "6.0"
-whoami = "1.5"
 rand = "0.9"
 hex = "0.4"
 fluent = "0.17.0"
@@ -26,21 +24,43 @@ fluent-bundle = "0.16.0"
 fluent-syntax = "0.12.0"
 unic-langid = "0.9.6"
 avian3d = "0.3.1"
-# MCP (Model Context Protocol) support
-tokio-util = { version = "0.7", features = ["codec"] }
 futures = "0.3"
 anyhow = "1.0"
 uuid = { version = "1.0", features = ["v4"] }
 bytes = "1.0"
-# HTTP server support for mcp-remote
-axum = "0.8"
-tower = "0.5"
-tower-http = { version = "0.6", features = ["cors"] }
 # Async channels for Bevy-compatible communication
 async-channel = "2.5"
 # Performance optimization dependencies
-rayon = "1.8" # Parallel processing
 bytemuck = { version = "1.16", features = ["derive"] } # GPU data alignment
+
+# Web-specific dependencies
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen = "0.2"
+web-sys = "0.3"
+js-sys = "0.3"
+wasm-bindgen-futures = "0.4"
+console_error_panic_hook = "0.1"
+# WebSocket-based MQTT client for WASM
+tungstenite = { version = "0.24", default-features = false, features = [] }
+# Configure both getrandom versions for WASM
+getrandom = { version = "0.2", features = ["js"] }
+# Add getrandom v0.3 directly to enable wasm_js feature
+getrandom_03 = { package = "getrandom", version = "0.3", features = ["wasm_js"] }
+
+# Desktop-specific dependencies (non-WASM)
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+rumqttc = "0.24.0"
+rumqttd = "0.19.0"
+tokio = { version = "1.47", features = ["rt-multi-thread", "macros", "fs", "net"] }
+axum = "0.8"
+tower = "0.5"
+tower-http = { version = "0.6", features = ["cors"] }
+clap = { version = "4.5", features = ["derive"] }
+tracing-subscriber = "0.3"
+dirs = "6.0"
+whoami = "1.5"
+tokio-util = { version = "0.7", features = ["codec"] }
+rayon = "1.8" # Parallel processing
 tempfile = "3.8" # For testing async file operations
 
 # Enable max optimizations for dependencies (incl. Bevy), but not for our code
@@ -51,3 +71,25 @@ opt-level = 3
 # Enable a small amount of optimization for our own code if needed
 [profile.dev]
 opt-level = 1
+
+# Optimize for size in WASM builds (important for web loading times)
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+
+# Special profile for WASM release builds
+[profile.wasm-release]
+inherits = "release"
+opt-level = "s"  # Optimize for size
+lto = true
+codegen-units = 1
+strip = true
+
+# Workspace for xtask
+[workspace]
+members = [".", "xtask"]
+
+# Custom commands (use via .cargo/config.toml for local aliases)
+# For now, use: cargo run --package xtask -- <command>
+

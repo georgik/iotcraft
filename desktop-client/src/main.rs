@@ -1,11 +1,10 @@
-use bevy::asset::Assets;
 use bevy::prelude::*;
 use bevy::window::CursorGrabMode;
 use bevy_console::{
-    AddConsoleCommand, ConsoleCommand, ConsoleOpen, ConsoleSet, PrintConsoleLine, reply,
+    AddConsoleCommand, ConsoleCommand, ConsoleConfiguration, ConsoleOpen, ConsolePlugin,
+    ConsoleSet, PrintConsoleLine, reply,
 };
-use bevy_console::{ConsoleConfiguration, ConsolePlugin};
-use camera_controllers::{CameraController, CameraControllerPlugin};
+#[cfg(not(target_arch = "wasm32"))]
 use clap::Parser;
 use log::{error, info, warn};
 use rumqttc::{Client, Event, MqttOptions, Outgoing, QoS};
@@ -38,6 +37,7 @@ mod shared_materials;
 mod world;
 
 // Re-export types for easier access
+use camera_controllers::{CameraController, CameraControllerPlugin};
 use config::MqttConfig;
 use console::console_types::{ListCommand, LookCommand, TeleportCommand};
 use console::*;
