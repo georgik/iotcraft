@@ -9,12 +9,16 @@ rustflags = ["-C", "linker=/usr/bin/ld"]
 [target.x86_64-apple-darwin] 
 rustflags = ["-C", "linker=/usr/bin/ld"]
 
-# Use LLD on other platforms for faster builds
+# Linux: Use lld for faster builds (now installed in CI)
 [target.x86_64-unknown-linux-gnu]
 rustflags = ["-C", "link-arg=-fuse-ld=lld"]
 
+# Windows: Use system linker with debug info disabled for faster builds
 [target.x86_64-pc-windows-msvc]
 rustflags = ["-C", "link-arg=/DEBUG:NONE"]
+
+[target.x86_64-pc-windows-gnu]
+rustflags = []
 
 [target.wasm32-unknown-unknown]
 rustflags = [
