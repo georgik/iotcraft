@@ -11,9 +11,126 @@ use crate::web_menu::{WebGameState, WebMenuPlugin};
 use crate::config::MqttConfig;
 use crate::mqtt::MqttPlugin;
 
-// Simple device tracking for web (without full desktop functionality)
+// Device types for web (simplified from desktop version)
 use crate::mqtt::web::DeviceAnnouncementReceiver;
 use serde_json::Value;
+#[cfg(not(target_arch = "wasm32"))]
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+// Import web MQTT multiplayer types
+#[cfg(target_arch = "wasm32")]
+use crate::mqtt::web::{PoseMessage, PoseReceiver, PoseSender};
+
+// Import desktop multiplayer types for non-WASM
+#[cfg(not(target_arch = "wasm32"))]
+use crate::multiplayer::{PoseMessage, PoseReceiver, PoseSender};
+
+/// Device types available in the system
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum DeviceType {
+    Lamp,
+    Door,
+    Sensor,
+}
+
+impl DeviceType {
+    /// Convert from string representation
+    fn from_str(s: &str) -> Option<Self> {
+        match s {
+            "lamp" => Some(DeviceType::Lamp),
+            "door" => Some(DeviceType::Door),
+            "sensor" => Some(DeviceType::Sensor),
+            _ => None,
+        }
+    }
+
+    /// Convert to string representation
+    fn as_str(&self) -> &'static str {
+        match self {
+            DeviceType::Lamp => "lamp",
+            DeviceType::Door => "door",
+            DeviceType::Sensor => "sensor",
+        }
+    }
+
+    /// Get the mesh dimensions for this device type (width, height, depth)
+    fn mesh_dimensions(&self) -> (f32, f32, f32) {
+        match self {
+            DeviceType::Lamp => (1.0, 1.0, 1.0),
+            DeviceType::Door => (0.2, 2.0, 1.0),
+            DeviceType::Sensor => (1.0, 1.0, 1.0),
+        }
+    }
+}
+
+/// Web-compatible device entity component
+#[derive(Component)]
+struct DeviceEntity {
+    pub device_id: String,
+    pub device_type: String,
+}
+
+// ============ MULTIPLAYER COMPONENTS & RESOURCES ============
+
+/// Component to mark remote player entities
+#[derive(Component)]
+struct RemotePlayer;
+
+/// Component to store player avatar information
+#[derive(Component)]
+struct PlayerAvatar {
+    pub player_id: String,
+    pub player_name: String,
+}
+
+// Multiplayer types are imported from either web MQTT or desktop multiplayer modules
+
+/// Multiplayer connection status
+#[derive(Resource, Default)]
+struct MultiplayerConnectionStatus {
+    pub connection_available: bool,
+}
+
+/// Timer for position updates (10 Hz)
+#[derive(Resource)]
+struct PositionTimer {
+    timer: Timer,
+    last_position: Option<Vec3>,
+}
+
+impl Default for PositionTimer {
+    fn default() -> Self {
+        Self {
+            timer: Timer::from_seconds(0.1, TimerMode::Repeating), // 10 Hz
+            last_position: None,
+        }
+    }
+}
+
+/// World ID resource
+#[derive(Resource, Debug, Clone)]
+struct WorldId(pub String);
+
+impl Default for WorldId {
+    fn default() -> Self {
+        Self("default".to_string())
+    }
+}
+
+fn now_ts() -> u64 {
+    #[cfg(target_arch = "wasm32")]
+    {
+        // For WASM, use JavaScript Date.now() which returns milliseconds since epoch
+        js_sys::Date::now() as u64
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or(Duration::from_secs(0))
+            .as_millis() as u64
+    }
+}
 
 /// Set up panic hook for better error reporting in web console
 #[cfg(target_arch = "wasm32")]
@@ -77,13 +194,20 @@ pub fn start() {
         .add_plugins(MqttPlugin) // MQTT connection working!
         .insert_resource(ClearColor(Color::srgb(0.53, 0.81, 0.92)))
         .insert_resource(CameraController::new())
-        .add_systems(Startup, setup_basic_scene)
+        // Multiplayer resources
+        .insert_resource(WorldId::default())
+        .insert_resource(MultiplayerConnectionStatus::default())
+        .insert_resource(PositionTimer::default())
+        .add_systems(Startup, (setup_basic_scene, setup_multiplayer_connections))
         .add_systems(
             Update,
             (
                 rotate_cube,
                 camera_control_system.run_if(in_state(WebGameState::InGame)),
                 process_device_announcements,
+                update_position_timer,
+                publish_local_pose,
+                apply_remote_poses,
                 log_fps,
             ),
         )
@@ -423,7 +547,7 @@ fn camera_control_system(
     let dt = time.delta_secs();
 
     // Arrow key camera rotation (backup for mouse look)
-    let rotation_speed = 8.0f32; // degrees per frame when held (increased from 2.0)
+    let rotation_speed = 16.0f32; // degrees per frame when held (doubled from 8.0)
     let mut yaw_change = 0.0f32;
     let mut pitch_change = 0.0f32;
 
@@ -521,8 +645,9 @@ fn process_device_announcements(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    asset_server: Res<AssetServer>,
     device_receiver: Option<Res<DeviceAnnouncementReceiver>>,
-    existing_devices: Query<(Entity, &WebMqttDevice)>,
+    existing_devices: Query<(Entity, &DeviceEntity)>,
 ) {
     let Some(receiver) = device_receiver else {
         return; // No DeviceAnnouncementReceiver resource available yet
@@ -541,78 +666,128 @@ fn process_device_announcements(
 
         // Parse the JSON device announcement
         if let Ok(device_data) = serde_json::from_str::<Value>(&device_msg) {
-            let device_id = device_data["device_id"].as_str().unwrap_or("unknown");
-            let device_type = device_data["device_type"].as_str().unwrap_or("lamp");
-            let state = device_data["state"].as_str().unwrap_or("online");
+            if let (Some(device_id), Some(device_type_str), Some(state), Some(location)) = (
+                device_data["device_id"].as_str(),
+                device_data["device_type"].as_str(),
+                device_data["state"].as_str(),
+                device_data["location"].as_object(),
+            ) {
+                match state {
+                    "online" => {
+                        // Handle device registration/online announcement
+                        if let Some(device_type) = DeviceType::from_str(device_type_str) {
+                            // Check if device already exists
+                            let device_exists = existing_devices
+                                .iter()
+                                .any(|(_, dev)| dev.device_id == device_id);
 
-            // Parse location if available
-            let location = if let Some(loc) = device_data.get("location") {
-                Vec3::new(
-                    loc["x"].as_f64().unwrap_or(0.0) as f32,
-                    loc["y"].as_f64().unwrap_or(1.25) as f32, // Default height above ground
-                    loc["z"].as_f64().unwrap_or(0.0) as f32,
-                )
+                            if !device_exists {
+                                info!(
+                                    "🔌 Web: Registering new device: {} ({})",
+                                    device_id, device_type_str
+                                );
+
+                                // Extract location coordinates
+                                let x = location["x"].as_f64().unwrap_or(0.0) as f32;
+                                let y = location["y"].as_f64().unwrap_or(0.5) as f32;
+                                let z = location["z"].as_f64().unwrap_or(0.0) as f32;
+
+                                // Choose material based on device type
+                                let material = match device_type {
+                                    DeviceType::Lamp => {
+                                        let lamp_texture: Handle<Image> =
+                                            asset_server.load("textures/lamp.webp");
+                                        materials.add(StandardMaterial {
+                                            base_color_texture: Some(lamp_texture),
+                                            base_color: Color::srgb(0.2, 0.2, 0.2),
+                                            ..default()
+                                        })
+                                    }
+                                    DeviceType::Door => {
+                                        let door_texture: Handle<Image> =
+                                            asset_server.load("textures/door.webp");
+                                        materials.add(StandardMaterial {
+                                            base_color_texture: Some(door_texture),
+                                            base_color: Color::srgb(0.8, 0.6, 0.4), // Wood-like brown when closed
+                                            ..default()
+                                        })
+                                    }
+                                    DeviceType::Sensor => materials.add(StandardMaterial {
+                                        base_color: Color::srgb(0.2, 0.8, 1.0),
+                                        ..default()
+                                    }),
+                                };
+
+                                // Create mesh based on device type dimensions
+                                let (width, height, depth) = device_type.mesh_dimensions();
+                                let mesh = meshes.add(Cuboid::new(width, height, depth));
+
+                                // Spawn the device entity
+                                let _device_entity = commands.spawn((
+                                    Mesh3d(mesh),
+                                    MeshMaterial3d(material),
+                                    Transform::from_translation(Vec3::new(x, y, z)),
+                                    DeviceEntity {
+                                        device_id: device_id.to_string(),
+                                        device_type: device_type.as_str().to_string(),
+                                    },
+                                    Name::new(format!("Web-Device-{}", device_id)),
+                                ));
+
+                                info!(
+                                    "✅ Web: Spawned device: {} of type {} at ({}, {}, {})",
+                                    device_id,
+                                    device_type.as_str(),
+                                    x,
+                                    y,
+                                    z
+                                );
+                                web_sys::console::log_1(
+                                    &format!(
+                                        "✅ Web: Spawned device: {} of type {} at ({}, {}, {})",
+                                        device_id,
+                                        device_type.as_str(),
+                                        x,
+                                        y,
+                                        z
+                                    )
+                                    .into(),
+                                );
+                            } else {
+                                info!(
+                                    "⚠️ Web: Device {} already registered, ignoring duplicate announcement",
+                                    device_id
+                                );
+                            }
+                        } else {
+                            info!("❓ Web: Unknown device type: {}", device_type_str);
+                        }
+                    }
+                    "offline" => {
+                        // Handle device deregistration/offline announcement
+                        info!(
+                            "🔌 Web: Device {} going offline, removing from world",
+                            device_id
+                        );
+
+                        // Find and despawn the device entity
+                        for (entity, device_entity) in existing_devices.iter() {
+                            if device_entity.device_id == device_id {
+                                commands.entity(entity).despawn();
+                                info!("🗑️ Web: Removed device {} from 3D world", device_id);
+                                break;
+                            }
+                        }
+                    }
+                    _ => {
+                        info!(
+                            "❓ Web: Unknown device state: {} for device {}",
+                            state, device_id
+                        );
+                    }
+                }
             } else {
-                // Default position if no location specified
-                Vec3::new(0.0, 1.25, 5.0)
-            };
-
-            info!(
-                "Web: Device {} ({}), state: {}, location: {:?}",
-                device_id, device_type, state, location
-            );
-
-            // Check if device already exists
-            let device_exists = existing_devices
-                .iter()
-                .any(|(_, dev)| dev.device_id == device_id);
-
-            if !device_exists && state == "online" {
-                // Spawn new device
-                let device_material = if device_type == "lamp" {
-                    materials.add(StandardMaterial {
-                        base_color: Color::srgb(1.0, 1.0, 0.0), // Yellow for lamp
-                        emissive: Color::srgb(0.2, 0.2, 0.0).into(),
-                        ..default()
-                    })
-                } else {
-                    materials.add(StandardMaterial {
-                        base_color: Color::srgb(0.0, 0.8, 1.0), // Cyan for other devices
-                        ..default()
-                    })
-                };
-
-                let device_mesh = if device_type == "door" {
-                    meshes.add(Cuboid::new(0.2, 2.0, 1.0)) // Tall thin for door
-                } else {
-                    meshes.add(Cuboid::new(0.8, 0.8, 0.8)) // Regular cube for lamp
-                };
-
-                let device_entity = commands
-                    .spawn((
-                        Mesh3d(device_mesh),
-                        MeshMaterial3d(device_material),
-                        Transform::from_translation(location),
-                        WebMqttDevice {
-                            device_id: device_id.to_string(),
-                            device_type: device_type.to_string(),
-                            is_on: false,
-                        },
-                        Name::new(format!("MQTT-Device-{}", device_id)),
-                    ))
-                    .id();
-
-                info!(
-                    "Web: Spawned new {} device '{}' at {:?}",
-                    device_type, device_id, location
-                );
-                web_sys::console::log_1(
-                    &format!(
-                        "Web: Spawned new {} device '{}' at {:?}",
-                        device_type, device_id, location
-                    )
-                    .into(),
-                );
+                info!("⚠️ Web: Invalid device announcement format: missing required fields");
             }
         } else {
             warn!(
@@ -640,4 +815,246 @@ fn log_fps(time: Res<Time>, mut timer: Local<Timer>) {
 #[cfg(not(target_arch = "wasm32"))]
 fn log_fps(_time: Res<Time>) {
     // No-op for non-wasm targets
+}
+
+// ============ MULTIPLAYER SYSTEMS ============
+
+/// Setup multiplayer connections (simplified for web)
+fn setup_multiplayer_connections(
+    mut commands: Commands,
+    profile: Res<crate::profile::PlayerProfile>,
+) {
+    info!("🌐 Initializing web multiplayer...");
+
+    // Enable multiplayer - PoseReceiver and PoseSender are already set up by the web MQTT plugin
+    // We just need to enable the connection status
+    commands.insert_resource(MultiplayerConnectionStatus {
+        connection_available: true,
+    });
+
+    info!(
+        "🌐 Web multiplayer initialized for player {}",
+        profile.player_name
+    );
+    web_sys::console::log_1(
+        &format!(
+            "🌐 Web multiplayer initialized for player {}",
+            profile.player_name
+        )
+        .into(),
+    );
+}
+
+/// Update position timer
+fn update_position_timer(mut timer: ResMut<PositionTimer>, time: Res<Time>) {
+    timer.timer.tick(time.delta());
+}
+
+/// Publish local player pose (simplified for web)
+fn publish_local_pose(
+    profile: Res<crate::profile::PlayerProfile>,
+    mut timer: ResMut<PositionTimer>,
+    pose_sender: Option<Res<PoseSender>>,
+    camera_query: Query<&Transform, With<Camera3d>>,
+    connection_status: Res<MultiplayerConnectionStatus>,
+) {
+    if !timer.timer.just_finished() {
+        return;
+    }
+
+    // Don't publish poses if multiplayer is disabled
+    if !connection_status.connection_available {
+        return;
+    }
+
+    let Some(sender) = pose_sender else {
+        return;
+    };
+
+    let Ok(transform) = camera_query.single() else {
+        return;
+    };
+
+    let current_position = transform.translation;
+
+    // Always send initial pose, then only if position changed significantly
+    let should_send = match timer.last_position {
+        Some(last_pos) => current_position.distance(last_pos) > 0.01, // 1cm threshold
+        None => true,                                                 // Always send first time
+    };
+
+    if !should_send {
+        return;
+    }
+
+    timer.last_position = Some(current_position);
+
+    // Extract yaw/pitch from rotation
+    let forward = transform.forward();
+    let yaw = forward.x.atan2(forward.z);
+    let pitch = forward.y.asin();
+
+    let msg = PoseMessage {
+        player_id: profile.player_id.clone(),
+        player_name: profile.player_name.clone(),
+        pos: [current_position.x, current_position.y, current_position.z],
+        yaw,
+        pitch,
+        ts: now_ts(),
+    };
+
+    // Send pose message to MQTT system for publishing
+    if let Ok(tx) = sender.0.lock() {
+        if let Err(_) = tx.send(msg.clone()) {
+            error!("Failed to send pose message to MQTT publisher");
+        } else {
+            info!(
+                "📡 Web: Publishing pose for {} at [{:.2}, {:.2}, {:.2}]",
+                msg.player_name, msg.pos[0], msg.pos[1], msg.pos[2]
+            );
+        }
+    }
+}
+
+/// Apply remote poses to spawn/update player avatars
+fn apply_remote_poses(
+    profile: Res<crate::profile::PlayerProfile>,
+    pose_receiver: Option<Res<PoseReceiver>>,
+    mut commands: Commands,
+    mut remote_players: Query<(&mut Transform, &PlayerAvatar), With<RemotePlayer>>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    connection_status: Res<MultiplayerConnectionStatus>,
+) {
+    // Don't process remote poses if multiplayer is disabled
+    if !connection_status.connection_available {
+        return;
+    }
+
+    let Some(receiver) = pose_receiver else {
+        return;
+    };
+
+    let Ok(rx) = receiver.0.lock() else {
+        return;
+    };
+
+    // Process all available messages
+    while let Ok(msg) = rx.try_recv() {
+        // Ignore our own messages
+        if msg.player_id == profile.player_id {
+            continue;
+        }
+
+        // Try to update existing remote player avatar
+        let mut updated = false;
+        for (mut transform, player_avatar) in remote_players.iter_mut() {
+            if player_avatar.player_id == msg.player_id {
+                transform.translation = Vec3::new(msg.pos[0], msg.pos[1], msg.pos[2]);
+                transform.rotation = Quat::from_rotation_y(msg.yaw);
+                updated = true;
+                break;
+            }
+        }
+
+        // Spawn new remote player avatar if not found
+        if !updated {
+            let position = Vec3::new(msg.pos[0], msg.pos[1], msg.pos[2]);
+            spawn_simple_player_avatar(
+                &mut commands,
+                &mut meshes,
+                &mut materials,
+                position,
+                msg.player_id.clone(),
+                msg.player_name.clone(),
+            );
+
+            info!(
+                "👤 Web: New remote player joined: {} ({})",
+                msg.player_name, msg.player_id
+            );
+            web_sys::console::log_1(
+                &format!(
+                    "👤 Web: New remote player joined: {} ({})",
+                    msg.player_name, msg.player_id
+                )
+                .into(),
+            );
+        }
+    }
+}
+
+/// Spawn a simple player avatar for web (simplified version of desktop avatar)
+fn spawn_simple_player_avatar(
+    commands: &mut Commands,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    materials: &mut ResMut<Assets<StandardMaterial>>,
+    position: Vec3,
+    player_id: String,
+    player_name: String,
+) {
+    // Create a simple colorful avatar (simplified from desktop version)
+    let head_material = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.96, 0.8, 0.69), // Skin color
+        ..default()
+    });
+
+    let body_material = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.2, 0.4, 0.8), // Blue shirt
+        ..default()
+    });
+
+    // Simple avatar dimensions
+    let head_size = 0.4;
+    let body_width = 0.35;
+    let body_height = 0.6;
+    let body_depth = 0.2;
+
+    let head_mesh = meshes.add(Cuboid::new(head_size, head_size, head_size));
+    let body_mesh = meshes.add(Cuboid::new(body_width, body_height, body_depth));
+
+    // Spawn the main avatar entity
+    let avatar_entity = commands
+        .spawn((
+            Transform::from_translation(position),
+            GlobalTransform::default(),
+            PlayerAvatar {
+                player_id: player_id.clone(),
+                player_name: player_name.clone(),
+            },
+            RemotePlayer,
+            Name::new(format!("WebPlayerAvatar-{}", player_name)),
+            Visibility::default(),
+        ))
+        .id();
+
+    // Spawn head
+    let head_entity = commands
+        .spawn((
+            Mesh3d(head_mesh),
+            MeshMaterial3d(head_material),
+            Transform::from_translation(Vec3::new(0.0, body_height / 2.0 + head_size / 2.0, 0.0)),
+            Name::new("Head"),
+        ))
+        .id();
+
+    // Spawn body
+    let body_entity = commands
+        .spawn((
+            Mesh3d(body_mesh),
+            MeshMaterial3d(body_material),
+            Transform::from_translation(Vec3::ZERO),
+            Name::new("Body"),
+        ))
+        .id();
+
+    // Set up parent-child relationships
+    commands
+        .entity(avatar_entity)
+        .add_children(&[head_entity, body_entity]);
+
+    info!(
+        "👤 Web: Spawned simple avatar for player {} at {:?}",
+        player_name, position
+    );
 }
