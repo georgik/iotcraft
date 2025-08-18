@@ -7,6 +7,14 @@ use wasm_bindgen::prelude::*;
 // Web menu system
 use crate::web_menu::{WebGameState, WebMenuPlugin};
 
+// MQTT plugin and related modules
+use crate::config::MqttConfig;
+use crate::mqtt::MqttPlugin;
+
+// Simple device tracking for web (without full desktop functionality)
+use crate::mqtt::web::DeviceAnnouncementReceiver;
+use serde_json::Value;
+
 /// Set up panic hook for better error reporting in web console
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
@@ -35,9 +43,16 @@ pub fn main() {
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn start() {
-    web_sys::console::log_1(
-        &"Starting IoTCraft Desktop Client (Web Version) - Gradual Build".into(),
+    // Get build timestamp from compile-time environment variables
+    let build_timestamp = env!(
+        "BUILD_TIMESTAMP",
+        "Set BUILD_TIMESTAMP environment variable during build"
     );
+    let start_message = format!(
+        "Starting IoTCraft Desktop Client (Web Version) - Build: {}",
+        build_timestamp
+    );
+    web_sys::console::log_1(&start_message.into());
 
     // Initialize the Bevy app with basic plugins
     App::new()
@@ -52,7 +67,14 @@ pub fn start() {
             }),
             ..default()
         }))
+        // Insert resources BEFORE adding plugins that depend on them
+        .insert_resource(MqttConfig {
+            host: "localhost".to_string(),
+            port: 1883,
+        })
+        .insert_resource(crate::profile::load_or_create_profile_with_override(None))
         .add_plugins(WebMenuPlugin)
+        .add_plugins(MqttPlugin) // MQTT connection working!
         .insert_resource(ClearColor(Color::srgb(0.53, 0.81, 0.92)))
         .insert_resource(CameraController::new())
         .add_systems(Startup, setup_basic_scene)
@@ -61,6 +83,7 @@ pub fn start() {
             (
                 rotate_cube,
                 camera_control_system.run_if(in_state(WebGameState::InGame)),
+                process_device_announcements,
                 log_fps,
             ),
         )
@@ -73,6 +96,14 @@ struct DemoCube;
 
 #[derive(Component)]
 struct Ground;
+
+/// Component for MQTT-spawned devices in web client
+#[derive(Component)]
+struct WebMqttDevice {
+    pub device_id: String,
+    pub device_type: String,
+    pub is_on: bool,
+}
 
 /// Simple camera controller for web
 #[derive(Resource, Default)]
@@ -125,7 +156,7 @@ fn setup_basic_scene(
         )),
     ));
 
-    // Create materials for different block types
+    // Create materials for different block types - ensure asset paths are correct for web
     let grass_texture = asset_server.load("textures/grass.webp");
     let dirt_texture = asset_server.load("textures/dirt.webp");
     let stone_texture = asset_server.load("textures/stone.webp");
@@ -133,6 +164,11 @@ fn setup_basic_scene(
     let glass_texture = asset_server.load("textures/glass_pane.webp");
     let cyan_terracotta_texture = asset_server.load("textures/cyan_terracotta.webp");
     let esp_logo_texture = asset_server.load("textures/espressif.webp");
+
+    // Log asset loading for debugging
+    info!(
+        "Loading textures from base path. If textures don't appear, check browser console for 404 errors."
+    );
 
     let grass_material = materials.add(StandardMaterial {
         base_color_texture: Some(grass_texture.clone()),
@@ -387,7 +423,7 @@ fn camera_control_system(
     let dt = time.delta_secs();
 
     // Arrow key camera rotation (backup for mouse look)
-    let rotation_speed = 2.0f32; // degrees per frame when held
+    let rotation_speed = 8.0f32; // degrees per frame when held (increased from 2.0)
     let mut yaw_change = 0.0f32;
     let mut pitch_change = 0.0f32;
 
@@ -475,6 +511,113 @@ fn camera_control_system(
             window.cursor_options.visible = false;
             info!(
                 "Mouse captured for camera control. Use WASD to move, mouse to look around. Press Escape to open menu."
+            );
+        }
+    }
+}
+
+/// Process device announcements received via MQTT and spawn devices visually
+fn process_device_announcements(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    device_receiver: Option<Res<DeviceAnnouncementReceiver>>,
+    existing_devices: Query<(Entity, &WebMqttDevice)>,
+) {
+    let Some(receiver) = device_receiver else {
+        return; // No DeviceAnnouncementReceiver resource available yet
+    };
+
+    let Ok(rx) = receiver.0.lock() else {
+        return;
+    };
+
+    // Process all available device announcements
+    while let Ok(device_msg) = rx.try_recv() {
+        web_sys::console::log_1(
+            &format!("Web: Processing device announcement: {}", device_msg).into(),
+        );
+        info!("Web: Processing device announcement: {}", device_msg);
+
+        // Parse the JSON device announcement
+        if let Ok(device_data) = serde_json::from_str::<Value>(&device_msg) {
+            let device_id = device_data["device_id"].as_str().unwrap_or("unknown");
+            let device_type = device_data["device_type"].as_str().unwrap_or("lamp");
+            let state = device_data["state"].as_str().unwrap_or("online");
+
+            // Parse location if available
+            let location = if let Some(loc) = device_data.get("location") {
+                Vec3::new(
+                    loc["x"].as_f64().unwrap_or(0.0) as f32,
+                    loc["y"].as_f64().unwrap_or(1.25) as f32, // Default height above ground
+                    loc["z"].as_f64().unwrap_or(0.0) as f32,
+                )
+            } else {
+                // Default position if no location specified
+                Vec3::new(0.0, 1.25, 5.0)
+            };
+
+            info!(
+                "Web: Device {} ({}), state: {}, location: {:?}",
+                device_id, device_type, state, location
+            );
+
+            // Check if device already exists
+            let device_exists = existing_devices
+                .iter()
+                .any(|(_, dev)| dev.device_id == device_id);
+
+            if !device_exists && state == "online" {
+                // Spawn new device
+                let device_material = if device_type == "lamp" {
+                    materials.add(StandardMaterial {
+                        base_color: Color::srgb(1.0, 1.0, 0.0), // Yellow for lamp
+                        emissive: Color::srgb(0.2, 0.2, 0.0).into(),
+                        ..default()
+                    })
+                } else {
+                    materials.add(StandardMaterial {
+                        base_color: Color::srgb(0.0, 0.8, 1.0), // Cyan for other devices
+                        ..default()
+                    })
+                };
+
+                let device_mesh = if device_type == "door" {
+                    meshes.add(Cuboid::new(0.2, 2.0, 1.0)) // Tall thin for door
+                } else {
+                    meshes.add(Cuboid::new(0.8, 0.8, 0.8)) // Regular cube for lamp
+                };
+
+                let device_entity = commands
+                    .spawn((
+                        Mesh3d(device_mesh),
+                        MeshMaterial3d(device_material),
+                        Transform::from_translation(location),
+                        WebMqttDevice {
+                            device_id: device_id.to_string(),
+                            device_type: device_type.to_string(),
+                            is_on: false,
+                        },
+                        Name::new(format!("MQTT-Device-{}", device_id)),
+                    ))
+                    .id();
+
+                info!(
+                    "Web: Spawned new {} device '{}' at {:?}",
+                    device_type, device_id, location
+                );
+                web_sys::console::log_1(
+                    &format!(
+                        "Web: Spawned new {} device '{}' at {:?}",
+                        device_type, device_id, location
+                    )
+                    .into(),
+                );
+            }
+        } else {
+            warn!(
+                "Web: Failed to parse device announcement JSON: {}",
+                device_msg
             );
         }
     }

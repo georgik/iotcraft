@@ -82,11 +82,6 @@ pub fn load_or_create_profile_with_override(player_id_override: Option<String>) 
     // For web, we'll use localStorage in the future, but for now just create a default profile
     let mut profile = PlayerProfile::default();
 
-    // Override player ID if provided
-    if let Some(id) = player_id_override {
-        profile.player_id = id;
-    }
-
     // Try to load from localStorage if available
     #[cfg(target_arch = "wasm32")]
     {
@@ -97,15 +92,30 @@ pub fn load_or_create_profile_with_override(player_id_override: Option<String>) 
                     if let Ok(stored_profile) = serde_json::from_str::<PlayerProfile>(&stored_data)
                     {
                         profile = stored_profile;
-                        if let Some(id) = player_id_override {
-                            profile.player_id = id;
-                        }
                     }
                 }
+            }
+        }
+    }
 
-                // Save profile back to localStorage
-                if let Ok(json) = serde_json::to_string(&profile) {
-                    let _ = local_storage.set_item(storage_key, &json);
+    // Track if we used an override
+    let used_override = if let Some(id) = player_id_override {
+        profile.player_id = id;
+        true
+    } else {
+        false
+    };
+
+    // Save profile back to localStorage (only if not using override)
+    #[cfg(target_arch = "wasm32")]
+    {
+        if !used_override {
+            if let Some(window) = web_sys::window() {
+                if let Ok(Some(local_storage)) = window.local_storage() {
+                    let storage_key = "iotcraft_player_profile";
+                    if let Ok(json) = serde_json::to_string(&profile) {
+                        let _ = local_storage.set_item(storage_key, &json);
+                    }
                 }
             }
         }

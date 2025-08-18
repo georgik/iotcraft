@@ -36,12 +36,23 @@ bytemuck = { version = "1.16", features = ["derive"] } # GPU data alignment
 # Web-specific dependencies
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 wasm-bindgen = "0.2"
-web-sys = "0.3"
+web-sys = { version = "0.3", features = [
+  "BinaryType",
+  "Blob",
+  "CloseEvent",
+  "ErrorEvent",
+  "FileReader",
+  "MessageEvent",
+  "ProgressEvent",
+  "WebSocket",
+  "Window",
+  "console",
+  "Location",
+  "Storage",
+] }
 js-sys = "0.3"
 wasm-bindgen-futures = "0.4"
 console_error_panic_hook = "0.1"
-# WebSocket-based MQTT client for WASM
-tungstenite = { version = "0.24", default-features = false, features = [] }
 # Configure both getrandom versions for WASM
 getrandom = { version = "0.2", features = ["js"] }
 # Add getrandom v0.3 directly to enable wasm_js feature
@@ -85,6 +96,9 @@ opt-level = "s"  # Optimize for size
 lto = true
 codegen-units = 1
 strip = true
+
+[build-dependencies]
+chrono = "0.4"
 
 # Workspace for xtask
 [workspace]

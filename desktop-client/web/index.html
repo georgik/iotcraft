@@ -54,7 +54,7 @@
             color: #888;
         }
 
-        #bevy {
+        #canvas {
             width: 100vw;
             height: 100vh;
             display: block;
@@ -131,7 +131,7 @@
     </div>
 
     <!-- Main Canvas -->
-    <canvas id="bevy" style="display: none;"></canvas>
+    <canvas id="canvas" style="display: none;"></canvas>
 
     <!-- Controls -->
     <div class="controls">
@@ -158,7 +158,7 @@
         let isInitialized = false;
         let loadingElement = document.getElementById('loading');
         let loadingProgress = document.getElementById('loadingProgress');
-        let canvas = document.getElementById('bevy');
+        let canvas = document.getElementById('canvas');
         let errorElement = document.getElementById('error');
         let errorMessage = document.getElementById('errorMessage');
         let statusElement = document.getElementById('status');
@@ -218,7 +218,7 @@
                 updateProgress('Loading WASM module...');
                 
                 // Import the WASM module
-                const wasmModule = await import('./pkg/iotcraft_desktop_client.js');
+                const wasmModule = await import('./iotcraft_web.js');
                 
                 updateProgress('Initializing WebAssembly...');
                 
@@ -304,6 +304,13 @@
                 showError('Application failed to start', event.reason?.message || 'Promise rejection');
             }
         });
+
+        // Add user interaction handler for audio context
+        document.addEventListener('click', function handleFirstClick() {
+            // Remove the handler after first click
+            document.removeEventListener('click', handleFirstClick);
+            console.log('[IoTCraft] User interaction detected, enabling audio context');
+        }, { once: true });
 
         // Check WebAssembly support
         if (typeof WebAssembly !== 'object') {
