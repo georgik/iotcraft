@@ -1,0 +1,114 @@
+name: Desktop Client Web Build
+
+on:
+  workflow_dispatch:
+    inputs:
+      deploy_to_pages:
+        description: 'Deploy to GitHub Pages'
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Allow only one concurrent deployment, skipping runs queued between the run in-progress and latest queued.
+# However, do NOT cancel in-progress runs as we want to allow these production deployments to complete.
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-web:
+    name: Build Web Application
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Install Linux dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          pkg-config \
+          libx11-dev \
+          libasound2-dev \
+          libudev-dev \
+          libxkbcommon-x11-0 \
+          libwayland-dev \
+          libxrandr-dev \
+          libxcursor-dev \
+          libxi-dev \
+          libxinerama-dev \
+          libgl1-mesa-dev \
+          libglu1-mesa-dev
+
+    - name: Install Rust
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        targets: wasm32-unknown-unknown
+
+    - name: Install wasm-pack
+      run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+
+    - name: Cache dependencies
+      uses: Swatinem/rust-cache@v2
+      with:
+        workspaces: |
+          desktop-client
+          desktop-client/xtask
+
+    - name: Build web version
+      run: |
+        cd desktop-client
+        cargo xtask web-build --release
+
+    - name: List build outputs (for debugging)
+      run: |
+        cd desktop-client
+        ls -la dist/
+        echo "--- index.html preview ---"
+        head -20 dist/index.html || true
+
+    - name: Upload web build artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: iotcraft-web-build
+        path: desktop-client/dist/
+        retention-days: 30
+
+  deploy-pages:
+    name: Deploy to GitHub Pages
+    if: |
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.deploy_to_pages == 'true') ||
+      (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    needs: build-web
+    
+    steps:
+    - name: Download build artifacts
+      uses: actions/download-artifact@v4
+      with:
+        name: iotcraft-web-build
+        path: ./web-build
+
+    - name: Setup Pages
+      uses: actions/configure-pages@v4
+
+    - name: Upload to GitHub Pages
+      uses: actions/upload-pages-artifact@v3
+      with:
+        path: ./web-build
+
+    - name: Deploy to GitHub Pages
+      id: deployment
+      uses: actions/deploy-pages@v4

@@ -168,7 +168,7 @@ async fn copy_wasm_files(output_path: &Path) -> Result<()> {
 async fn generate_html(output_path: &Path, _is_release: bool) -> Result<()> {
     // Try to use template from web/index.html, otherwise generate default
     let template_path = Path::new("web/index.html");
-    
+
     let html_content = if template_path.exists() {
         // Use existing template
         fs::read_to_string(template_path)
