@@ -76,13 +76,6 @@ struct DeviceEntity {
 #[derive(Component)]
 struct RemotePlayer;
 
-/// Component to store player avatar information
-#[derive(Component)]
-struct PlayerAvatar {
-    pub player_id: String,
-    pub player_name: String,
-}
-
 // Multiplayer types are imported from either web MQTT or desktop multiplayer modules
 
 /// Multiplayer connection status
@@ -199,6 +192,7 @@ pub fn start() {
         .insert_resource(crate::profile::load_or_create_profile_with_override(None))
         .add_plugins(WebMenuPlugin)
         .add_plugins(MqttPlugin) // MQTT connection working!
+        .add_plugins(crate::player_avatar::PlayerAvatarPlugin) // Add avatar animations
         .insert_resource(ClearColor(Color::srgb(0.53, 0.81, 0.92)))
         .insert_resource(CameraController::new())
         // Multiplayer resources
@@ -928,7 +922,10 @@ fn apply_remote_poses(
     profile: Res<crate::profile::PlayerProfile>,
     pose_receiver: Option<Res<PoseReceiver>>,
     mut commands: Commands,
-    mut remote_players: Query<(&mut Transform, &PlayerAvatar), With<RemotePlayer>>,
+    mut remote_players: Query<
+        (&mut Transform, &crate::player_avatar::PlayerAvatar),
+        With<RemotePlayer>,
+    >,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     connection_status: Res<MultiplayerConnectionStatus>,
@@ -981,7 +978,9 @@ fn apply_remote_poses(
         // Spawn new remote player avatar if not found
         if !updated {
             let position = Vec3::new(msg.pos[0], msg.pos[1], msg.pos[2]);
-            spawn_simple_player_avatar(
+
+            // Use the unified desktop avatar spawning function
+            let avatar_entity = crate::player_avatar::spawn_player_avatar(
                 &mut commands,
                 &mut meshes,
                 &mut materials,
@@ -990,99 +989,20 @@ fn apply_remote_poses(
                 msg.player_name.clone(),
             );
 
+            // Add RemotePlayer marker to distinguish from local player
+            commands.entity(avatar_entity).insert(RemotePlayer);
+
             info!(
-                "👤 Web: New remote player joined: {} ({})",
+                "👤 Web: New remote player joined using unified avatar: {} ({})",
                 msg.player_name, msg.player_id
             );
             web_sys::console::log_1(
                 &format!(
-                    "👤 Web: New remote player joined: {} ({})",
+                    "👤 Web: New remote player joined using unified avatar: {} ({})",
                     msg.player_name, msg.player_id
                 )
                 .into(),
             );
         }
     }
-}
-
-/// Spawn a simple player avatar for web (simplified version of desktop avatar)
-fn spawn_simple_player_avatar(
-    commands: &mut Commands,
-    meshes: &mut ResMut<Assets<Mesh>>,
-    materials: &mut ResMut<Assets<StandardMaterial>>,
-    position: Vec3,
-    player_id: String,
-    player_name: String,
-) {
-    // Create a simple colorful avatar (simplified from desktop version)
-    let head_material = materials.add(StandardMaterial {
-        base_color: Color::srgb(0.96, 0.8, 0.69), // Skin color
-        ..default()
-    });
-
-    let body_material = materials.add(StandardMaterial {
-        base_color: Color::srgb(0.2, 0.4, 0.8), // Blue shirt
-        ..default()
-    });
-
-    // Simple avatar dimensions
-    let head_size = 0.4;
-    let body_width = 0.35;
-    let body_height = 0.6;
-    let body_depth = 0.2;
-
-    let head_mesh = meshes.add(Cuboid::new(head_size, head_size, head_size));
-    let body_mesh = meshes.add(Cuboid::new(body_width, body_height, body_depth));
-
-    // Spawn the main avatar entity
-    let avatar_entity = commands
-        .spawn((
-            Transform::from_translation(position),
-            GlobalTransform::default(),
-            PlayerAvatar {
-                player_id: player_id.clone(),
-                player_name: player_name.clone(),
-            },
-            RemotePlayer,
-            Name::new(format!("WebPlayerAvatar-{}", player_name)),
-            Visibility::default(),
-        ))
-        .id();
-
-    // Spawn head
-    let head_entity = commands
-        .spawn((
-            Mesh3d(head_mesh),
-            MeshMaterial3d(head_material),
-            Transform::from_translation(Vec3::new(0.0, body_height / 2.0 + head_size / 2.0, 0.0)),
-            Name::new("Head"),
-        ))
-        .id();
-
-    // Spawn body
-    let body_entity = commands
-        .spawn((
-            Mesh3d(body_mesh),
-            MeshMaterial3d(body_material),
-            Transform::from_translation(Vec3::ZERO),
-            Name::new("Body"),
-        ))
-        .id();
-
-    // Set up parent-child relationships
-    commands
-        .entity(avatar_entity)
-        .add_children(&[head_entity, body_entity]);
-
-    info!(
-        "👤 Web: Spawned simple avatar for player {} at {:?}",
-        player_name, position
-    );
-    web_sys::console::log_1(
-        &format!(
-            "👤 Web: Spawned simple avatar for player {} at {:?}",
-            player_name, position
-        )
-        .into(),
-    );
 }
