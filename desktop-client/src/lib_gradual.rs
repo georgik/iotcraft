@@ -948,8 +948,17 @@ fn apply_remote_poses(
 
     // Process all available messages
     while let Ok(msg) = rx.try_recv() {
+        info!(
+            "📡 Web: Processing pose message from {}: {:?}",
+            msg.player_name, msg.pos
+        );
+
         // Ignore our own messages
         if msg.player_id == profile.player_id {
+            info!(
+                "📡 Web: Ignoring our own pose message from {}",
+                msg.player_name
+            );
             continue;
         }
 
@@ -957,9 +966,14 @@ fn apply_remote_poses(
         let mut updated = false;
         for (mut transform, player_avatar) in remote_players.iter_mut() {
             if player_avatar.player_id == msg.player_id {
+                let old_pos = transform.translation;
                 transform.translation = Vec3::new(msg.pos[0], msg.pos[1], msg.pos[2]);
                 transform.rotation = Quat::from_rotation_y(msg.yaw);
                 updated = true;
+                info!(
+                    "👤 Web: Updated existing avatar for {} from {:?} to {:?}",
+                    msg.player_name, old_pos, transform.translation
+                );
                 break;
             }
         }
@@ -1063,5 +1077,12 @@ fn spawn_simple_player_avatar(
     info!(
         "👤 Web: Spawned simple avatar for player {} at {:?}",
         player_name, position
+    );
+    web_sys::console::log_1(
+        &format!(
+            "👤 Web: Spawned simple avatar for player {} at {:?}",
+            player_name, position
+        )
+        .into(),
     );
 }

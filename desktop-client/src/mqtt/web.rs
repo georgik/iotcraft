@@ -349,6 +349,7 @@ pub fn spawn_web_mqtt_subscriber(
 
     // Connection and subscription state tracking
     let subscriptions_confirmed = Rc::new(RefCell::new(0u8)); // Track confirmed subscriptions (0-3)
+    let pose_subscription_confirmed = Rc::new(RefCell::new(false)); // Track specifically pose subscription
 
     // Wrap channels in Rc<RefCell<>> for sharing between closures
     let temp_tx = Rc::new(RefCell::new(temp_tx));
@@ -361,6 +362,7 @@ pub fn spawn_web_mqtt_subscriber(
     let device_tx_clone = device_tx.clone();
     let pose_tx_clone = pose_tx.clone();
     let subscriptions_confirmed_clone = subscriptions_confirmed.clone();
+    let pose_subscription_confirmed_clone = pose_subscription_confirmed.clone();
 
     // Message handler
     let onmessage_callback = Closure::<dyn FnMut(_)>::new(move |e: MessageEvent| {
@@ -394,14 +396,23 @@ pub fn spawn_web_mqtt_subscriber(
                         *confirmed += 1;
                         info!("MQTT Web: Subscriptions confirmed: {}/3", *confirmed);
 
-                        if *confirmed == 3 {
+                        // Special handling for pose subscription (packet ID 3)
+                        if packet_id == 3 {
+                            if let Ok(mut pose_confirmed) =
+                                pose_subscription_confirmed_clone.try_borrow_mut()
+                            {
+                                *pose_confirmed = true;
+                            }
                             info!(
-                                "🎉 MQTT Web: All subscriptions confirmed! Pose publishing will now start."
+                                "🎉 MQTT Web: Pose subscription confirmed! Pose publishing enabled."
                             );
                             web_sys::console::log_1(
-                                &"🎉 All MQTT subscriptions confirmed! Pose publishing enabled."
-                                    .into(),
+                                &"🎉 Pose subscription confirmed! Multiplayer enabled.".into(),
                             );
+                        }
+
+                        if *confirmed == 3 {
+                            info!("🎉 MQTT Web: All subscriptions confirmed!");
                         }
                     }
                 } else {
@@ -575,11 +586,29 @@ pub fn spawn_web_mqtt_subscriber(
             let subs_confirmed_pub = subscriptions_confirmed_clone2.clone();
 
             let publish_callback = Closure::<dyn FnMut()>::new(move || {
-                // Only start publishing poses after all 3 subscriptions are confirmed
-                if let Ok(confirmed) = subs_confirmed_pub.try_borrow() {
-                    if *confirmed < 3 {
-                        return; // Not all subscriptions confirmed yet
+                // Check subscription status and log it
+                let confirmed_count = if let Ok(confirmed) = subs_confirmed_pub.try_borrow() {
+                    *confirmed
+                } else {
+                    0
+                };
+
+                // Only start publishing poses after pose subscription is confirmed (packet ID 3)
+                // We need at least 2 confirmations (temperature + pose)
+                if confirmed_count < 2 {
+                    // Periodically log that we're waiting for subscriptions
+                    static mut LOG_COUNTER: u32 = 0;
+                    unsafe {
+                        LOG_COUNTER += 1;
+                        if LOG_COUNTER % 100 == 0 {
+                            // Log every 5 seconds (50ms * 100)
+                            info!(
+                                "⏳ Web: Waiting for pose subscription to be confirmed ({}/3)",
+                                confirmed_count
+                            );
+                        }
                     }
+                    return; // Not all subscriptions confirmed yet
                 }
 
                 // Check for outgoing pose messages
@@ -592,10 +621,14 @@ pub fn spawn_web_mqtt_subscriber(
                         if let Ok(payload) = serde_json::to_string(&pose_msg) {
                             let publish_packet =
                                 SimpleMqttPackets::publish_packet(&topic, payload.as_bytes());
+                            info!("📡 Web: Publishing pose to topic '{}': {}", topic, payload);
                             if let Err(e) = websocket_pub.send_with_u8_array(&publish_packet) {
                                 error!("📡 Web: Failed to publish pose: {:?}", e);
                             } else {
-                                info!("📡 Web: Published pose for player {}", pose_msg.player_name);
+                                info!(
+                                    "📡 Web: Successfully sent pose packet for player {}",
+                                    pose_msg.player_name
+                                );
                             }
                         }
                     }
