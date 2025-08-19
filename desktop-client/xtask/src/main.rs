@@ -341,17 +341,23 @@ async fn web_serve(port: u16, dir: &str) -> Result<()> {
     println!("   Serving directory: {}", dir);
     println!("   Port: {}", port);
     println!("   URL: http://localhost:{}", port);
+
+    // Get local IP for network access instructions
+    let local_ip = get_local_ip().unwrap_or_else(|| "<your-ip>".to_string());
+    println!("   Network URL: http://{}:{}", local_ip, port);
     println!();
+    println!("📱 Access from mobile devices or other computers using the network URL");
     println!("Press Ctrl+C to stop the server");
 
     // Use Python's built-in HTTP server for simplicity and portability
+    // The --bind 0.0.0.0 flag makes it accessible from other machines
     let mut cmd = if which::which("python3").is_ok() {
         let mut cmd = Command::new("python3");
-        cmd.args(&["-m", "http.server", &port.to_string()]);
+        cmd.args(&["-m", "http.server", &port.to_string(), "--bind", "0.0.0.0"]);
         cmd
     } else if which::which("python").is_ok() {
         let mut cmd = Command::new("python");
-        cmd.args(&["-m", "http.server", &port.to_string()]);
+        cmd.args(&["-m", "http.server", &port.to_string(), "--bind", "0.0.0.0"]);
         cmd
     } else {
         return Err(anyhow::anyhow!(
@@ -368,4 +374,16 @@ async fn web_serve(port: u16, dir: &str) -> Result<()> {
     }
 
     Ok(())
+}
+
+/// Get the local IP address for network access
+fn get_local_ip() -> Option<String> {
+    use std::net::UdpSocket;
+
+    // Try to connect to a remote address to determine local IP
+    // This doesn't actually send data, just determines routing
+    let socket = UdpSocket::bind("0.0.0.0:0").ok()?;
+    socket.connect("8.8.8.8:80").ok()?;
+    let local_addr = socket.local_addr().ok()?;
+    Some(local_addr.ip().to_string())
 }

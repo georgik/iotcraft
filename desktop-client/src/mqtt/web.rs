@@ -319,13 +319,8 @@ pub fn spawn_web_mqtt_subscriber(
     let world_id = "default"; // Use default world for web client
     let pose_subscribe_topic = format!("iotcraft/worlds/{}/players/+/pose", world_id);
 
-    // Determine WebSocket URL based on MQTT config
-    let ws_port = if mqtt_config.port == 1883 {
-        8083
-    } else {
-        mqtt_config.port + 1000
-    };
-    let ws_url = format!("ws://{}:{}/", mqtt_config.host, ws_port);
+    // Use the WebSocket port directly from MQTT config (should be 8083 for web)
+    let ws_url = format!("ws://{}:{}/", mqtt_config.host, mqtt_config.port);
 
     info!("MQTT Web: Connecting to WebSocket MQTT at {}", ws_url);
     web_sys::console::log_1(&format!("Connecting to MQTT broker at {}", ws_url).into());

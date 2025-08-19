@@ -100,7 +100,7 @@ fn setup_main_menu(mut commands: Commands, _asset_server: Res<AssetServer>) {
         MainMenuUI,
     )).with_children(|parent| {
         parent.spawn((
-            Text::new("IoTCraft Web\n\nPress Enter to start the game\nPress Escape for menu when in-game"),
+            Text::new("IoTCraft Web\n\nPress Enter or tap anywhere to start\nPress Escape for menu when in-game"),
             TextFont { font_size: 32.0, ..default() },
             TextColor(BUTTON_TEXT_COLOR),
         ));
@@ -313,23 +313,46 @@ fn handle_settings_menu_buttons(
     }
 }
 
-/// Handle keyboard navigation
+/// Handle keyboard and touch navigation
 fn handle_escape_key(
     keyboard_input: Res<ButtonInput<KeyCode>>,
+    mut touch_events: EventReader<TouchInput>,
     current_state: Res<State<WebGameState>>,
     mut next_state: ResMut<NextState<WebGameState>>,
 ) {
+    // Handle keyboard input
     if keyboard_input.just_pressed(KeyCode::Enter) {
         match current_state.get() {
-            WebGameState::MainMenu => next_state.set(WebGameState::InGame),
+            WebGameState::MainMenu => {
+                info!("📱 Starting game via Enter key");
+                next_state.set(WebGameState::InGame);
+            }
             _ => {}
         }
     }
 
     if keyboard_input.just_pressed(KeyCode::Escape) {
         match current_state.get() {
-            WebGameState::InGame => next_state.set(WebGameState::MainMenu),
+            WebGameState::InGame => {
+                info!("📱 Opening menu via Escape key");
+                next_state.set(WebGameState::MainMenu);
+            }
             _ => {}
+        }
+    }
+
+    // Handle touch input - tap anywhere on main menu to start game
+    for touch in touch_events.read() {
+        if touch.phase == bevy::input::touch::TouchPhase::Started {
+            match current_state.get() {
+                WebGameState::MainMenu => {
+                    info!("📱 Starting game via touch input at {:?}", touch.position);
+                    #[cfg(target_arch = "wasm32")]
+                    web_sys::console::log_1(&"📱 Touch detected - starting game!".into());
+                    next_state.set(WebGameState::InGame);
+                }
+                _ => {}
+            }
         }
     }
 }

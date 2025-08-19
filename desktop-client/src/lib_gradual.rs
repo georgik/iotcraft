@@ -110,6 +110,241 @@ impl Default for WorldId {
     }
 }
 
+// ============ TOUCH CONTROL SYSTEMS ============
+
+/// Setup touch control areas based on screen size
+fn setup_touch_areas(mut touch_state: ResMut<TouchInputState>, windows: Query<&Window>) {
+    if let Ok(window) = windows.single() {
+        let window_width = window.resolution.width();
+        let window_height = window.resolution.height();
+
+        // Virtual joystick center (bottom-left quarter)
+        touch_state.joystick_center = Vec2::new(window_width * 0.15, window_height * 0.85);
+
+        // Look area starts from center of screen to the right
+        touch_state.look_area_min_x = window_width * 0.5;
+
+        info!(
+            "📱 Touch areas initialized: joystick at {:?}, look area x >= {:.1}",
+            touch_state.joystick_center, touch_state.look_area_min_x
+        );
+
+        #[cfg(target_arch = "wasm32")]
+        web_sys::console::log_1(&format!(
+            "📱 Touch controls ready: Movement (left side), Look (right side), Joystick center: {:?}",
+            touch_state.joystick_center
+        ).into());
+    }
+}
+
+/// Enhanced camera control system with touch support for mobile devices
+fn touch_camera_control_system(
+    time: Res<Time>,
+    mut camera_controller: ResMut<CameraController>,
+    keyboard_input: Res<ButtonInput<KeyCode>>,
+    mut camera_query: Query<&mut Transform, With<Camera3d>>,
+    mut windows: Query<&mut Window>,
+    mouse_button_input: Res<ButtonInput<MouseButton>>,
+    mut cursor_moved_events: EventReader<CursorMoved>,
+    mut touch_events: EventReader<TouchInput>,
+    mut touch_state: ResMut<TouchInputState>,
+) {
+    if !camera_controller.enabled {
+        return;
+    }
+
+    let Ok(mut camera_transform) = camera_query.single_mut() else {
+        return;
+    };
+
+    let mut velocity = Vec3::ZERO;
+    let dt = time.delta_secs();
+
+    // ============ TOUCH INPUT PROCESSING ============
+
+    for touch in touch_events.read() {
+        let touch_pos = touch.position;
+
+        match touch.phase {
+            bevy::input::touch::TouchPhase::Started => {
+                // Determine if this touch is for movement (left side) or look (right side)
+                if touch_pos.x < touch_state.look_area_min_x {
+                    // Movement touch (left side)
+                    if touch_state.move_touch_id.is_none() {
+                        touch_state.move_touch_id = Some(touch.id);
+                        touch_state.last_move_position = Some(touch_pos);
+                        info!("📱 Movement touch started at {:?}", touch_pos);
+                    }
+                } else {
+                    // Look touch (right side)
+                    if touch_state.look_touch_id.is_none() {
+                        touch_state.look_touch_id = Some(touch.id);
+                        touch_state.last_look_position = Some(touch_pos);
+                        info!("📱 Look touch started at {:?}", touch_pos);
+                    }
+                }
+            }
+            bevy::input::touch::TouchPhase::Moved => {
+                if Some(touch.id) == touch_state.move_touch_id {
+                    // Handle movement touch
+                    if let Some(_last_pos) = touch_state.last_move_position {
+                        // Move delta is not needed for joystick-style movement
+
+                        // Convert touch delta to movement (virtual joystick)
+                        let joystick_delta = touch_pos - touch_state.joystick_center;
+                        let distance = joystick_delta.length();
+                        let max_distance = 100.0; // Maximum joystick distance
+
+                        if distance > 10.0 {
+                            // Dead zone
+                            let normalized = joystick_delta / distance;
+                            let strength = (distance / max_distance).min(1.0);
+
+                            // Forward/backward based on Y
+                            if normalized.y < -0.3 {
+                                velocity += camera_transform.forward().as_vec3() * strength;
+                            } else if normalized.y > 0.3 {
+                                velocity -= camera_transform.forward().as_vec3() * strength;
+                            }
+
+                            // Left/right based on X
+                            if normalized.x < -0.3 {
+                                velocity -= camera_transform.right().as_vec3() * strength;
+                            } else if normalized.x > 0.3 {
+                                velocity += camera_transform.right().as_vec3() * strength;
+                            }
+                        }
+
+                        touch_state.last_move_position = Some(touch_pos);
+                    }
+                } else if Some(touch.id) == touch_state.look_touch_id {
+                    // Handle look touch
+                    if let Some(last_pos) = touch_state.last_look_position {
+                        let delta = touch_pos - last_pos;
+
+                        // Apply camera rotation based on touch drag
+                        let touch_sensitivity = camera_controller.touch_sensitivity * 0.01;
+                        camera_controller.yaw -= delta.x * touch_sensitivity;
+                        camera_controller.pitch -= delta.y * touch_sensitivity;
+
+                        // Clamp pitch
+                        camera_controller.pitch = camera_controller.pitch.clamp(
+                            -std::f32::consts::FRAC_PI_2 * 0.9,
+                            std::f32::consts::FRAC_PI_2 * 0.9,
+                        );
+
+                        touch_state.last_look_position = Some(touch_pos);
+                    }
+                }
+            }
+            bevy::input::touch::TouchPhase::Ended | bevy::input::touch::TouchPhase::Canceled => {
+                // Clear touch tracking
+                if Some(touch.id) == touch_state.move_touch_id {
+                    touch_state.move_touch_id = None;
+                    touch_state.last_move_position = None;
+                    info!("📱 Movement touch ended");
+                } else if Some(touch.id) == touch_state.look_touch_id {
+                    touch_state.look_touch_id = None;
+                    touch_state.last_look_position = None;
+                    info!("📱 Look touch ended");
+                }
+            }
+        }
+    }
+
+    // ============ KEYBOARD INPUT (for desktop compatibility) ============
+
+    // Arrow key camera rotation (backup for mouse look)
+    let rotation_speed = 16.0f32; // degrees per frame when held
+    let mut yaw_change = 0.0f32;
+    let mut pitch_change = 0.0f32;
+
+    if keyboard_input.pressed(KeyCode::ArrowLeft) {
+        yaw_change += rotation_speed;
+    }
+    if keyboard_input.pressed(KeyCode::ArrowRight) {
+        yaw_change -= rotation_speed;
+    }
+    if keyboard_input.pressed(KeyCode::ArrowUp) {
+        pitch_change += rotation_speed;
+    }
+    if keyboard_input.pressed(KeyCode::ArrowDown) {
+        pitch_change -= rotation_speed;
+    }
+
+    // Apply arrow key rotation
+    if yaw_change != 0.0 || pitch_change != 0.0 {
+        camera_controller.yaw += yaw_change.to_radians() * dt;
+        camera_controller.pitch = (camera_controller.pitch + pitch_change.to_radians() * dt)
+            .clamp(-std::f32::consts::PI / 2.0, std::f32::consts::PI / 2.0);
+    }
+
+    // Handle WASD movement (desktop)
+    if keyboard_input.pressed(KeyCode::KeyW) {
+        velocity += camera_transform.forward().as_vec3();
+    }
+    if keyboard_input.pressed(KeyCode::KeyS) {
+        velocity -= camera_transform.forward().as_vec3();
+    }
+    if keyboard_input.pressed(KeyCode::KeyA) {
+        velocity -= camera_transform.right().as_vec3();
+    }
+    if keyboard_input.pressed(KeyCode::KeyD) {
+        velocity += camera_transform.right().as_vec3();
+    }
+    if keyboard_input.pressed(KeyCode::Space) {
+        velocity += Vec3::Y;
+    }
+    if keyboard_input.pressed(KeyCode::ControlLeft) || keyboard_input.pressed(KeyCode::ShiftLeft) {
+        velocity -= Vec3::Y;
+    }
+
+    // ============ MOUSE INPUT (for desktop compatibility) ============
+
+    // Handle mouse look (only if we have delta information)
+    for cursor_event in cursor_moved_events.read() {
+        if let Some(delta) = cursor_event.delta {
+            let delta_x = delta.x * camera_controller.sensitivity * dt;
+            let delta_y = delta.y * camera_controller.sensitivity * dt;
+
+            camera_controller.yaw -= delta_x * 0.01;
+            camera_controller.pitch -= delta_y * 0.01;
+
+            // Clamp pitch
+            camera_controller.pitch = camera_controller.pitch.clamp(
+                -std::f32::consts::FRAC_PI_2 * 0.9,
+                std::f32::consts::FRAC_PI_2 * 0.9,
+            );
+        }
+    }
+
+    // ============ APPLY TRANSFORMS ============
+
+    // Apply rotation changes from all input sources
+    camera_transform.rotation = Quat::from_euler(
+        EulerRot::ZYX,
+        0.0,
+        camera_controller.yaw,
+        camera_controller.pitch,
+    );
+
+    // Apply movement
+    if velocity != Vec3::ZERO {
+        camera_transform.translation += velocity.normalize() * camera_controller.speed * dt;
+    }
+
+    // Handle mouse capture (escape key is handled by menu system)
+    for mut window in &mut windows {
+        if mouse_button_input.just_pressed(MouseButton::Left) && window.focused {
+            window.cursor_options.grab_mode = bevy::window::CursorGrabMode::Locked;
+            window.cursor_options.visible = false;
+            info!(
+                "Mouse captured for camera control. Use WASD to move, mouse to look around. Touch controls: left side = move, right side = look."
+            );
+        }
+    }
+}
+
 fn now_ts() -> u64 {
     #[cfg(target_arch = "wasm32")]
     {
@@ -185,26 +420,31 @@ pub fn start() {
                 }),
         )
         // Insert resources BEFORE adding plugins that depend on them
-        .insert_resource(MqttConfig {
-            host: "localhost".to_string(),
-            port: 1883,
-        })
+        .insert_resource(MqttConfig::from_web_env())
         .insert_resource(crate::profile::load_or_create_profile_with_override(None))
         .add_plugins(WebMenuPlugin)
         .add_plugins(MqttPlugin) // MQTT connection working!
         .add_plugins(crate::player_avatar::PlayerAvatarPlugin) // Add avatar animations
         .insert_resource(ClearColor(Color::srgb(0.53, 0.81, 0.92)))
         .insert_resource(CameraController::new())
+        .insert_resource(TouchInputState::default())
         // Multiplayer resources
         .insert_resource(WorldId::default())
         .insert_resource(MultiplayerConnectionStatus::default())
         .insert_resource(PositionTimer::default())
-        .add_systems(Startup, (setup_basic_scene, setup_multiplayer_connections))
+        .add_systems(
+            Startup,
+            (
+                setup_basic_scene,
+                setup_multiplayer_connections,
+                setup_touch_areas,
+            ),
+        )
         .add_systems(
             Update,
             (
                 rotate_cube,
-                camera_control_system.run_if(in_state(WebGameState::InGame)),
+                touch_camera_control_system.run_if(in_state(WebGameState::InGame)),
                 process_device_announcements,
                 update_position_timer,
                 publish_local_pose,
@@ -238,6 +478,22 @@ pub struct CameraController {
     pub speed: f32,
     pub yaw: f32,
     pub pitch: f32,
+    pub touch_sensitivity: f32,
+}
+
+/// Touch input state for mobile controls
+#[derive(Resource, Default)]
+struct TouchInputState {
+    /// Current touch for look control (camera rotation)
+    look_touch_id: Option<u64>,
+    last_look_position: Option<Vec2>,
+    /// Current touch for movement control
+    move_touch_id: Option<u64>,
+    last_move_position: Option<Vec2>,
+    /// Virtual joystick center (bottom-left area)
+    joystick_center: Vec2,
+    /// Look area (right side of screen)
+    look_area_min_x: f32,
 }
 
 impl CameraController {
@@ -248,6 +504,7 @@ impl CameraController {
             speed: 5.0,
             yaw: 0.0,
             pitch: 0.0,
+            touch_sensitivity: 3.0, // Higher sensitivity for touch
         }
     }
 }
