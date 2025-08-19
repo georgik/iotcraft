@@ -42,7 +42,7 @@ listen = "0.0.0.0:1883"
 next_connection_delay_ms = 1
 [v4.1.connections]
 connection_timeout_ms = 60000
-max_payload_size = 20480
+max_payload_size = 1048576
 max_inflight_count = 100
 dynamic_filters = true
 #   auth = { user1 = "p@ssw0rd", user2 = "password" }
@@ -73,7 +73,7 @@ listen = "0.0.0.0:1884"
 next_connection_delay_ms = 1
 [v5.1.connections]
 connection_timeout_ms = 60000
-max_payload_size = 20480
+max_payload_size = 1048576
 max_inflight_count = 100
 
 [prometheus]
@@ -88,7 +88,7 @@ next_connection_delay_ms = 1
 connection_timeout_ms = 60000
 max_client_id_len = 256
 throttle_delay_ms = 0
-max_payload_size = 20480
+max_payload_size = 1048576
 max_inflight_count = 500
 max_inflight_size = 1024
 

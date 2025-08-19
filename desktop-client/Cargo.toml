@@ -30,6 +30,8 @@ uuid = { version = "1.0", features = ["v4"] }
 bytes = "1.0"
 # Async channels for Bevy-compatible communication
 async-channel = "2.5"
+# Compression for chunked world data
+flate2 = "1.0"
 # Performance optimization dependencies
 bytemuck = { version = "1.16", features = ["derive"] } # GPU data alignment
 

@@ -198,6 +198,43 @@ pub fn place_block_system(
     }
 }
 
+/// System to handle multiplayer synchronization for UI block placement
+pub fn place_block_multiplayer_sync_system(
+    mut place_block_events: EventReader<PlaceBlockEvent>,
+    mut block_change_events: EventWriter<crate::multiplayer::BlockChangeEvent>,
+    multiplayer_mode: Res<crate::multiplayer::MultiplayerMode>,
+    player_profile: Res<crate::profile::PlayerProfile>,
+    inventory: Res<PlayerInventory>,
+) {
+    for event in place_block_events.read() {
+        // Only send multiplayer events when in multiplayer mode
+        if let crate::multiplayer::MultiplayerMode::HostingWorld { world_id, .. }
+        | crate::multiplayer::MultiplayerMode::JoinedWorld { world_id, .. } = &*multiplayer_mode
+        {
+            // Get the block type from the player's selected inventory item
+            if let Some(selected_item) = inventory.get_selected_item() {
+                let ItemType::Block(block_type) = selected_item.item_type;
+                block_change_events.write(crate::multiplayer::BlockChangeEvent {
+                    world_id: world_id.clone(),
+                    player_id: player_profile.player_id.clone(),
+                    player_name: player_profile.player_name.clone(),
+                    change_type: crate::multiplayer::BlockChangeType::Placed {
+                        x: event.position.x,
+                        y: event.position.y,
+                        z: event.position.z,
+                        block_type,
+                    },
+                });
+
+                info!(
+                    "Sent multiplayer block change event: {:?} at {:?}",
+                    block_type, event.position
+                );
+            }
+        }
+    }
+}
+
 /// System to handle block breaking
 pub fn break_block_system(
     mut events: EventReader<BreakBlockEvent>,

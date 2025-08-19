@@ -7,6 +7,7 @@ use std::thread;
 use std::time::Duration;
 
 use super::shared_world::*;
+use super::world_publisher::ChunkedWorldData; // Import from publisher
 use crate::config::MqttConfig;
 use crate::world::*;
 
@@ -85,6 +86,7 @@ fn initialize_world_discovery(
         let mut opts = MqttOptions::new("iotcraft-world-discovery", &mqtt_host, mqtt_port);
         opts.set_keep_alive(Duration::from_secs(30));
         opts.set_clean_session(false);
+        opts.set_max_packet_size(1048576, 1048576); // Set max packet size to 1MB to match server
 
         let (client, mut conn) = Client::new(opts, 10);
 
@@ -105,6 +107,12 @@ fn initialize_world_discovery(
                     }
                     if let Err(e) = client.subscribe("iotcraft/worlds/+/data", QoS::AtLeastOnce) {
                         error!("Failed to subscribe to world data: {}", e);
+                        break;
+                    }
+                    if let Err(e) =
+                        client.subscribe("iotcraft/worlds/+/data/chunk", QoS::AtLeastOnce)
+                    {
+                        error!("Failed to subscribe to world data chunks: {}", e);
                         break;
                     }
                     if let Err(e) = client.subscribe("iotcraft/worlds/+/changes", QoS::AtLeastOnce)
@@ -137,11 +145,14 @@ fn initialize_world_discovery(
             let mut opts = MqttOptions::new("iotcraft-world-discovery", &mqtt_host, mqtt_port);
             opts.set_keep_alive(Duration::from_secs(30));
             opts.set_clean_session(false);
+            opts.set_max_packet_size(1048576, 1048576); // Set max packet size to 1MB to match server
 
             let (client, mut conn) = Client::new(opts, 10);
             let mut connected = false;
-            let subscribed = false;
+            let mut subscribed = false;
             let mut world_cache: HashMap<String, SharedWorldInfo> = HashMap::new();
+            // Track chunks for reassembly
+            let mut chunk_cache: HashMap<String, HashMap<u32, ChunkedWorldData>> = HashMap::new();
 
             // Wait for connection and subscribe
             for event in conn.iter() {
@@ -161,20 +172,28 @@ fn initialize_world_discovery(
                             break;
                         }
                         if let Err(e) =
+                            client.subscribe("iotcraft/worlds/+/data/chunk", QoS::AtLeastOnce)
+                        {
+                            error!("Failed to subscribe to world data chunks: {}", e);
+                            break;
+                        }
+                        if let Err(e) =
                             client.subscribe("iotcraft/worlds/+/changes", QoS::AtLeastOnce)
                         {
                             error!("Failed to subscribe to world changes: {}", e);
                             break;
                         }
 
-                        let _ = subscribed; // Intentionally unused for now
+                        subscribed = true;
+                        info!("Successfully subscribed to all world discovery topics");
                         break;
                     }
                     Ok(Event::Incoming(Incoming::Publish(p))) => {
                         if !subscribed {
                             continue;
                         }
-                        handle_discovery_message(&p, &mut world_cache, &response_tx);
+                        // We need chunk_cache here too, but it's in the inner loop
+                        // This initial loop is just for subscription, so we'll skip handling here
                     }
                     Ok(_) => {}
                     Err(e) => {
@@ -195,7 +214,12 @@ fn initialize_world_discovery(
                 // Handle connection events (non-blocking)
                 match conn.try_recv() {
                     Ok(Ok(Event::Incoming(Incoming::Publish(p)))) => {
-                        handle_discovery_message(&p, &mut world_cache, &response_tx);
+                        handle_discovery_message(
+                            &p,
+                            &mut world_cache,
+                            &mut chunk_cache,
+                            &response_tx,
+                        );
                     }
                     Ok(Ok(_)) => {}
                     Ok(Err(e)) => {
@@ -238,16 +262,25 @@ fn initialize_world_discovery(
 fn handle_discovery_message(
     publish: &rumqttc::Publish,
     world_cache: &mut HashMap<String, SharedWorldInfo>,
+    chunk_cache: &mut HashMap<String, HashMap<u32, ChunkedWorldData>>,
     response_tx: &mpsc::Sender<DiscoveryResponse>,
 ) {
+    info!("Received MQTT message on topic: {}", publish.topic);
+
     let topic_parts: Vec<&str> = publish.topic.split('/').collect();
 
     if topic_parts.len() < 4 {
+        warn!("Invalid topic structure: {}", publish.topic);
         return;
     }
 
     let world_id = topic_parts[2];
     let message_type = topic_parts[3];
+
+    info!(
+        "Processing message for world_id: {}, type: {}",
+        world_id, message_type
+    );
 
     match message_type {
         "info" => {
@@ -284,22 +317,21 @@ fn handle_discovery_message(
             });
         }
         "data" => {
-            if !publish.payload.is_empty() {
-                match String::from_utf8(publish.payload.to_vec()) {
-                    Ok(payload_str) => match serde_json::from_str::<WorldSaveData>(&payload_str) {
-                        Ok(world_data) => {
-                            info!("Received world data for: {}", world_id);
-                            let _ = response_tx.send(DiscoveryResponse::WorldDataReceived {
-                                world_id: world_id.to_string(),
-                                world_data,
-                            });
-                        }
-                        Err(e) => {
-                            error!("Failed to parse world data: {}", e);
-                        }
-                    },
+            if topic_parts.len() >= 5 && topic_parts[4] == "chunk" {
+                // Handle chunked data
+                handle_chunk_message(publish, world_id, chunk_cache, response_tx);
+            } else if !publish.payload.is_empty() {
+                // Handle regular (non-chunked) data - try both binary and JSON
+                match try_parse_world_data(&publish.payload) {
+                    Ok(world_data) => {
+                        info!("Received world data for: {}", world_id);
+                        let _ = response_tx.send(DiscoveryResponse::WorldDataReceived {
+                            world_id: world_id.to_string(),
+                            world_data,
+                        });
+                    }
                     Err(e) => {
-                        error!("Failed to decode world data payload: {}", e);
+                        error!("Failed to parse world data: {}", e);
                     }
                 }
             }
@@ -321,6 +353,111 @@ fn handle_discovery_message(
             // Unknown message type
         }
     }
+}
+
+/// Try to parse world data from both binary and JSON formats
+fn try_parse_world_data(payload: &[u8]) -> Result<WorldSaveData, String> {
+    // First try direct JSON deserialization (for non-chunked data)
+    if let Ok(payload_str) = String::from_utf8(payload.to_vec()) {
+        if let Ok(world_data) = serde_json::from_str::<WorldSaveData>(&payload_str) {
+            return Ok(world_data);
+        }
+    }
+
+    // If that fails, try binary deserialization (for binary payloads)
+    serde_json::from_slice::<WorldSaveData>(payload)
+        .map_err(|e| format!("Failed to parse world data: {}", e))
+}
+
+/// Handle incoming chunk message and reassemble if complete
+fn handle_chunk_message(
+    publish: &rumqttc::Publish,
+    world_id: &str,
+    chunk_cache: &mut HashMap<String, HashMap<u32, ChunkedWorldData>>,
+    response_tx: &mpsc::Sender<DiscoveryResponse>,
+) {
+    // Parse the chunk from binary payload
+    match serde_json::from_slice::<ChunkedWorldData>(&publish.payload) {
+        Ok(chunk) => {
+            info!(
+                "Received chunk {}/{} for world {} (chunk_id: {})",
+                chunk.chunk_index + 1,
+                chunk.total_chunks,
+                world_id,
+                chunk.chunk_id
+            );
+
+            // Store the chunk
+            let chunk_map = chunk_cache
+                .entry(chunk.chunk_id.clone())
+                .or_insert_with(HashMap::new);
+            chunk_map.insert(chunk.chunk_index, chunk.clone());
+
+            // Check if we have all chunks
+            if chunk_map.len() == chunk.total_chunks as usize {
+                info!(
+                    "All chunks received for {}, reassembling...",
+                    chunk.chunk_id
+                );
+
+                match reassemble_chunks(chunk_map) {
+                    Ok(world_data) => {
+                        info!("Successfully reassembled world data for: {}", world_id);
+                        let _ = response_tx.send(DiscoveryResponse::WorldDataReceived {
+                            world_id: world_id.to_string(),
+                            world_data,
+                        });
+
+                        // Clean up the chunk cache for this chunk_id
+                        chunk_cache.remove(&chunk.chunk_id);
+                    }
+                    Err(e) => {
+                        error!("Failed to reassemble chunks for {}: {}", chunk.chunk_id, e);
+                        // Clean up failed assembly
+                        chunk_cache.remove(&chunk.chunk_id);
+                    }
+                }
+            }
+        }
+        Err(e) => {
+            error!("Failed to parse chunk message: {}", e);
+        }
+    }
+}
+
+/// Reassemble chunks into world data
+fn reassemble_chunks(chunk_map: &HashMap<u32, ChunkedWorldData>) -> Result<WorldSaveData, String> {
+    // Sort chunks by index and concatenate data
+    let mut sorted_chunks: Vec<_> = chunk_map.iter().collect();
+    sorted_chunks.sort_by_key(|(index, _)| *index);
+
+    let mut reassembled_data = Vec::new();
+    for (expected_index, (actual_index, chunk)) in sorted_chunks.iter().enumerate() {
+        if **actual_index != expected_index as u32 {
+            return Err(format!(
+                "Missing chunk at index {}, found index {}",
+                expected_index, actual_index
+            ));
+        }
+        reassembled_data.extend_from_slice(&chunk.data);
+    }
+
+    // Decompress the data
+    let decompressed = decompress_data(&reassembled_data)
+        .map_err(|e| format!("Failed to decompress data: {}", e))?;
+
+    // Deserialize the world data
+    serde_json::from_slice::<WorldSaveData>(&decompressed)
+        .map_err(|e| format!("Failed to deserialize world data: {}", e))
+}
+
+/// Decompress data using deflate
+fn decompress_data(compressed: &[u8]) -> Result<Vec<u8>, std::io::Error> {
+    use std::io::Read;
+    let mut decoder = flate2::read::DeflateDecoder::new(compressed);
+    let mut decompressed = Vec::new();
+    decoder.read_to_end(&mut decompressed)?;
+    Ok(decompressed)
 }
 
 fn handle_discovery_requests(

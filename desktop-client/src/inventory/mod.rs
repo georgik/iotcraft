@@ -17,7 +17,12 @@ impl Plugin for InventoryPlugin {
             .insert_resource(PlayerInventory::new())
             .add_systems(
                 Update,
-                (give_item_system, place_block_system, break_block_system),
+                (
+                    give_item_system,
+                    place_block_system,
+                    place_block_multiplayer_sync_system,
+                    break_block_system,
+                ),
             );
     }
 }
