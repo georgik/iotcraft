@@ -137,7 +137,7 @@ fn setup_touch_areas(mut touch_state: ResMut<TouchInputState>, windows: Query<&W
     }
 }
 
-/// Enhanced camera control system with touch support for mobile devices
+/// Enhanced camera control system with continuous touch support for mobile devices
 fn touch_camera_control_system(
     time: Res<Time>,
     mut camera_controller: ResMut<CameraController>,
@@ -160,102 +160,217 @@ fn touch_camera_control_system(
     let mut velocity = Vec3::ZERO;
     let dt = time.delta_secs();
 
-    // ============ TOUCH INPUT PROCESSING ============
+    // ============ PROCESS TOUCH EVENTS ============
 
     for touch in touch_events.read() {
         let touch_pos = touch.position;
 
         match touch.phase {
             bevy::input::touch::TouchPhase::Started => {
-                // Determine if this touch is for movement (left side) or look (right side)
-                if touch_pos.x < touch_state.look_area_min_x {
+                // Dynamically update screen split based on current window size
+                if let Ok(window) = windows.single() {
+                    let current_width = window.resolution.width();
+                    touch_state.look_area_min_x = current_width * 0.5;
+                    touch_state.screen_width = current_width;
+                    touch_state.screen_height = window.resolution.height();
+                }
+
+                // Determine touch area: left half = movement, right half = look
+                let is_left_side = touch_pos.x < touch_state.look_area_min_x;
+
+                info!(
+                    "📱 Touch at {:?}, screen_width={:.1}, split_x={:.1}, is_left={}",
+                    touch_pos, touch_state.screen_width, touch_state.look_area_min_x, is_left_side
+                );
+
+                #[cfg(target_arch = "wasm32")]
+                web_sys::console::log_1(&format!(
+                    "📱 Touch debug: pos=({:.1},{:.1}), screen={:.1}x{:.1}, split_x={:.1}, left_side={}", 
+                    touch_pos.x, touch_pos.y, touch_state.screen_width, touch_state.screen_height,
+                    touch_state.look_area_min_x, is_left_side
+                ).into());
+
+                if is_left_side {
                     // Movement touch (left side)
                     if touch_state.move_touch_id.is_none() {
                         touch_state.move_touch_id = Some(touch.id);
-                        touch_state.last_move_position = Some(touch_pos);
-                        info!("📱 Movement touch started at {:?}", touch_pos);
+                        touch_state.joystick_active = true;
+                        // Update joystick center to where user touched (floating joystick)
+                        touch_state.joystick_center = touch_pos;
+                        touch_state.joystick_offset = Vec2::ZERO;
+                        info!("📱 Movement joystick activated at {:?}", touch_pos);
+
+                        #[cfg(target_arch = "wasm32")]
+                        web_sys::console::log_1(&"📱 Movement joystick activated".into());
                     }
                 } else {
-                    // Look touch (right side)
+                    // Look touch (right side) - NO joystick visual, just camera rotation
                     if touch_state.look_touch_id.is_none() {
                         touch_state.look_touch_id = Some(touch.id);
                         touch_state.last_look_position = Some(touch_pos);
-                        info!("📱 Look touch started at {:?}", touch_pos);
+                        touch_state.look_delta_accumulator = Vec2::ZERO;
+                        info!(
+                            "🎮 Look control started at {:?} (no joystick visual)",
+                            touch_pos
+                        );
+
+                        #[cfg(target_arch = "wasm32")]
+                        web_sys::console::log_1(
+                            &"🎮 Look control activated - camera rotation only".into(),
+                        );
                     }
                 }
             }
             bevy::input::touch::TouchPhase::Moved => {
                 if Some(touch.id) == touch_state.move_touch_id {
-                    // Handle movement touch
-                    if let Some(_last_pos) = touch_state.last_move_position {
-                        // Move delta is not needed for joystick-style movement
-
-                        // Convert touch delta to movement (virtual joystick)
-                        let joystick_delta = touch_pos - touch_state.joystick_center;
-                        let distance = joystick_delta.length();
-                        let max_distance = 100.0; // Maximum joystick distance
-
-                        if distance > 10.0 {
-                            // Dead zone
-                            let normalized = joystick_delta / distance;
-                            let strength = (distance / max_distance).min(1.0);
-
-                            // Forward/backward based on Y
-                            if normalized.y < -0.3 {
-                                velocity += camera_transform.forward().as_vec3() * strength;
-                            } else if normalized.y > 0.3 {
-                                velocity -= camera_transform.forward().as_vec3() * strength;
-                            }
-
-                            // Left/right based on X
-                            if normalized.x < -0.3 {
-                                velocity -= camera_transform.right().as_vec3() * strength;
-                            } else if normalized.x > 0.3 {
-                                velocity += camera_transform.right().as_vec3() * strength;
-                            }
-                        }
-
-                        touch_state.last_move_position = Some(touch_pos);
-                    }
+                    // Update joystick offset from center
+                    touch_state.joystick_offset = touch_pos - touch_state.joystick_center;
                 } else if Some(touch.id) == touch_state.look_touch_id {
-                    // Handle look touch
+                    // Accumulate look delta for smooth rotation
                     if let Some(last_pos) = touch_state.last_look_position {
                         let delta = touch_pos - last_pos;
-
-                        // Apply camera rotation based on touch drag
-                        let touch_sensitivity = camera_controller.touch_sensitivity * 0.01;
-                        camera_controller.yaw -= delta.x * touch_sensitivity;
-                        camera_controller.pitch -= delta.y * touch_sensitivity;
-
-                        // Clamp pitch
-                        camera_controller.pitch = camera_controller.pitch.clamp(
-                            -std::f32::consts::FRAC_PI_2 * 0.9,
-                            std::f32::consts::FRAC_PI_2 * 0.9,
-                        );
-
+                        touch_state.look_delta_accumulator += delta;
                         touch_state.last_look_position = Some(touch_pos);
+
+                        #[cfg(target_arch = "wasm32")]
+                        web_sys::console::log_1(
+                            &format!(
+                                "🎮 Look move: delta=({:.2},{:.2}), accumulator=({:.2},{:.2})",
+                                delta.x,
+                                delta.y,
+                                touch_state.look_delta_accumulator.x,
+                                touch_state.look_delta_accumulator.y
+                            )
+                            .into(),
+                        );
                     }
                 }
             }
             bevy::input::touch::TouchPhase::Ended | bevy::input::touch::TouchPhase::Canceled => {
-                // Clear touch tracking
+                let phase_name = if matches!(touch.phase, bevy::input::touch::TouchPhase::Ended) {
+                    "ENDED"
+                } else {
+                    "CANCELED"
+                };
+
                 if Some(touch.id) == touch_state.move_touch_id {
+                    // Deactivate movement joystick
                     touch_state.move_touch_id = None;
-                    touch_state.last_move_position = None;
-                    info!("📱 Movement touch ended");
+                    touch_state.joystick_active = false;
+                    touch_state.joystick_offset = Vec2::ZERO;
+                    info!("📱 Movement joystick deactivated ({})", phase_name);
+
+                    #[cfg(target_arch = "wasm32")]
+                    web_sys::console::log_1(
+                        &format!("📱 Movement joystick deactivated ({})", phase_name).into(),
+                    );
                 } else if Some(touch.id) == touch_state.look_touch_id {
+                    // Deactivate look control
                     touch_state.look_touch_id = None;
                     touch_state.last_look_position = None;
-                    info!("📱 Look touch ended");
+                    touch_state.look_delta_accumulator = Vec2::ZERO;
+                    info!("📱 Look control deactivated ({})", phase_name);
+
+                    #[cfg(target_arch = "wasm32")]
+                    web_sys::console::log_1(
+                        &format!("📱 Look control deactivated ({})", phase_name).into(),
+                    );
+                } else {
+                    // Unknown touch ended - log for debugging
+                    #[cfg(target_arch = "wasm32")]
+                    web_sys::console::log_1(
+                        &format!(
+                            "📱 Unknown touch {} - ID: {}, Active Move: {:?}, Active Look: {:?}",
+                            phase_name,
+                            touch.id,
+                            touch_state.move_touch_id,
+                            touch_state.look_touch_id
+                        )
+                        .into(),
+                    );
                 }
             }
         }
     }
 
+    // ============ CONTINUOUS TOUCH MOVEMENT ============
+
+    if touch_state.joystick_active {
+        let joystick_distance = touch_state.joystick_offset.length();
+        let max_distance = 80.0; // Maximum joystick radius
+        let dead_zone = 15.0; // Dead zone radius
+
+        if joystick_distance > dead_zone {
+            // Calculate movement direction and strength
+            let normalized_offset = touch_state.joystick_offset / joystick_distance;
+            let movement_strength =
+                ((joystick_distance - dead_zone) / (max_distance - dead_zone)).min(1.0);
+
+            // Apply movement based on joystick direction
+            // Note: Y is inverted for touch (up = negative Y)
+            let forward_input = -normalized_offset.y; // Invert Y for forward/back
+            let right_input = normalized_offset.x;
+
+            // Add movement velocity
+            velocity += camera_transform.forward().as_vec3() * forward_input * movement_strength;
+            velocity += camera_transform.right().as_vec3() * right_input * movement_strength;
+
+            // Visual feedback - clamp joystick to max distance
+            if joystick_distance > max_distance {
+                touch_state.joystick_offset = normalized_offset * max_distance;
+            }
+        }
+    }
+
+    // ============ CONTINUOUS LOOK ROTATION ============
+
+    if touch_state.look_delta_accumulator != Vec2::ZERO {
+        let sensitivity = camera_controller.touch_sensitivity * 0.0025; // Reduced sensitivity by 75% total
+
+        // Apply accumulated rotation to camera controller
+        let old_yaw = camera_controller.yaw;
+        let old_pitch = camera_controller.pitch;
+
+        camera_controller.yaw -= touch_state.look_delta_accumulator.x * sensitivity;
+        camera_controller.pitch -= touch_state.look_delta_accumulator.y * sensitivity;
+
+        // Clamp pitch to prevent over-rotation
+        camera_controller.pitch = camera_controller.pitch.clamp(
+            -std::f32::consts::FRAC_PI_2 * 0.9,
+            std::f32::consts::FRAC_PI_2 * 0.9,
+        );
+
+        // Smooth decay of accumulated delta for natural feel
+        touch_state.look_delta_accumulator *= 0.7; // Faster decay for better responsiveness
+
+        // Clear very small deltas to prevent jitter
+        if touch_state.look_delta_accumulator.length() < 0.1 {
+            touch_state.look_delta_accumulator = Vec2::ZERO;
+        }
+
+        info!(
+            "🎮 Look control: yaw={:.3} (Δ{:.3}), pitch={:.3} (Δ{:.3}), delta={:?}",
+            camera_controller.yaw,
+            camera_controller.yaw - old_yaw,
+            camera_controller.pitch,
+            camera_controller.pitch - old_pitch,
+            touch_state.look_delta_accumulator
+        );
+
+        #[cfg(target_arch = "wasm32")]
+        web_sys::console::log_1(
+            &format!(
+                "🎮 Camera rotation: yaw={:.3}, pitch={:.3}",
+                camera_controller.yaw, camera_controller.pitch
+            )
+            .into(),
+        );
+    }
+
     // ============ KEYBOARD INPUT (for desktop compatibility) ============
 
     // Arrow key camera rotation (backup for mouse look)
-    let rotation_speed = 16.0f32; // degrees per frame when held
+    let rotation_speed = 64.0f32; // degrees per frame when held (4x original for web browser)
     let mut yaw_change = 0.0f32;
     let mut pitch_change = 0.0f32;
 
@@ -409,7 +524,7 @@ pub fn start() {
                         resolution: (1280.0, 720.0).into(),
                         canvas: Some("#canvas".to_owned()),
                         fit_canvas_to_parent: true,
-                        prevent_default_event_handling: false,
+                        prevent_default_event_handling: true, // Prevent browser touch conflicts
                         ..default()
                     }),
                     ..default()
@@ -438,6 +553,7 @@ pub fn start() {
                 setup_basic_scene,
                 setup_multiplayer_connections,
                 setup_touch_areas,
+                setup_touch_ui,
             ),
         )
         .add_systems(
@@ -445,6 +561,7 @@ pub fn start() {
             (
                 rotate_cube,
                 touch_camera_control_system.run_if(in_state(WebGameState::InGame)),
+                update_touch_ui.run_if(in_state(WebGameState::InGame)),
                 process_device_announcements,
                 update_position_timer,
                 publish_local_pose,
@@ -481,7 +598,7 @@ pub struct CameraController {
     pub touch_sensitivity: f32,
 }
 
-/// Touch input state for mobile controls
+/// Touch input state for mobile controls with joystick behavior
 #[derive(Resource, Default)]
 struct TouchInputState {
     /// Current touch for look control (camera rotation)
@@ -489,12 +606,36 @@ struct TouchInputState {
     last_look_position: Option<Vec2>,
     /// Current touch for movement control
     move_touch_id: Option<u64>,
-    last_move_position: Option<Vec2>,
-    /// Virtual joystick center (bottom-left area)
+    /// Current joystick position relative to center
+    joystick_offset: Vec2,
+    /// Virtual joystick center (dynamically set where user touches)
     joystick_center: Vec2,
     /// Look area (right side of screen)
     look_area_min_x: f32,
+    /// Whether joystick is currently active
+    joystick_active: bool,
+    /// Accumulated look delta for smooth rotation with decay
+    look_delta_accumulator: Vec2,
+    /// Screen dimensions for UI positioning
+    screen_width: f32,
+    screen_height: f32,
 }
+
+/// UI components for touch controls
+#[derive(Component)]
+struct TouchControlsUI;
+
+#[derive(Component)]
+struct JoystickBase;
+
+#[derive(Component)]
+struct JoystickKnob;
+
+#[derive(Component)]
+struct TouchZoneIndicator;
+
+#[derive(Component)]
+struct TouchInstructions;
 
 impl CameraController {
     fn new() -> Self {
@@ -517,9 +658,13 @@ fn setup_basic_scene(
 ) {
     info!("Setting up enhanced IoTCraft world scene...");
 
-    // Add a camera positioned like in the original desktop client
+    // Add a camera positioned like in the original desktop client with explicit order 0
     commands.spawn((
         Camera3d::default(),
+        Camera {
+            order: 0, // Render first (3D scene)
+            ..default()
+        },
         Transform::from_xyz(-8.0, 3.0, 15.0).looking_at(Vec3::new(0.0, 1.0, 0.0), Vec3::Y),
     ));
 
@@ -1260,6 +1405,166 @@ fn apply_remote_poses(
                 )
                 .into(),
             );
+        }
+    }
+}
+
+// ============ TOUCH UI SYSTEMS ============
+
+/// Setup touch control UI with virtual joystick and touch areas
+fn setup_touch_ui(
+    mut commands: Commands,
+    mut touch_state: ResMut<TouchInputState>,
+    windows: Query<&Window>,
+    asset_server: Res<AssetServer>,
+) {
+    if let Ok(window) = windows.single() {
+        let window_width = window.resolution.width();
+        let window_height = window.resolution.height();
+
+        // Store screen dimensions
+        touch_state.screen_width = window_width;
+        touch_state.screen_height = window_height;
+
+        info!(
+            "📱 Setting up touch UI for {}x{} screen",
+            window_width, window_height
+        );
+
+        // Create UI camera for 2D overlay with higher order to render on top
+        commands.spawn((
+            Camera2d,
+            Camera {
+                order: 1, // Render after the 3D camera (order 0)
+                ..default()
+            },
+        ));
+
+        // Create touch control overlay container
+        commands
+            .spawn((
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: Val::Px(0.0),
+                    top: Val::Px(0.0),
+                    width: Val::Percent(100.0),
+                    height: Val::Percent(100.0),
+                    ..default()
+                },
+                TouchControlsUI,
+            ))
+            .with_children(|parent| {
+                // Build info display in bottom-right corner
+                parent
+                    .spawn((
+                        Node {
+                            position_type: PositionType::Absolute,
+                            right: Val::Px(10.0),
+                            bottom: Val::Px(10.0),
+                            padding: UiRect::all(Val::Px(8.0)),
+                            ..default()
+                        },
+                        BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.5)),
+                        BorderRadius::all(Val::Px(5.0)),
+                    ))
+                    .with_children(|info_parent| {
+                        let build_timestamp = env!(
+                            "BUILD_TIMESTAMP",
+                            "Set BUILD_TIMESTAMP environment variable during build"
+                        );
+                        info_parent.spawn((
+                            Text::new(format!("Build: {}", build_timestamp)),
+                            TextFont {
+                                font: asset_server.load("fonts/FiraSans-Bold.ttf"),
+                                font_size: 12.0,
+                                ..default()
+                            },
+                            TextColor(Color::srgba(0.8, 0.8, 0.8, 0.9)),
+                        ));
+                    });
+
+                // Virtual joystick base (initially hidden)
+                parent
+                    .spawn((
+                        Node {
+                            position_type: PositionType::Absolute,
+                            left: Val::Px(100.0), // Will be updated dynamically
+                            bottom: Val::Px(150.0),
+                            width: Val::Px(120.0),
+                            height: Val::Px(120.0),
+                            border: UiRect::all(Val::Px(3.0)),
+                            ..default()
+                        },
+                        BackgroundColor(Color::srgba(0.3, 0.3, 0.3, 0.4)),
+                        BorderColor(Color::srgba(0.8, 0.8, 0.8, 0.6)),
+                        BorderRadius::all(Val::Px(60.0)), // Circular
+                        Visibility::Hidden,               // Start hidden
+                        JoystickBase,
+                    ))
+                    .with_children(|base_parent| {
+                        // Virtual joystick knob
+                        base_parent.spawn((
+                            Node {
+                                position_type: PositionType::Absolute,
+                                left: Val::Px(35.0), // Centered in base
+                                top: Val::Px(35.0),
+                                width: Val::Px(50.0),
+                                height: Val::Px(50.0),
+                                ..default()
+                            },
+                            BackgroundColor(Color::srgba(0.9, 0.9, 0.9, 0.8)),
+                            BorderRadius::all(Val::Px(25.0)), // Circular
+                            JoystickKnob,
+                        ));
+                    });
+            });
+
+        #[cfg(target_arch = "wasm32")]
+        web_sys::console::log_1(
+            &"📱 Touch UI setup complete with virtual joystick and zone indicators".into(),
+        );
+    }
+}
+
+/// Update touch UI based on current touch state
+fn update_touch_ui(
+    touch_state: Res<TouchInputState>,
+    mut joystick_base_query: Query<
+        (&mut Node, &mut Visibility),
+        (With<JoystickBase>, Without<JoystickKnob>),
+    >,
+    mut joystick_knob_query: Query<&mut Node, (With<JoystickKnob>, Without<JoystickBase>)>,
+    windows: Query<&Window>,
+) {
+    if let Ok(window) = windows.single() {
+        let window_height = window.resolution.height();
+
+        // Update joystick base position and visibility
+        if let Ok((mut base_style, mut base_visibility)) = joystick_base_query.get_single_mut() {
+            if touch_state.joystick_active {
+                // Show joystick and position it at touch center
+                *base_visibility = Visibility::Visible;
+                base_style.left = Val::Px(touch_state.joystick_center.x - 60.0); // Center the 120px base
+                base_style.bottom = Val::Px(window_height - touch_state.joystick_center.y - 60.0); // Flip Y coordinate
+
+                // Update knob position within base
+                if let Ok(mut knob_style) = joystick_knob_query.get_single_mut() {
+                    // Clamp joystick offset to base radius (60px)
+                    let max_offset = 35.0; // Half the base radius minus knob radius
+                    let clamped_offset = if touch_state.joystick_offset.length() > max_offset {
+                        touch_state.joystick_offset.normalize() * max_offset
+                    } else {
+                        touch_state.joystick_offset
+                    };
+
+                    // Position knob relative to base center (35px from edge)
+                    knob_style.left = Val::Px(35.0 + clamped_offset.x);
+                    knob_style.top = Val::Px(35.0 - clamped_offset.y); // Invert Y for UI coordinate system
+                }
+            } else {
+                // Hide joystick when not active
+                *base_visibility = Visibility::Hidden;
+            }
         }
     }
 }
