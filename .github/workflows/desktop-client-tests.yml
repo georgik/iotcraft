@@ -44,7 +44,8 @@ jobs:
           libxi-dev \
           libxinerama-dev \
           libgl1-mesa-dev \
-          libglu1-mesa-dev
+          libglu1-mesa-dev \
+          lld
 
     - name: Setup Rust
       uses: dtolnay/rust-toolchain@stable

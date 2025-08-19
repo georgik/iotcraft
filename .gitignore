@@ -1,3 +1,7 @@
+dist/
+dist-dev/
+dist-release/
+dist-test/
 target/
 Cargo.lock
 

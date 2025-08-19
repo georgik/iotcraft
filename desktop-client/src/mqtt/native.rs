@@ -10,18 +10,19 @@ use crate::config::MqttConfig;
 use crate::devices::DeviceAnnouncementReceiver;
 use crate::profile::PlayerProfile;
 
-pub struct MqttPlugin;
+/// Native MQTT implementation for desktop using rumqttc
+pub struct NativeMqttPlugin;
 
-impl Plugin for MqttPlugin {
+impl Plugin for NativeMqttPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(TemperatureResource::default())
-            .add_systems(Startup, spawn_mqtt_subscriber)
+            .add_systems(Startup, spawn_native_mqtt_subscriber)
             .add_systems(Update, update_temperature);
     }
 }
 
-/// Spawn a background thread to subscribe to the temperature topic and feed readings into the channel.
-pub fn spawn_mqtt_subscriber(
+/// Spawn native MQTT subscribers using rumqttc (desktop only)
+pub fn spawn_native_mqtt_subscriber(
     mut commands: Commands,
     mqtt_config: Res<MqttConfig>,
     profile: Res<PlayerProfile>,
@@ -33,7 +34,7 @@ pub fn spawn_mqtt_subscriber(
 
     thread::spawn(move || {
         info!(
-            "MQTT: Starting temperature subscriber on {}:{}",
+            "MQTT Native: Starting temperature subscriber on {}:{}",
             mqtt_host, mqtt_port
         );
         let mut mqttoptions = MqttOptions::new(&temp_client_id, &mqtt_host, mqtt_port);
@@ -41,14 +42,20 @@ pub fn spawn_mqtt_subscriber(
         let (client, mut connection) = Client::new(mqttoptions, 10);
 
         match client.subscribe("home/sensor/temperature", QoS::AtMostOnce) {
-            Ok(_) => info!("MQTT: Successfully subscribed to home/sensor/temperature"),
-            Err(e) => error!("MQTT: Failed to subscribe to temperature topic: {}", e),
+            Ok(_) => info!("MQTT Native: Successfully subscribed to home/sensor/temperature"),
+            Err(e) => error!(
+                "MQTT Native: Failed to subscribe to temperature topic: {}",
+                e
+            ),
         }
 
         for notification in connection.iter() {
             match notification {
                 Ok(Event::Incoming(Incoming::Publish(p))) => {
-                    info!("MQTT: Received temperature message on topic: {}", p.topic);
+                    info!(
+                        "MQTT Native: Received temperature message on topic: {}",
+                        p.topic
+                    );
                     if let Ok(s) = String::from_utf8(p.payload.to_vec()) {
                         if let Ok(val) = s.parse::<f32>() {
                             let _ = tx.send(val);
@@ -56,10 +63,10 @@ pub fn spawn_mqtt_subscriber(
                     }
                 }
                 Ok(Event::Incoming(Incoming::ConnAck(_))) => {
-                    info!("MQTT: Temperature subscriber connected successfully");
+                    info!("MQTT Native: Temperature subscriber connected successfully");
                 }
                 Err(e) => {
-                    error!("MQTT: Temperature subscriber error: {}", e);
+                    error!("MQTT Native: Temperature subscriber error: {}", e);
                     break;
                 }
                 _ => {}
@@ -79,7 +86,7 @@ pub fn spawn_mqtt_subscriber(
 
     thread::spawn(move || {
         info!(
-            "MQTT: Starting device announcements subscriber on {}:{}",
+            "MQTT Native: Starting device announcements subscriber on {}:{}",
             mqtt_host2, mqtt_port2
         );
         let mut mqttoptions = MqttOptions::new(&device_client_id, &mqtt_host2, mqtt_port2);
@@ -87,15 +94,18 @@ pub fn spawn_mqtt_subscriber(
         let (client, mut connection) = Client::new(mqttoptions, 10);
 
         match client.subscribe("devices/announce", QoS::AtMostOnce) {
-            Ok(_) => info!("MQTT: Successfully subscribed to devices/announce"),
-            Err(e) => error!("MQTT: Failed to subscribe to devices/announce: {}", e),
+            Ok(_) => info!("MQTT Native: Successfully subscribed to devices/announce"),
+            Err(e) => error!(
+                "MQTT Native: Failed to subscribe to devices/announce: {}",
+                e
+            ),
         }
 
         for notification in connection.iter() {
             match notification {
                 Ok(Event::Incoming(Incoming::Publish(p))) => {
                     info!(
-                        "MQTT: Received device announcement on topic: {} with payload: {}",
+                        "MQTT Native: Received device announcement on topic: {} with payload: {}",
                         p.topic,
                         String::from_utf8_lossy(&p.payload)
                     );
@@ -104,10 +114,10 @@ pub fn spawn_mqtt_subscriber(
                     }
                 }
                 Ok(Event::Incoming(Incoming::ConnAck(_))) => {
-                    info!("MQTT: Device announcements subscriber connected successfully");
+                    info!("MQTT Native: Device announcements subscriber connected successfully");
                 }
                 Err(e) => {
-                    error!("MQTT: Device announcements subscriber error: {}", e);
+                    error!("MQTT Native: Device announcements subscriber error: {}", e);
                     break;
                 }
                 _ => {}
