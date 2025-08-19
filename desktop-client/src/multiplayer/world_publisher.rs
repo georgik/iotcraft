@@ -36,6 +36,23 @@ pub enum PublishMessage {
     BroadcastChange {
         change: WorldChange,
     },
+    // New message types for state synchronization
+    PublishWorldState {
+        world_id: String,
+        world_data: WorldSaveData,
+        is_snapshot: bool,
+    },
+    PublishBlockChange {
+        world_id: String,
+        player_id: String,
+        player_name: String,
+        change_type: BlockChangeType,
+    },
+    PublishInventoryChange {
+        world_id: String,
+        player_id: String,
+        inventory: crate::inventory::PlayerInventory,
+    },
 }
 
 pub struct WorldPublisherPlugin;
@@ -226,6 +243,75 @@ fn handle_publish_message(client: &Client, message: PublishMessage) {
             if let Ok(payload) = serde_json::to_string(&change) {
                 if let Err(e) = client.publish(&change_topic, QoS::AtLeastOnce, false, payload) {
                     error!("Failed to broadcast world change: {}", e);
+                }
+            }
+        }
+        // New synchronization message handlers
+        PublishMessage::PublishWorldState {
+            world_id,
+            world_data,
+            is_snapshot,
+        } => {
+            let topic = if is_snapshot {
+                format!("iotcraft/worlds/{}/state/snapshot", world_id)
+            } else {
+                format!("iotcraft/worlds/{}/state/update", world_id)
+            };
+
+            if let Ok(payload) = serde_json::to_string(&world_data) {
+                // Use retain=true for snapshots, false for updates
+                if let Err(e) = client.publish(&topic, QoS::AtLeastOnce, is_snapshot, payload) {
+                    error!("Failed to publish world state to {}: {}", topic, e);
+                } else {
+                    info!("Published world state to {}", topic);
+                }
+            }
+        }
+        PublishMessage::PublishBlockChange {
+            world_id,
+            player_id,
+            player_name,
+            change_type,
+        } => {
+            let topic = match &change_type {
+                BlockChangeType::Placed { .. } => {
+                    format!("iotcraft/worlds/{}/state/blocks/placed", world_id)
+                }
+                BlockChangeType::Removed { .. } => {
+                    format!("iotcraft/worlds/{}/state/blocks/removed", world_id)
+                }
+            };
+
+            let change_message = serde_json::json!({
+                "player_id": player_id,
+                "player_name": player_name,
+                "timestamp": chrono::Utc::now().timestamp_millis(),
+                "change": change_type
+            });
+
+            if let Ok(payload) = serde_json::to_string(&change_message) {
+                if let Err(e) = client.publish(&topic, QoS::AtLeastOnce, false, payload) {
+                    error!("Failed to publish block change to {}: {}", topic, e);
+                }
+            }
+        }
+        PublishMessage::PublishInventoryChange {
+            world_id,
+            player_id,
+            inventory,
+        } => {
+            let topic = format!("iotcraft/worlds/{}/state/inventory/updates", world_id);
+
+            let inventory_message = serde_json::json!({
+                "player_id": player_id,
+                "timestamp": chrono::Utc::now().timestamp_millis(),
+                "inventory": inventory
+            });
+
+            if let Ok(payload) = serde_json::to_string(&inventory_message) {
+                // Retain inventory updates so new joiners get latest state
+                if let Err(e) = client.publish(&topic, QoS::AtLeastOnce, true, payload) {
+                    error!("Failed to publish inventory change to {}: {}", topic, e);
                 }
             }
         }

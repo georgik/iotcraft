@@ -121,6 +121,54 @@ pub struct WorldChangeEvent {
 #[derive(Event)]
 pub struct RefreshOnlineWorldsEvent;
 
+/// New events for world state synchronization
+#[derive(Event)]
+pub struct PublishWorldStateEvent {
+    pub world_id: String,
+    pub force_full_snapshot: bool,
+}
+
+#[derive(Event)]
+pub struct RequestWorldStateEvent {
+    pub world_id: String,
+}
+
+#[derive(Event)]
+pub struct WorldStateReceivedEvent {
+    pub world_id: String,
+    pub world_data: WorldSaveData,
+}
+
+#[derive(Event)]
+pub struct BlockChangeEvent {
+    pub world_id: String,
+    pub player_id: String,
+    pub player_name: String,
+    pub change_type: BlockChangeType,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum BlockChangeType {
+    Placed {
+        x: i32,
+        y: i32,
+        z: i32,
+        block_type: crate::environment::BlockType,
+    },
+    Removed {
+        x: i32,
+        y: i32,
+        z: i32,
+    },
+}
+
+#[derive(Event)]
+pub struct InventoryChangeEvent {
+    pub world_id: String,
+    pub player_id: String,
+    pub inventory: crate::inventory::PlayerInventory,
+}
+
 /// Plugin for shared world functionality
 pub struct SharedWorldPlugin;
 
@@ -134,6 +182,12 @@ impl Plugin for SharedWorldPlugin {
             .add_event::<LeaveSharedWorldEvent>()
             .add_event::<WorldChangeEvent>()
             .add_event::<RefreshOnlineWorldsEvent>()
+            // New world state synchronization events
+            .add_event::<PublishWorldStateEvent>()
+            .add_event::<RequestWorldStateEvent>()
+            .add_event::<WorldStateReceivedEvent>()
+            .add_event::<BlockChangeEvent>()
+            .add_event::<InventoryChangeEvent>()
             .add_systems(
                 Update,
                 (
