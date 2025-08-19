@@ -14,3 +14,9 @@ pub use native::NativeMqttPlugin as MqttPlugin;
 pub use web::WebMqttPlugin as MqttPlugin;
 
 pub use mqtt_types::*;
+
+// Web-specific timestamp function for WASM
+#[cfg(target_arch = "wasm32")]
+pub fn now_ts_web() -> u64 {
+    js_sys::Date::now() as u64
+}

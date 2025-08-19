@@ -48,41 +48,100 @@ impl Plugin for WebMqttPlugin {
 struct SimpleMqttPackets;
 
 impl SimpleMqttPackets {
+    /// Encode variable length integer for MQTT protocol
+    fn encode_remaining_length(length: usize) -> Vec<u8> {
+        let mut encoded = Vec::new();
+        let mut x = length;
+
+        loop {
+            let mut encoded_byte = (x % 128) as u8;
+            x /= 128;
+            if x > 0 {
+                encoded_byte |= 0x80;
+            }
+            encoded.push(encoded_byte);
+            if x == 0 {
+                break;
+            }
+        }
+
+        encoded
+    }
+
+    /// Decode variable length integer from MQTT packet
+    fn decode_remaining_length(data: &[u8], start_offset: usize) -> Option<(usize, usize)> {
+        let mut value = 0usize;
+        let mut multiplier = 1;
+        let mut offset = start_offset;
+
+        loop {
+            if offset >= data.len() {
+                return None;
+            }
+
+            let encoded_byte = data[offset];
+            value += ((encoded_byte & 0x7F) as usize) * multiplier;
+
+            if multiplier > 128 * 128 * 128 {
+                return None; // Malformed remaining length
+            }
+
+            offset += 1;
+
+            if (encoded_byte & 0x80) == 0 {
+                break;
+            }
+
+            multiplier *= 128;
+        }
+
+        Some((value, offset - start_offset))
+    }
+
     /// Parse MQTT SUBACK packet to check subscription acknowledgment
     fn parse_suback_packet(data: &[u8]) -> Option<(u16, Vec<u8>)> {
-        if data.len() < 4 || (data[0] & 0xF0) != 0x90 {
+        if data.len() < 2 || (data[0] & 0xF0) != 0x90 {
             return None; // Not a SUBACK packet
         }
 
-        let remaining_length = data[1] as usize;
-        if data.len() < 2 + remaining_length {
+        let (remaining_length, length_bytes) = Self::decode_remaining_length(data, 1)?;
+        let header_end = 1 + length_bytes;
+
+        if data.len() < header_end + remaining_length {
             return None; // Incomplete packet
         }
 
         // Extract packet identifier (2 bytes)
-        let packet_id = ((data[2] as u16) << 8) | (data[3] as u16);
+        let packet_id = ((data[header_end] as u16) << 8) | (data[header_end + 1] as u16);
 
         // Extract return codes (remaining bytes)
-        let return_codes = data[4..].to_vec();
+        let return_codes = data[header_end + 2..header_end + remaining_length].to_vec();
 
         Some((packet_id, return_codes))
     }
 
     /// Parse MQTT CONNACK packet to check connection acknowledgment
     fn parse_connack_packet(data: &[u8]) -> Option<u8> {
-        if data.len() < 4 || (data[0] & 0xF0) != 0x20 {
+        if data.len() < 2 || (data[0] & 0xF0) != 0x20 {
             return None; // Not a CONNACK packet
         }
 
-        // Return code is in byte 3 (0 = success)
-        Some(data[3])
+        let (remaining_length, length_bytes) = Self::decode_remaining_length(data, 1)?;
+        let header_end = 1 + length_bytes;
+
+        if data.len() < header_end + remaining_length || remaining_length < 2 {
+            return None; // Incomplete packet or invalid length
+        }
+
+        // Return code is in the second byte of variable header
+        Some(data[header_end + 1])
     }
 
     /// Create MQTT CONNECT packet
     fn connect_packet(client_id: &str) -> Vec<u8> {
         let mut packet = Vec::new();
 
-        // Fixed header: CONNECT (0x10), remaining length will be calculated
+        // Fixed header: CONNECT (0x10)
         packet.push(0x10);
 
         let mut variable_header = Vec::new();
@@ -108,9 +167,9 @@ impl SimpleMqttPackets {
         ]);
         variable_header.extend_from_slice(client_id_bytes);
 
-        // Calculate remaining length
-        let remaining_length = variable_header.len();
-        packet.push(remaining_length as u8); // Simplified for small packets
+        // Add proper variable length encoding for remaining length
+        let remaining_length_bytes = Self::encode_remaining_length(variable_header.len());
+        packet.extend_from_slice(&remaining_length_bytes);
 
         packet.extend_from_slice(&variable_header);
         packet
@@ -120,7 +179,7 @@ impl SimpleMqttPackets {
     fn subscribe_packet(topic: &str, packet_id: u16) -> Vec<u8> {
         let mut packet = Vec::new();
 
-        // Fixed header: SUBSCRIBE (0x82), remaining length will be calculated
+        // Fixed header: SUBSCRIBE (0x82)
         packet.push(0x82);
 
         let mut variable_header = Vec::new();
@@ -139,9 +198,9 @@ impl SimpleMqttPackets {
         // QoS level (0)
         variable_header.push(0x00);
 
-        // Calculate remaining length
-        let remaining_length = variable_header.len();
-        packet.push(remaining_length as u8); // Simplified for small packets
+        // Add proper variable length encoding for remaining length
+        let remaining_length_bytes = Self::encode_remaining_length(variable_header.len());
+        packet.extend_from_slice(&remaining_length_bytes);
 
         packet.extend_from_slice(&variable_header);
         packet
@@ -151,7 +210,7 @@ impl SimpleMqttPackets {
     fn publish_packet(topic: &str, payload: &[u8]) -> Vec<u8> {
         let mut packet = Vec::new();
 
-        // Fixed header: PUBLISH (0x30), remaining length will be calculated
+        // Fixed header: PUBLISH (0x30)
         packet.push(0x30);
 
         let mut variable_header = Vec::new();
@@ -167,9 +226,9 @@ impl SimpleMqttPackets {
         // Payload
         variable_header.extend_from_slice(payload);
 
-        // Calculate remaining length
-        let remaining_length = variable_header.len();
-        packet.push(remaining_length as u8); // Simplified for small packets
+        // Add proper variable length encoding for remaining length
+        let remaining_length_bytes = Self::encode_remaining_length(variable_header.len());
+        packet.extend_from_slice(&remaining_length_bytes);
 
         packet.extend_from_slice(&variable_header);
         packet
@@ -181,14 +240,16 @@ impl SimpleMqttPackets {
             return None; // Not a PUBLISH packet
         }
 
-        let remaining_length = data[1] as usize;
-        if data.len() < 2 + remaining_length {
+        let (remaining_length, length_bytes) = Self::decode_remaining_length(data, 1)?;
+        let header_end = 1 + length_bytes;
+
+        if data.len() < header_end + remaining_length {
             return None; // Incomplete packet
         }
 
-        let mut offset = 2;
+        let mut offset = header_end;
 
-        // Topic length
+        // Topic length (2 bytes)
         if offset + 2 > data.len() {
             return None;
         }
@@ -202,8 +263,12 @@ impl SimpleMqttPackets {
         let topic = String::from_utf8_lossy(&data[offset..offset + topic_length]).to_string();
         offset += topic_length;
 
-        // Payload
-        let payload = data[offset..].to_vec();
+        // Payload (rest of the packet within remaining length)
+        let payload_end = header_end + remaining_length;
+        if offset > payload_end {
+            return None;
+        }
+        let payload = data[offset..payload_end].to_vec();
 
         Some((topic, payload))
     }
@@ -283,12 +348,7 @@ pub fn spawn_web_mqtt_subscriber(
     websocket.set_binary_type(BinaryType::Arraybuffer);
 
     // Connection and subscription state tracking
-    let is_connected = Rc::new(RefCell::new(false));
     let subscriptions_confirmed = Rc::new(RefCell::new(0u8)); // Track confirmed subscriptions (0-3)
-    let websocket_ref = Rc::new(RefCell::new(Some(websocket.clone())));
-
-    // Store WebSocket reference for publishing (not as a Bevy resource due to thread safety)
-    let _websocket_ref = Rc::new(RefCell::new(Some(websocket.clone())));
 
     // Wrap channels in Rc<RefCell<>> for sharing between closures
     let temp_tx = Rc::new(RefCell::new(temp_tx));
@@ -435,7 +495,9 @@ pub fn spawn_web_mqtt_subscriber(
 
         let subscriptions_confirmed_clone2 = subscriptions_confirmed.clone();
         let timeout_callback = Closure::<dyn FnMut()>::new(move || {
-            // Subscribe to temperature topic
+            // Strategy: Subscribe to working topics first, then publish pose to create the topic hierarchy
+
+            // 1. Subscribe to temperature topic (this works)
             let sub_temp_packet = SimpleMqttPackets::subscribe_packet("home/sensor/temperature", 1);
             if let Err(e) = websocket_clone2.send_with_u8_array(&sub_temp_packet) {
                 error!(
@@ -444,22 +506,64 @@ pub fn spawn_web_mqtt_subscriber(
                 );
             }
 
-            // Subscribe to device announcements topic
+            // 2. Subscribe to device announcements topic (this works)
             let sub_device_packet = SimpleMqttPackets::subscribe_packet("devices/announce", 2);
             if let Err(e) = websocket_clone2.send_with_u8_array(&sub_device_packet) {
                 error!("MQTT Web: Failed to send device SUBSCRIBE packet: {:?}", e);
             }
 
-            // Subscribe to multiplayer poses topic
-            let sub_pose_packet = SimpleMqttPackets::subscribe_packet(&pose_topic_clone2, 3);
-            if let Err(e) = websocket_clone2.send_with_u8_array(&sub_pose_packet) {
-                error!("MQTT Web: Failed to send pose SUBSCRIBE packet: {:?}", e);
-            } else {
-                info!(
-                    "🌐 Web: Subscribed to multiplayer poses: {}",
-                    pose_topic_clone2
-                );
+            // 3. FIRST: Publish an initial pose to CREATE the topic hierarchy for multiplayer
+            let publish_topic = format!(
+                "iotcraft/worlds/{}/players/{}/pose",
+                world_id_clone2, player_id_clone2
+            );
+
+            let initial_pose = PoseMessage {
+                player_id: player_id_clone2.clone(),
+                player_name: "WebPlayer".to_string(),
+                pos: [0.0, 2.0, 0.0], // Default spawn position
+                yaw: 0.0,
+                pitch: 0.0,
+                ts: crate::mqtt::now_ts_web(),
+            };
+
+            if let Ok(pose_payload) = serde_json::to_string(&initial_pose) {
+                let publish_packet =
+                    SimpleMqttPackets::publish_packet(&publish_topic, pose_payload.as_bytes());
+                if let Err(e) = websocket_clone2.send_with_u8_array(&publish_packet) {
+                    error!("🚀 Web: Failed to publish initial pose: {:?}", e);
+                } else {
+                    info!(
+                        "🚀 Web: Published initial pose to CREATE topic: {}",
+                        publish_topic
+                    );
+                }
             }
+
+            // Small delay to let broker process the publish
+            let websocket_delay = websocket_clone2.clone();
+            let pose_topic_delay = pose_topic_clone2.clone();
+            let delay_callback = Closure::<dyn FnMut()>::new(move || {
+                // 4. NOW subscribe to multiplayer poses topic (after topic exists)
+                let sub_pose_packet = SimpleMqttPackets::subscribe_packet(&pose_topic_delay, 3);
+                if let Err(e) = websocket_delay.send_with_u8_array(&sub_pose_packet) {
+                    error!("MQTT Web: Failed to send pose SUBSCRIBE packet: {:?}", e);
+                } else {
+                    info!(
+                        "🌐 Web: NOW subscribed to multiplayer poses: {}",
+                        pose_topic_delay
+                    );
+                }
+            });
+
+            web_sys::window()
+                .unwrap()
+                .set_timeout_with_callback_and_timeout_and_arguments_0(
+                    delay_callback.as_ref().unchecked_ref(),
+                    200, // 200ms delay to let publish create the topic
+                )
+                .unwrap();
+            delay_callback.forget();
 
             info!("MQTT Web: Sent all SUBSCRIBE packets, waiting for confirmations...");
 

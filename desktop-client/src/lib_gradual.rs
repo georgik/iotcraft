@@ -173,17 +173,24 @@ pub fn start() {
 
     // Initialize the Bevy app with basic plugins
     App::new()
-        .add_plugins(DefaultPlugins.set(WindowPlugin {
-            primary_window: Some(Window {
-                title: "IoTCraft Desktop Client - Web Version".to_string(),
-                resolution: (1280.0, 720.0).into(),
-                canvas: Some("#canvas".to_owned()),
-                fit_canvas_to_parent: true,
-                prevent_default_event_handling: false,
-                ..default()
-            }),
-            ..default()
-        }))
+        .add_plugins(
+            DefaultPlugins
+                .set(WindowPlugin {
+                    primary_window: Some(Window {
+                        title: "IoTCraft Desktop Client - Web Version".to_string(),
+                        resolution: (1280.0, 720.0).into(),
+                        canvas: Some("#canvas".to_owned()),
+                        fit_canvas_to_parent: true,
+                        prevent_default_event_handling: false,
+                        ..default()
+                    }),
+                    ..default()
+                })
+                .set(AssetPlugin {
+                    watch_for_changes_override: Some(false), // Disable asset watching for web
+                    ..default()
+                }),
+        )
         // Insert resources BEFORE adding plugins that depend on them
         .insert_resource(MqttConfig {
             host: "localhost".to_string(),
