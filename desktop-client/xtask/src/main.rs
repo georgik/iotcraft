@@ -1,9 +1,12 @@
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
+use html5ever::parse_document;
+use html5ever::tendril::TendrilSink;
+use markup5ever_rcdom::{Handle, NodeData, RcDom};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use tokio::fs;
-use warp::Filter;
 
 #[derive(Parser)]
 #[command(name = "xtask")]
@@ -382,15 +385,24 @@ async fn web_serve(port: u16, dir: &str) -> Result<()> {
     println!("🚀 Starting Rust HTTP server...");
     println!("   Serving directory: {}", dir);
     println!("   Port: {}", port);
-    println!("   URL: http://localhost:{}", port);
+    println!();
 
-    // Get local IP for network access instructions
-    let local_ip = get_local_ip().unwrap_or_else(|| "<your-ip>".to_string());
-    println!("   Network URL: http://{}:{}", local_ip, port);
+    // Get local IP for network access
+    let local_ip = get_local_ip().unwrap_or_else(|| "localhost".to_string());
+    let localhost_url = format!("http://localhost:{}", port);
+    let network_url = format!("http://{}:{}", local_ip, port);
+
+    println!("📱 Access URLs:");
+    println!("   Local:   {}", localhost_url);
+    println!("   Network: {}", network_url);
     println!();
-    println!("📱 Access from mobile devices or other computers using the network URL");
-    println!("   Press Ctrl+C to stop the server");
-    println!();
+
+    // Generate QR code for the network URL
+    if local_ip != "localhost" {
+        println!("📱 QR Code for mobile access:");
+        generate_qr_code(&network_url);
+        println!();
+    }
 
     // Validate directory exists
     let serve_dir = Path::new(dir);
@@ -402,38 +414,46 @@ async fn web_serve(port: u16, dir: &str) -> Result<()> {
     }
 
     // Convert to absolute path for better error reporting
-    let absolute_dir = std::fs::canonicalize(serve_dir)
-        .context("Failed to resolve absolute path")?;
-    
+    let absolute_dir =
+        std::fs::canonicalize(serve_dir).context("Failed to resolve absolute path")?;
+
     println!("📁 Serving files from: {}", absolute_dir.display());
     println!();
 
-    // Create CORS headers for WASM files and development
-    let cors = warp::cors()
-        .allow_any_origin()
-        .allow_headers(vec!["content-type", "authorization"])
-        .allow_methods(vec!["GET", "POST", "PUT", "DELETE", "HEAD", "OPTIONS"]);
-
-    // Create static file server with proper MIME types
-    let static_files = warp::fs::dir(absolute_dir.clone())
-        .with(cors)
-        .with(warp::compression::gzip());
-
-    // Handle root path explicitly to serve index.html
-    let index_route = warp::path::end()
-        .and(warp::fs::file(absolute_dir.join("index.html")));
-
-    // Combine routes: index route takes precedence over static files
-    let routes = index_route.or(static_files);
+    // Simplest possible static file server
+    let routes = warp::fs::dir(absolute_dir.clone());
 
     println!("🌟 IoTCraft Web Server is ready!");
+    println!("   Listening on 0.0.0.0:{}", port);
+    println!("   Press Ctrl+C to stop the server");
     println!();
 
-    // Start the server - bind to 0.0.0.0 to allow network access
-    let server = warp::serve(routes)
-        .bind(([0, 0, 0, 0], port));
+    // Start the server with proper async handling
+    println!("🟢 Server starting on 0.0.0.0:{}...", port);
 
-    server.await;
+    // Spawn the server task
+    let server_task = tokio::spawn(async move {
+        let server = warp::serve(routes).run(([0, 0, 0, 0], port));
+
+        server.await;
+        println!("🔄 Server task completed");
+    });
+
+    println!("💫 Server is running indefinitely - use Ctrl+C to stop");
+    println!();
+
+    // Wait for Ctrl+C
+    tokio::signal::ctrl_c()
+        .await
+        .expect("Failed to listen for Ctrl+C");
+
+    println!();
+    println!("🛡️ Received Ctrl+C, shutting down...");
+
+    // Abort the server task since warp doesn't support graceful shutdown in this version
+    server_task.abort();
+
+    println!("✅ Web server stopped successfully");
 
     Ok(())
 }
@@ -450,22 +470,42 @@ fn get_local_ip() -> Option<String> {
     Some(local_addr.ip().to_string())
 }
 
+/// Generate and display a QR code for the given URL
+fn generate_qr_code(url: &str) {
+    match qr2term::print_qr(url) {
+        Ok(_) => {
+            println!("   Scan the QR code above with your phone's camera");
+            println!("   or QR code reader app to open: {}", url);
+        }
+        Err(e) => {
+            println!("   Failed to generate QR code: {}", e);
+            println!("   Use this URL instead: {}", url);
+        }
+    }
+}
+
 /// Format HTML files using tidier
 async fn format_html(check_only: bool, path_str: &str) -> Result<()> {
     let path = Path::new(path_str);
-    
+
     if check_only {
         println!("🔍 Checking HTML formatting...");
     } else {
         println!("🎨 Formatting HTML files...");
     }
 
-    let html_files = if path.is_file() && path.extension().map_or(false, |ext| ext == "html" || ext == "htm") {
+    let html_files = if path.is_file()
+        && path
+            .extension()
+            .map_or(false, |ext| ext == "html" || ext == "htm")
+    {
         vec![path.to_path_buf()]
     } else if path.is_dir() {
         find_html_files(path).await?
     } else {
-        return Err(anyhow::anyhow!("Path must be an HTML file or directory containing HTML files"));
+        return Err(anyhow::anyhow!(
+            "Path must be an HTML file or directory containing HTML files"
+        ));
     };
 
     if html_files.is_empty() {
@@ -491,7 +531,7 @@ async fn format_html(check_only: bool, path_str: &str) -> Result<()> {
                 } else if !check_only {
                     println!("   ✅ {}: already formatted", html_file.display());
                 }
-            },
+            }
             Err(e) => {
                 errors.push((html_file.display().to_string(), e));
             }
@@ -501,7 +541,7 @@ async fn format_html(check_only: bool, path_str: &str) -> Result<()> {
     println!();
     println!("📊 Summary:");
     println!("   Files processed: {}", files_processed);
-    
+
     if check_only {
         if files_changed > 0 {
             println!("   ❌ Files with formatting issues: {}", files_changed);
@@ -540,7 +580,8 @@ fn find_html_files_recursive<'a>(
     html_files: &'a mut Vec<PathBuf>,
 ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<()>> + 'a>> {
     Box::pin(async move {
-        let mut entries = fs::read_dir(dir).await
+        let mut entries = fs::read_dir(dir)
+            .await
             .with_context(|| format!("Failed to read directory: {}", dir.display()))?;
 
         while let Some(entry) = entries.next_entry().await? {
@@ -558,35 +599,15 @@ fn find_html_files_recursive<'a>(
     })
 }
 
-/// Process a single HTML file
+/// Process a single HTML file with pure Rust HTML5 parser
 async fn process_html_file(file_path: &Path, check_only: bool) -> Result<bool> {
     let original_content = fs::read_to_string(file_path)
         .await
         .with_context(|| format!("Failed to read file: {}", file_path.display()))?;
 
-    // Configure tidier for HTML formatting
-    let opts = tidier::FormatOptions {
-        indent: tidier::Indent {
-            size: 4,
-            tabs: false,
-            attributes: false,
-            cdata: false,
-        },
-        eol: tidier::LineEnding::Lf,
-        wrap: 120,
-        custom_tags: tidier::CustomTags::Blocklevel,
-        ascii_symbols: false,
-        strip_comments: false,
-        join_classes: true,
-        join_styles: true,
-        br_newline: false,
-        merge_divs: false,
-        merge_spans: false,
-    };
-
-    // Format the HTML (xml=false for HTML documents)
-    let formatted_content = tidier::format(&original_content, false, &opts)
-        .map_err(|e| anyhow::anyhow!("Failed to format HTML: {}", e))?;
+    // Format the HTML using our pure Rust formatter
+    let formatted_content = format_html_content(&original_content)
+        .with_context(|| format!("Failed to format HTML file: {}", file_path.display()))?;
 
     let changed = original_content != formatted_content;
 
@@ -597,4 +618,116 @@ async fn process_html_file(file_path: &Path, check_only: bool) -> Result<bool> {
     }
 
     Ok(changed)
+}
+
+/// Pure Rust HTML formatter using html5ever
+fn format_html_content(content: &str) -> Result<String> {
+    // Parse the HTML document
+    let dom = parse_document(RcDom::default(), Default::default())
+        .from_utf8()
+        .read_from(&mut content.as_bytes())
+        .map_err(|e| anyhow::anyhow!("Failed to parse HTML: {}", e))?;
+
+    // Format the DOM back to HTML
+    let mut output = Vec::new();
+    serialize_node(&dom.document, &mut output, 0)?;
+
+    let formatted = String::from_utf8(output)
+        .map_err(|e| anyhow::anyhow!("Invalid UTF-8 in formatted HTML: {}", e))?;
+
+    Ok(formatted)
+}
+
+/// Serialize an HTML node to properly formatted output
+fn serialize_node(handle: &Handle, output: &mut Vec<u8>, indent_level: usize) -> Result<()> {
+    let indent = "    ".repeat(indent_level); // 4 spaces per indent level
+
+    match &handle.data {
+        NodeData::Document => {
+            // Process children without adding any content for the document node
+            for child in handle.children.borrow().iter() {
+                serialize_node(child, output, indent_level)?
+            }
+        }
+        NodeData::Doctype { name, .. } => writeln!(output, "<!DOCTYPE {}>", name)
+            .map_err(|e| anyhow::anyhow!("Write error: {}", e))?,
+        NodeData::Text { contents } => {
+            let text = contents.borrow();
+            let trimmed = text.trim();
+            if !trimmed.is_empty() {
+                // Only add indentation if we're not already on a line with content
+                if output.last().map_or(true, |&b| b == b'\n') {
+                    write!(output, "{}", indent)
+                        .map_err(|e| anyhow::anyhow!("Write error: {}", e))?
+                }
+                write!(output, "{}", trimmed).map_err(|e| anyhow::anyhow!("Write error: {}", e))?
+            }
+        }
+        NodeData::Comment { contents } => writeln!(output, "{}<!--{}-->", indent, contents)
+            .map_err(|e| anyhow::anyhow!("Write error: {}", e))?,
+        NodeData::Element { name, attrs, .. } => {
+            let tag_name = &name.local;
+
+            // Write opening tag with proper indentation
+            write!(output, "{}<{}", indent, tag_name)
+                .map_err(|e| anyhow::anyhow!("Write error: {}", e))?;
+
+            // Add attributes
+            for attr in attrs.borrow().iter() {
+                write!(output, " {}=\"{}\"", attr.name.local, attr.value)
+                    .map_err(|e| anyhow::anyhow!("Write error: {}", e))?;
+            }
+
+            let children = handle.children.borrow();
+            let has_children = !children.is_empty();
+
+            // Handle void elements (self-closing tags)
+            let void_elements = [
+                "area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta",
+                "param", "source", "track", "wbr",
+            ];
+
+            if void_elements.contains(&tag_name.as_ref()) {
+                writeln!(output, ">").map_err(|e| anyhow::anyhow!("Write error: {}", e))?;
+            } else if !has_children {
+                writeln!(output, "></{}>", tag_name)
+                    .map_err(|e| anyhow::anyhow!("Write error: {}", e))?;
+            } else {
+                writeln!(output, ">").map_err(|e| anyhow::anyhow!("Write error: {}", e))?;
+
+                // Handle special formatting for style and script tags
+                if tag_name.as_ref() == "style" || tag_name.as_ref() == "script" {
+                    // For style/script, preserve internal formatting but ensure proper indentation
+                    for child in children.iter() {
+                        if let NodeData::Text { contents } = &child.data {
+                            let text = contents.borrow();
+                            let lines: Vec<&str> = text.lines().collect();
+                            for line in lines {
+                                if !line.trim().is_empty() {
+                                    writeln!(output, "{}    {}", indent, line.trim())
+                                        .map_err(|e| anyhow::anyhow!("Write error: {}", e))?
+                                }
+                            }
+                        } else {
+                            serialize_node(child, output, indent_level + 1)?
+                        }
+                    }
+                } else {
+                    // Regular content - process children with increased indentation
+                    for child in children.iter() {
+                        serialize_node(child, output, indent_level + 1)?
+                    }
+                }
+
+                // Close tag
+                writeln!(output, "{}</{}>", indent, tag_name)
+                    .map_err(|e| anyhow::anyhow!("Write error: {}", e))?
+            }
+        }
+        _ => {
+            // Handle other node types if needed
+        }
+    }
+
+    Ok(())
 }
