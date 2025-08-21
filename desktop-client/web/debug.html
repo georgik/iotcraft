@@ -1,19 +1,18 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <!-- iPad-optimized viewport settings -->
-    <meta
-      name="viewport"
-      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"
-    />
-    <meta name="mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-    <meta name="apple-touch-fullscreen" content="yes" />
-    <title>IoTCraft DEBUG - iPad Crash Diagnosis</title>
-    <style>
-      body {
+    <head>
+        <meta charset="UTF-8"><!-- iPad-optimized viewport settings -->
+        <meta name="viewport" content=
+        "width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+        <meta name="mobile-web-app-capable" content="yes">
+        <meta name="apple-mobile-web-app-capable" content="yes">
+        <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+        <meta name="apple-touch-fullscreen" content="yes">
+        <title>
+            IoTCraft DEBUG - iPad Crash Diagnosis
+        </title>
+        <style>
+        body {
         margin: 0;
         padding: 0;
         background-color: #1a1a2e;
@@ -28,9 +27,9 @@
         -ms-user-select: none;
         user-select: none;
         -webkit-tap-highlight-color: transparent;
-      }
+        }
 
-      #canvas {
+        #canvas {
         width: 100vw;
         height: 100vh;
         display: block;
@@ -42,9 +41,9 @@
         position: fixed;
         top: 0;
         left: 0;
-      }
+        }
 
-      .debug-info {
+        .debug-info {
         position: fixed;
         top: 10px;
         left: 10px;
@@ -55,9 +54,9 @@
         z-index: 1000;
         color: white;
         max-width: 300px;
-      }
+        }
 
-      .debug-log {
+        .debug-log {
         position: fixed;
         bottom: 10px;
         left: 10px;
@@ -70,33 +69,40 @@
         color: #00ff00;
         max-height: 200px;
         overflow-y: auto;
-      }
-    </style>
-  </head>
-  <body>
-    <!-- Debug Canvas -->
-    <canvas id="canvas"></canvas>
+        }
+        </style>
+    </head>
+    <body>
+        <!-- Debug Canvas -->
+        <canvas id="canvas"></canvas><!-- Debug Info -->
+        <div class="debug-info">
+            <div>
+                <strong>🚨 DEBUG MODE</strong>
+            </div>
+            <div>
+                Platform: <span id="platform">Unknown</span>
+            </div>
+            <div>
+                UserAgent: <span id="userAgent">Unknown</span>
+            </div>
+            <div>
+                Touch Points: <span id="touchPoints">0</span>
+            </div>
+            <div>
+                Status: <span id="status">Loading...</span>
+            </div>
+        </div><!-- Debug Log -->
+        <div class="debug-log" id="debugLog">
+            <div>
+                🚨 DEBUG LOG:
+            </div>
+        </div>
+        <script type="module">
+        let wasmModule = null;
+        let debugLog = document.getElementById('debugLog');
 
-    <!-- Debug Info -->
-    <div class="debug-info">
-      <div><strong>🚨 DEBUG MODE</strong></div>
-      <div>Platform: <span id="platform">Unknown</span></div>
-      <div>UserAgent: <span id="userAgent">Unknown</span></div>
-      <div>Touch Points: <span id="touchPoints">0</span></div>
-      <div>Status: <span id="status">Loading...</span></div>
-    </div>
-
-    <!-- Debug Log -->
-    <div class="debug-log" id="debugLog">
-      <div>🚨 DEBUG LOG:</div>
-    </div>
-
-    <script type="module">
-      let wasmModule = null;
-      let debugLog = document.getElementById('debugLog');
-
-      // Enhanced logging function (doesn't call console.log to avoid recursion)
-      function debugLogMessage(message) {
+        // Enhanced logging function (doesn't call console.log to avoid recursion)
+        function debugLogMessage(message) {
         const div = document.createElement('div');
         div.textContent = new Date().toISOString() + ': ' + message;
         debugLog.appendChild(div);
@@ -107,26 +113,26 @@
           // 20 + header
           debugLog.removeChild(debugLog.children[1]);
         }
-      }
+        }
 
-      // Safe logging function that also outputs to original console
-      function safeLog(message) {
+        // Safe logging function that also outputs to original console
+        function safeLog(message) {
         // Store original console.log reference before overrides
         const originalConsoleLog = console.log;
         debugLogMessage(message);
         originalConsoleLog(message);
-      }
+        }
 
-      // Update device info
-      document.getElementById('platform').textContent = navigator.platform || 'Unknown';
-      document.getElementById('userAgent').textContent = (navigator.userAgent || 'Unknown').substring(0, 50) + '...';
-      document.getElementById('touchPoints').textContent = navigator.maxTouchPoints || 0;
+        // Update device info
+        document.getElementById('platform').textContent = navigator.platform || 'Unknown';
+        document.getElementById('userAgent').textContent = (navigator.userAgent || 'Unknown').substring(0, 50) + '...';
+        document.getElementById('touchPoints').textContent = navigator.maxTouchPoints || 0;
 
-      // Override console methods to capture logs
-      const originalLog = console.log;
-      const originalError = console.error;
+        // Override console methods to capture logs
+        const originalLog = console.log;
+        const originalError = console.error;
 
-      console.log = function (...args) {
+        console.log = function (...args) {
         const message = 'LOG: ' + args.join(' ');
         // Call original console.log first to avoid recursion
         originalLog.apply(console, args);
@@ -141,9 +147,9 @@
           // 20 + header
           debugLog.removeChild(debugLog.children[1]);
         }
-      };
+        };
 
-      console.error = function (...args) {
+        console.error = function (...args) {
         const message = '❌ ERROR: ' + args.join(' ');
         // Call original console.error first to avoid recursion
         originalError.apply(console, args);
@@ -158,38 +164,38 @@
           // 20 + header
           debugLog.removeChild(debugLog.children[1]);
         }
-      };
+        };
 
-      // Global error handling
-      window.addEventListener('error', event => {
+        // Global error handling
+        window.addEventListener('error', event => {
         debugLogMessage('❌ GLOBAL ERROR: ' + event.message + ' at ' + event.filename + ':' + event.lineno);
         document.getElementById('status').textContent = 'ERROR: ' + event.message;
-      });
+        });
 
-      window.addEventListener('unhandledrejection', event => {
+        window.addEventListener('unhandledrejection', event => {
         debugLogMessage('❌ UNHANDLED REJECTION: ' + event.reason);
         document.getElementById('status').textContent = 'REJECTION: ' + event.reason;
-      });
+        });
 
-      // Touch event logging
-      document.addEventListener(
+        // Touch event logging
+        document.addEventListener(
         'touchstart',
         e => {
           debugLogMessage(`👆 TOUCHSTART: ${e.touches.length} touches`);
         },
         { passive: true }
-      );
+        );
 
-      document.addEventListener(
+        document.addEventListener(
         'touchend',
         e => {
           debugLogMessage(`👆 TOUCHEND: ${e.touches.length} remaining touches`);
         },
         { passive: true }
-      );
+        );
 
-      // Initialize WASM
-      async function initDebugWasm() {
+        // Initialize WASM
+        async function initDebugWasm() {
         try {
           debugLogMessage('🚨 Loading DEBUG WASM module...');
           document.getElementById('status').textContent = 'Loading WASM...';
@@ -219,11 +225,11 @@
           debugLogMessage('❌ WASM INIT FAILED: ' + error.message);
           document.getElementById('status').textContent = 'FAILED: ' + error.message;
         }
-      }
+        }
 
-      // Start the debug app
-      debugLogMessage('🚨 Starting iPad crash diagnosis...');
-      initDebugWasm();
-    </script>
-  </body>
+        // Start the debug app
+        debugLogMessage('🚨 Starting iPad crash diagnosis...');
+        initDebugWasm();
+        </script>
+    </body>
 </html>

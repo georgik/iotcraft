@@ -3,6 +3,7 @@ use clap::{Parser, Subcommand};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use tokio::fs;
+use warp::Filter;
 
 #[derive(Parser)]
 #[command(name = "xtask")]
@@ -38,6 +39,15 @@ enum Commands {
         #[arg(short, long, default_value = "8000")]
         port: u16,
     },
+    /// Format HTML files
+    FormatHtml {
+        /// Check formatting without modifying files
+        #[arg(short, long)]
+        check: bool,
+        /// Path to HTML files or directory
+        #[arg(default_value = "web")]
+        path: String,
+    },
 }
 
 #[tokio::main]
@@ -54,6 +64,9 @@ async fn main() -> Result<()> {
         Commands::WebDev { port } => {
             web_build(false, "dist").await?;
             web_serve(*port, "dist").await?;
+        }
+        Commands::FormatHtml { check, path } => {
+            format_html(*check, path).await?;
         }
     }
 
@@ -366,7 +379,7 @@ fn copy_dir_recursively<'a>(
 }
 
 async fn web_serve(port: u16, dir: &str) -> Result<()> {
-    println!("🚀 Starting web server...");
+    println!("🚀 Starting Rust HTTP server...");
     println!("   Serving directory: {}", dir);
     println!("   Port: {}", port);
     println!("   URL: http://localhost:{}", port);
@@ -376,31 +389,51 @@ async fn web_serve(port: u16, dir: &str) -> Result<()> {
     println!("   Network URL: http://{}:{}", local_ip, port);
     println!();
     println!("📱 Access from mobile devices or other computers using the network URL");
-    println!("Press Ctrl+C to stop the server");
+    println!("   Press Ctrl+C to stop the server");
+    println!();
 
-    // Use Python's built-in HTTP server for simplicity and portability
-    // The --bind 0.0.0.0 flag makes it accessible from other machines
-    let mut cmd = if which::which("python3").is_ok() {
-        let mut cmd = Command::new("python3");
-        cmd.args(&["-m", "http.server", &port.to_string(), "--bind", "0.0.0.0"]);
-        cmd
-    } else if which::which("python").is_ok() {
-        let mut cmd = Command::new("python");
-        cmd.args(&["-m", "http.server", &port.to_string(), "--bind", "0.0.0.0"]);
-        cmd
-    } else {
-        return Err(anyhow::anyhow!(
-            "Python is not installed. Please install Python or use a different HTTP server."
-        ));
-    };
-
-    cmd.current_dir(dir);
-
-    let status = cmd.status().context("Failed to start HTTP server")?;
-
-    if !status.success() {
-        return Err(anyhow::anyhow!("HTTP server failed"));
+    // Validate directory exists
+    let serve_dir = Path::new(dir);
+    if !serve_dir.exists() {
+        return Err(anyhow::anyhow!("Directory '{}' does not exist", dir));
     }
+    if !serve_dir.is_dir() {
+        return Err(anyhow::anyhow!("'{}' is not a directory", dir));
+    }
+
+    // Convert to absolute path for better error reporting
+    let absolute_dir = std::fs::canonicalize(serve_dir)
+        .context("Failed to resolve absolute path")?;
+    
+    println!("📁 Serving files from: {}", absolute_dir.display());
+    println!();
+
+    // Create CORS headers for WASM files and development
+    let cors = warp::cors()
+        .allow_any_origin()
+        .allow_headers(vec!["content-type", "authorization"])
+        .allow_methods(vec!["GET", "POST", "PUT", "DELETE", "HEAD", "OPTIONS"]);
+
+    // Create static file server with proper MIME types
+    let static_files = warp::fs::dir(absolute_dir.clone())
+        .with(cors)
+        .with(warp::compression::gzip());
+
+    // Handle root path explicitly to serve index.html
+    let index_route = warp::path::end()
+        .and(warp::fs::file(absolute_dir.join("index.html")));
+
+    // Combine routes: index route takes precedence over static files
+    let routes = index_route.or(static_files);
+
+    println!("🌟 IoTCraft Web Server is ready!");
+    println!();
+
+    // Start the server - bind to 0.0.0.0 to allow network access
+    let server = warp::serve(routes)
+        .bind(([0, 0, 0, 0], port));
+
+    server.await;
 
     Ok(())
 }
@@ -415,4 +448,153 @@ fn get_local_ip() -> Option<String> {
     socket.connect("8.8.8.8:80").ok()?;
     let local_addr = socket.local_addr().ok()?;
     Some(local_addr.ip().to_string())
+}
+
+/// Format HTML files using tidier
+async fn format_html(check_only: bool, path_str: &str) -> Result<()> {
+    let path = Path::new(path_str);
+    
+    if check_only {
+        println!("🔍 Checking HTML formatting...");
+    } else {
+        println!("🎨 Formatting HTML files...");
+    }
+
+    let html_files = if path.is_file() && path.extension().map_or(false, |ext| ext == "html" || ext == "htm") {
+        vec![path.to_path_buf()]
+    } else if path.is_dir() {
+        find_html_files(path).await?
+    } else {
+        return Err(anyhow::anyhow!("Path must be an HTML file or directory containing HTML files"));
+    };
+
+    if html_files.is_empty() {
+        println!("   No HTML files found in {}", path_str);
+        return Ok(());
+    }
+
+    let mut files_processed = 0;
+    let mut files_changed = 0;
+    let mut errors = Vec::new();
+
+    for html_file in html_files {
+        match process_html_file(&html_file, check_only).await {
+            Ok(changed) => {
+                files_processed += 1;
+                if changed {
+                    files_changed += 1;
+                    if check_only {
+                        println!("   ❌ {}: formatting issues found", html_file.display());
+                    } else {
+                        println!("   ✅ {}: formatted", html_file.display());
+                    }
+                } else if !check_only {
+                    println!("   ✅ {}: already formatted", html_file.display());
+                }
+            },
+            Err(e) => {
+                errors.push((html_file.display().to_string(), e));
+            }
+        }
+    }
+
+    println!();
+    println!("📊 Summary:");
+    println!("   Files processed: {}", files_processed);
+    
+    if check_only {
+        if files_changed > 0 {
+            println!("   ❌ Files with formatting issues: {}", files_changed);
+            println!("   Run 'cargo xtask format-html' to fix formatting.");
+        } else {
+            println!("   ✅ All files are properly formatted.");
+        }
+    } else {
+        println!("   Files formatted: {}", files_changed);
+    }
+
+    if !errors.is_empty() {
+        println!("   ❌ Errors encountered: {}", errors.len());
+        for (file, error) in errors {
+            println!("      {}: {}", file, error);
+        }
+        return Err(anyhow::anyhow!("Some files could not be processed"));
+    }
+
+    if check_only && files_changed > 0 {
+        return Err(anyhow::anyhow!("Formatting issues found"));
+    }
+
+    Ok(())
+}
+
+/// Find all HTML files in a directory recursively
+async fn find_html_files(dir: &Path) -> Result<Vec<PathBuf>> {
+    let mut html_files = Vec::new();
+    find_html_files_recursive(dir, &mut html_files).await?;
+    Ok(html_files)
+}
+
+fn find_html_files_recursive<'a>(
+    dir: &'a Path,
+    html_files: &'a mut Vec<PathBuf>,
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<()>> + 'a>> {
+    Box::pin(async move {
+        let mut entries = fs::read_dir(dir).await
+            .with_context(|| format!("Failed to read directory: {}", dir.display()))?;
+
+        while let Some(entry) = entries.next_entry().await? {
+            let path = entry.path();
+            if path.is_dir() {
+                find_html_files_recursive(&path, html_files).await?;
+            } else if let Some(ext) = path.extension() {
+                if ext == "html" || ext == "htm" {
+                    html_files.push(path);
+                }
+            }
+        }
+
+        Ok(())
+    })
+}
+
+/// Process a single HTML file
+async fn process_html_file(file_path: &Path, check_only: bool) -> Result<bool> {
+    let original_content = fs::read_to_string(file_path)
+        .await
+        .with_context(|| format!("Failed to read file: {}", file_path.display()))?;
+
+    // Configure tidier for HTML formatting
+    let opts = tidier::FormatOptions {
+        indent: tidier::Indent {
+            size: 4,
+            tabs: false,
+            attributes: false,
+            cdata: false,
+        },
+        eol: tidier::LineEnding::Lf,
+        wrap: 120,
+        custom_tags: tidier::CustomTags::Blocklevel,
+        ascii_symbols: false,
+        strip_comments: false,
+        join_classes: true,
+        join_styles: true,
+        br_newline: false,
+        merge_divs: false,
+        merge_spans: false,
+    };
+
+    // Format the HTML (xml=false for HTML documents)
+    let formatted_content = tidier::format(&original_content, false, &opts)
+        .map_err(|e| anyhow::anyhow!("Failed to format HTML: {}", e))?;
+
+    let changed = original_content != formatted_content;
+
+    if changed && !check_only {
+        fs::write(file_path, formatted_content)
+            .await
+            .with_context(|| format!("Failed to write formatted file: {}", file_path.display()))?;
+    }
+
+    Ok(changed)
 }
