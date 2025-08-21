@@ -126,6 +126,12 @@ async fn web_build(release: bool, output_dir: &str) -> Result<()> {
         .await
         .context("Failed to generate HTML")?;
 
+    // Copy additional HTML files (debug.html, etc.)
+    println!("🌐 Copying additional HTML files...");
+    copy_additional_html_files(&output_path)
+        .await
+        .context("Failed to copy additional HTML files")?;
+
     // Copy assets if they exist
     if Path::new("assets").exists() {
         println!("🎨 Copying assets...");
@@ -300,6 +306,29 @@ fn generate_default_html() -> String {
     </script>
 </body>
 </html>"#.to_string()
+}
+
+async fn copy_additional_html_files(output_path: &Path) -> Result<()> {
+    let web_dir = Path::new("web");
+
+    // List of additional HTML files to copy (excluding index.html which is handled separately)
+    let html_files = ["debug.html"];
+
+    for file in html_files {
+        let src = web_dir.join(file);
+        let dst = output_path.join(file);
+
+        if src.exists() {
+            fs::copy(&src, &dst)
+                .await
+                .with_context(|| format!("Failed to copy {}", file))?;
+            println!("   Copied {}", file);
+        } else {
+            println!("   Skipped {} (not found)", file);
+        }
+    }
+
+    Ok(())
 }
 
 async fn copy_assets(output_path: &Path) -> Result<()> {

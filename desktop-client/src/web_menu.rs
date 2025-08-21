@@ -128,10 +128,13 @@ fn setup_in_game(
     // Enable camera controller
     camera_controller.enabled = true;
 
-    // Try to grab mouse for in-game experience
+    // Try to grab mouse for in-game experience (safe for mobile)
     for mut window in &mut windows {
-        window.cursor_options.grab_mode = bevy::window::CursorGrabMode::Locked;
-        window.cursor_options.visible = false;
+        crate::lib_gradual::safe_set_cursor_grab_mode(
+            &mut window,
+            bevy::window::CursorGrabMode::Locked,
+            false,
+        );
     }
 }
 
@@ -313,10 +316,11 @@ fn handle_settings_menu_buttons(
     }
 }
 
-/// Handle keyboard and touch navigation
+/// Handle keyboard, touch, and mouse navigation (iPad compatible) - with crash protection
 fn handle_escape_key(
     keyboard_input: Res<ButtonInput<KeyCode>>,
     mut touch_events: EventReader<TouchInput>,
+    mouse_button_input: Res<ButtonInput<MouseButton>>,
     current_state: Res<State<WebGameState>>,
     mut next_state: ResMut<NextState<WebGameState>>,
 ) {
@@ -342,8 +346,10 @@ fn handle_escape_key(
     }
 
     // Handle touch input - tap anywhere on main menu to start game
+    let mut touch_detected = false;
     for touch in touch_events.read() {
         if touch.phase == bevy::input::touch::TouchPhase::Started {
+            touch_detected = true;
             match current_state.get() {
                 WebGameState::MainMenu => {
                     info!("📱 Starting game via touch input at {:?}", touch.position);
@@ -353,6 +359,21 @@ fn handle_escape_key(
                 }
                 _ => {}
             }
+        }
+    }
+
+    // iPad fallback: Handle mouse clicks as touch events (iPad Safari sometimes treats touches as mouse events)
+    if !touch_detected && mouse_button_input.just_pressed(MouseButton::Left) {
+        match current_state.get() {
+            WebGameState::MainMenu => {
+                info!("📱 Starting game via mouse click (iPad fallback)");
+                #[cfg(target_arch = "wasm32")]
+                web_sys::console::log_1(
+                    &"📱 Mouse click detected - starting game (iPad fallback)!".into(),
+                );
+                next_state.set(WebGameState::InGame);
+            }
+            _ => {}
         }
     }
 }
