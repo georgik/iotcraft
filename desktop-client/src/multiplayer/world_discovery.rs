@@ -45,6 +45,12 @@ pub enum DiscoveryResponse {
     WorldChangeReceived {
         change: WorldChange,
     },
+    BlockChangeReceived {
+        world_id: String,
+        player_id: String,
+        player_name: String,
+        change_type: super::shared_world::BlockChangeType,
+    },
 }
 
 pub struct WorldDiscoveryPlugin;
@@ -137,6 +143,23 @@ fn initialize_world_discovery(
                             break;
                         }
                         info!("Subscribed to iotcraft/worlds/+/changes");
+
+                        // Subscribe to block change topics for real-time synchronization
+                        if let Err(e) = client
+                            .subscribe("iotcraft/worlds/+/state/blocks/placed", QoS::AtLeastOnce)
+                        {
+                            error!("Failed to subscribe to block placements: {}", e);
+                            break;
+                        }
+                        info!("Subscribed to iotcraft/worlds/+/state/blocks/placed");
+
+                        if let Err(e) = client
+                            .subscribe("iotcraft/worlds/+/state/blocks/removed", QoS::AtLeastOnce)
+                        {
+                            error!("Failed to subscribe to block removals: {}", e);
+                            break;
+                        }
+                        info!("Subscribed to iotcraft/worlds/+/state/blocks/removed");
 
                         subscribed = true;
                         info!(
@@ -252,10 +275,13 @@ fn initialize_world_discovery(
             }
 
             // Handle discovery and connection events
+            let mut loop_counter = 0;
+            let mut last_debug_log = std::time::Instant::now();
             loop {
                 // Handle connection events (non-blocking)
                 match conn.try_recv() {
                     Ok(Ok(Event::Incoming(Incoming::Publish(p)))) => {
+                        info!("📬 Main loop received MQTT message on topic: {}", p.topic);
                         handle_discovery_message(
                             &p,
                             &mut world_cache,
@@ -263,7 +289,13 @@ fn initialize_world_discovery(
                             &response_tx,
                         );
                     }
-                    Ok(Ok(_)) => {}
+                    Ok(Ok(other_event)) => {
+                        // Log other events occasionally to verify connection is alive
+                        if last_debug_log.elapsed() > Duration::from_secs(30) {
+                            info!("📡 Main loop received other MQTT event: {:?}", other_event);
+                            last_debug_log = std::time::Instant::now();
+                        }
+                    }
                     Ok(Err(e)) => {
                         error!("World discovery connection error: {:?}", e);
                         break;
@@ -273,6 +305,16 @@ fn initialize_world_discovery(
                         error!("World discovery connection lost");
                         break;
                     }
+                }
+
+                loop_counter += 1;
+                if loop_counter % 100000 == 0 && last_debug_log.elapsed() > Duration::from_secs(60)
+                {
+                    info!(
+                        "🔄 Main MQTT processing loop is active (iteration {})",
+                        loop_counter
+                    );
+                    last_debug_log = std::time::Instant::now();
                 }
 
                 // Handle discovery requests (non-blocking)
@@ -413,6 +455,96 @@ fn handle_discovery_message(
                 error!("Failed to decode world change payload: {}", e);
             }
         },
+        "state" => {
+            // Handle block change messages
+            if topic_parts.len() >= 6 && topic_parts[4] == "blocks" {
+                let block_action = topic_parts[5]; // "placed" or "removed"
+
+                match String::from_utf8(publish.payload.to_vec()) {
+                    Ok(payload_str) => {
+                        match serde_json::from_str::<serde_json::Value>(&payload_str) {
+                            Ok(v) => {
+                                // Parse the block change message
+                                let player_id = v["player_id"].as_str().unwrap_or("").to_string();
+                                let player_name =
+                                    v["player_name"].as_str().unwrap_or("").to_string();
+
+                                if let Some(change_obj) = v["change"].as_object() {
+                                    let change_type = if block_action == "placed" {
+                                        if let Some(placed) = change_obj.get("Placed") {
+                                            super::shared_world::BlockChangeType::Placed {
+                                            x: placed["x"].as_i64().unwrap_or(0) as i32,
+                                            y: placed["y"].as_i64().unwrap_or(0) as i32,
+                                            z: placed["z"].as_i64().unwrap_or(0) as i32,
+                                            block_type: match placed["block_type"].as_str().unwrap_or("Stone") {
+                                                "Grass" => crate::environment::BlockType::Grass,
+                                                "Dirt" => crate::environment::BlockType::Dirt,
+                                                "Stone" => crate::environment::BlockType::Stone,
+                                                "QuartzBlock" => crate::environment::BlockType::QuartzBlock,
+                                                "GlassPane" => crate::environment::BlockType::GlassPane,
+                                                "CyanTerracotta" => crate::environment::BlockType::CyanTerracotta,
+                                                "Water" => crate::environment::BlockType::Water,
+                                                _ => crate::environment::BlockType::Stone,
+                                            },
+                                        }
+                                        } else {
+                                            error!("Invalid placed block change format");
+                                            return;
+                                        }
+                                    } else if block_action == "removed" {
+                                        if let Some(removed) = change_obj.get("Removed") {
+                                            super::shared_world::BlockChangeType::Removed {
+                                                x: removed["x"].as_i64().unwrap_or(0) as i32,
+                                                y: removed["y"].as_i64().unwrap_or(0) as i32,
+                                                z: removed["z"].as_i64().unwrap_or(0) as i32,
+                                            }
+                                        } else {
+                                            error!("Invalid removed block change format");
+                                            return;
+                                        }
+                                    } else {
+                                        error!("Unknown block action: {}", block_action);
+                                        return;
+                                    };
+
+                                    info!(
+                                        "🔄 Parsed block change for world {}: {:?} by {} - sending to response channel",
+                                        world_id, change_type, player_name
+                                    );
+
+                                    let send_result =
+                                        response_tx.send(DiscoveryResponse::BlockChangeReceived {
+                                            world_id: world_id.to_string(),
+                                            player_id,
+                                            player_name,
+                                            change_type,
+                                        });
+
+                                    if send_result.is_ok() {
+                                        info!(
+                                            "✅ Block change message sent to response channel successfully"
+                                        );
+                                    } else {
+                                        error!(
+                                            "❌ Failed to send block change to response channel: {:?}",
+                                            send_result
+                                        );
+                                    }
+                                } else {
+                                    error!("Block change message missing 'change' object");
+                                }
+                            }
+                            Err(e) => {
+                                error!("Failed to parse block change JSON: {}", e);
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        error!("Failed to decode block change payload: {}", e);
+                    }
+                }
+            }
+        }
         _ => {
             // Unknown message type
         }
@@ -541,12 +673,14 @@ fn process_discovery_responses(
     mut commands: Commands,
     mut voxel_world: ResMut<crate::environment::VoxelWorld>,
     existing_blocks_query: Query<Entity, With<crate::environment::VoxelBlock>>,
+    voxel_blocks_query: Query<(Entity, &crate::environment::VoxelBlock)>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     asset_server: Res<AssetServer>,
     mut inventory: ResMut<crate::inventory::PlayerInventory>,
     camera_query: Query<Entity, With<crate::camera_controllers::CameraController>>,
     multiplayer_mode: Res<MultiplayerMode>,
+    player_profile: Res<crate::profile::PlayerProfile>,
 ) {
     if let Some(rx) = world_discovery.world_rx.lock().unwrap().as_ref() {
         while let Ok(response) = rx.try_recv() {
@@ -563,7 +697,17 @@ fn process_discovery_responses(
                     world_id,
                     world_data,
                 } => {
-                    // Only load world data if we're joining this specific world
+                    // Always cache the world data when received
+                    info!(
+                        "Caching world data for: {} ({} blocks)",
+                        world_id,
+                        world_data.blocks.len()
+                    );
+                    online_worlds
+                        .world_data_cache
+                        .insert(world_id.clone(), world_data.clone());
+
+                    // Also load it immediately if we're already in this world
                     if let MultiplayerMode::JoinedWorld {
                         world_id: joined_id,
                         ..
@@ -602,6 +746,63 @@ fn process_discovery_responses(
                             }
                         }
                         MultiplayerMode::SinglePlayer => {}
+                    }
+                }
+                DiscoveryResponse::BlockChangeReceived {
+                    world_id,
+                    player_id,
+                    player_name,
+                    change_type,
+                } => {
+                    info!(
+                        "📨 Received block change for world {}: {:?} by {} (player_id: {})",
+                        world_id, change_type, player_name, player_id
+                    );
+                    info!("🔍 Current multiplayer mode: {:?}", &*multiplayer_mode);
+                    info!("👤 Current player ID: {}", player_profile.player_id);
+
+                    // Check if this change is from the current player (avoid duplicate block creation)
+                    if player_id == player_profile.player_id {
+                        info!("🚫 Ignoring block change from self to prevent duplicate creation");
+                        continue; // Skip processing our own changes, but continue processing other messages
+                    }
+
+                    // Apply block changes if we're in the same world and from a different player
+                    match &*multiplayer_mode {
+                        MultiplayerMode::JoinedWorld {
+                            world_id: joined_world,
+                            ..
+                        }
+                        | MultiplayerMode::HostingWorld {
+                            world_id: joined_world,
+                            ..
+                        } => {
+                            info!(
+                                "🌍 Checking world match: joined_world={} vs received_world={}",
+                                joined_world, world_id
+                            );
+                            if *joined_world == world_id {
+                                info!(
+                                    "✅ World matches! Applying block change from other player: {:?}",
+                                    change_type
+                                );
+                                apply_block_change(
+                                    change_type,
+                                    &player_name,
+                                    &mut commands,
+                                    &mut voxel_world,
+                                    &voxel_blocks_query,
+                                    &mut meshes,
+                                    &mut materials,
+                                    &asset_server,
+                                );
+                            } else {
+                                info!("❌ World doesn't match: {} != {}", joined_world, world_id);
+                            }
+                        }
+                        MultiplayerMode::SinglePlayer => {
+                            info!("🚫 In SinglePlayer mode, ignoring block change");
+                        }
                     }
                 }
             }
@@ -751,6 +952,80 @@ fn apply_world_change(
         }
         WorldChangeType::PlayerLeft { player_name, .. } => {
             info!("Player left: {}", player_name);
+        }
+    }
+}
+
+fn apply_block_change(
+    change_type: super::shared_world::BlockChangeType,
+    player_name: &str,
+    commands: &mut Commands,
+    voxel_world: &mut crate::environment::VoxelWorld,
+    voxel_blocks_query: &Query<(Entity, &crate::environment::VoxelBlock)>,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<StandardMaterial>,
+    asset_server: &AssetServer,
+) {
+    match change_type {
+        super::shared_world::BlockChangeType::Placed {
+            x,
+            y,
+            z,
+            block_type,
+        } => {
+            let pos = IVec3::new(x, y, z);
+            voxel_world.blocks.insert(pos, block_type);
+
+            // Spawn visual block
+            let cube_mesh = meshes.add(Cuboid::new(
+                crate::environment::CUBE_SIZE,
+                crate::environment::CUBE_SIZE,
+                crate::environment::CUBE_SIZE,
+            ));
+            let texture_path = match block_type {
+                crate::environment::BlockType::Grass => "textures/grass.webp",
+                crate::environment::BlockType::Dirt => "textures/dirt.webp",
+                crate::environment::BlockType::Stone => "textures/stone.webp",
+                crate::environment::BlockType::QuartzBlock => "textures/quartz_block.webp",
+                crate::environment::BlockType::GlassPane => "textures/glass_pane.webp",
+                crate::environment::BlockType::CyanTerracotta => "textures/cyan_terracotta.webp",
+                crate::environment::BlockType::Water => "textures/water.webp",
+            };
+            let texture: Handle<Image> = asset_server.load(texture_path);
+            let material = materials.add(StandardMaterial {
+                base_color_texture: Some(texture),
+                ..default()
+            });
+
+            commands.spawn((
+                Mesh3d(cube_mesh),
+                MeshMaterial3d(material),
+                Transform::from_translation(pos.as_vec3()),
+                crate::environment::VoxelBlock { position: pos },
+            ));
+
+            info!(
+                "Applied block placement from {}: {:?} at ({}, {}, {})",
+                player_name, block_type, x, y, z
+            );
+        }
+        super::shared_world::BlockChangeType::Removed { x, y, z } => {
+            let pos = IVec3::new(x, y, z);
+            voxel_world.blocks.remove(&pos);
+
+            // Despawn visual block by finding the entity at this position
+            for (entity, block) in voxel_blocks_query.iter() {
+                if block.position == pos {
+                    commands.entity(entity).despawn();
+                    info!("Despawned block entity at position ({}, {}, {})", x, y, z);
+                    break;
+                }
+            }
+
+            info!(
+                "Applied block removal from {}: ({}, {}, {})",
+                player_name, x, y, z
+            );
         }
     }
 }

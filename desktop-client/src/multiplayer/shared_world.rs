@@ -89,6 +89,7 @@ impl Default for MultiplayerMode {
 #[derive(Resource, Debug, Default)]
 pub struct OnlineWorlds {
     pub worlds: HashMap<String, SharedWorldInfo>,
+    pub world_data_cache: HashMap<String, crate::world::WorldSaveData>,
     pub last_updated: Option<std::time::Instant>,
 }
 
@@ -197,6 +198,8 @@ impl Plugin for SharedWorldPlugin {
                     handle_leave_shared_world_events,
                     handle_world_change_events,
                     handle_refresh_online_worlds_events,
+                    handle_block_change_events,
+                    handle_world_state_received_events,
                 ),
             );
     }
@@ -244,6 +247,7 @@ fn handle_join_shared_world_events(
     mut join_events: EventReader<JoinSharedWorldEvent>,
     mut multiplayer_mode: ResMut<MultiplayerMode>,
     online_worlds: Res<OnlineWorlds>,
+    mut world_state_events: EventWriter<WorldStateReceivedEvent>,
 ) {
     for event in join_events.read() {
         info!("Attempting to join shared world: {}", event.world_id);
@@ -258,6 +262,23 @@ fn handle_join_shared_world_events(
                 "Joined world {} hosted by {}",
                 world_info.world_name, world_info.host_name
             );
+
+            // Check if we have cached world data and load it
+            if let Some(world_data) = online_worlds.world_data_cache.get(&event.world_id) {
+                info!(
+                    "Found cached world data for: {}, triggering load",
+                    event.world_id
+                );
+                world_state_events.write(WorldStateReceivedEvent {
+                    world_id: event.world_id.clone(),
+                    world_data: world_data.clone(),
+                });
+            } else {
+                info!(
+                    "No cached world data found for: {}, waiting for MQTT data",
+                    event.world_id
+                );
+            }
         } else {
             error!("World {} not found in online worlds", event.world_id);
         }
@@ -301,4 +322,168 @@ fn handle_refresh_online_worlds_events(
         online_worlds.last_updated = Some(std::time::Instant::now());
         // TODO: Implement MQTT-based world discovery
     }
+}
+
+fn handle_block_change_events(
+    mut block_change_events: EventReader<BlockChangeEvent>,
+    world_publisher: Res<crate::multiplayer::world_publisher::WorldPublisher>,
+    multiplayer_mode: Res<MultiplayerMode>,
+) {
+    use crate::multiplayer::world_publisher::PublishMessage;
+
+    for event in block_change_events.read() {
+        match &*multiplayer_mode {
+            MultiplayerMode::HostingWorld { world_id, .. }
+            | MultiplayerMode::JoinedWorld { world_id, .. } => {
+                if event.world_id == *world_id {
+                    info!(
+                        "Publishing block change for world {}: {:?} by {}",
+                        world_id, event.change_type, event.player_name
+                    );
+
+                    if let Some(tx) = world_publisher.publish_tx.lock().unwrap().as_ref() {
+                        if let Err(e) = tx.send(PublishMessage::PublishBlockChange {
+                            world_id: event.world_id.clone(),
+                            player_id: event.player_id.clone(),
+                            player_name: event.player_name.clone(),
+                            change_type: event.change_type.clone(),
+                        }) {
+                            error!("Failed to send block change publish message: {}", e);
+                        }
+                    }
+                }
+            }
+            MultiplayerMode::SinglePlayer => {
+                // No MQTT publishing in single player mode
+            }
+        }
+    }
+}
+
+fn handle_world_state_received_events(
+    mut world_state_events: EventReader<WorldStateReceivedEvent>,
+    mut commands: Commands,
+    mut voxel_world: ResMut<crate::environment::VoxelWorld>,
+    existing_blocks_query: Query<Entity, With<crate::environment::VoxelBlock>>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    asset_server: Res<AssetServer>,
+    mut inventory: ResMut<crate::inventory::PlayerInventory>,
+    camera_query: Query<Entity, With<crate::camera_controllers::CameraController>>,
+    multiplayer_mode: Res<MultiplayerMode>,
+) {
+    for event in world_state_events.read() {
+        // Only load world data if we're currently in the specified world
+        if let MultiplayerMode::JoinedWorld {
+            world_id: joined_id,
+            ..
+        } = &*multiplayer_mode
+        {
+            if *joined_id == event.world_id {
+                info!(
+                    "Loading shared world state for: {} ({} blocks)",
+                    event.world_id,
+                    event.world_data.blocks.len()
+                );
+                load_shared_world_data(
+                    &event.world_data,
+                    &mut commands,
+                    &mut voxel_world,
+                    &existing_blocks_query,
+                    &mut meshes,
+                    &mut materials,
+                    &asset_server,
+                    &mut inventory,
+                    &camera_query,
+                );
+            }
+        }
+    }
+}
+
+fn load_shared_world_data(
+    world_data: &WorldSaveData,
+    commands: &mut Commands,
+    voxel_world: &mut crate::environment::VoxelWorld,
+    existing_blocks_query: &Query<Entity, With<crate::environment::VoxelBlock>>,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<StandardMaterial>,
+    asset_server: &AssetServer,
+    inventory: &mut crate::inventory::PlayerInventory,
+    camera_query: &Query<Entity, With<crate::camera_controllers::CameraController>>,
+) {
+    info!(
+        "Loading shared world with {} blocks",
+        world_data.blocks.len()
+    );
+
+    // Clear existing blocks
+    let cleared_entities = existing_blocks_query.iter().count();
+    for entity in existing_blocks_query.iter() {
+        commands.entity(entity).despawn();
+    }
+    info!(
+        "Cleared {} existing block entities from scene",
+        cleared_entities
+    );
+    voxel_world.blocks.clear();
+
+    // Load blocks
+    for block_data in &world_data.blocks {
+        voxel_world.blocks.insert(
+            IVec3::new(block_data.x, block_data.y, block_data.z),
+            block_data.block_type,
+        );
+    }
+    info!("Loaded {} blocks into VoxelWorld", voxel_world.blocks.len());
+
+    // Spawn visual blocks
+    let mut spawned_blocks = 0;
+    for (pos, block_type) in voxel_world.blocks.iter() {
+        let cube_mesh = meshes.add(Cuboid::new(
+            crate::environment::CUBE_SIZE,
+            crate::environment::CUBE_SIZE,
+            crate::environment::CUBE_SIZE,
+        ));
+        let texture_path = match block_type {
+            crate::environment::BlockType::Grass => "textures/grass.webp",
+            crate::environment::BlockType::Dirt => "textures/dirt.webp",
+            crate::environment::BlockType::Stone => "textures/stone.webp",
+            crate::environment::BlockType::QuartzBlock => "textures/quartz_block.webp",
+            crate::environment::BlockType::GlassPane => "textures/glass_pane.webp",
+            crate::environment::BlockType::CyanTerracotta => "textures/cyan_terracotta.webp",
+            crate::environment::BlockType::Water => "textures/water.webp",
+        };
+        let texture: Handle<Image> = asset_server.load(texture_path);
+        let material = materials.add(StandardMaterial {
+            base_color_texture: Some(texture),
+            ..default()
+        });
+
+        commands.spawn((
+            Mesh3d(cube_mesh),
+            MeshMaterial3d(material),
+            Transform::from_translation(pos.as_vec3()),
+            crate::environment::VoxelBlock { position: *pos },
+        ));
+        spawned_blocks += 1;
+    }
+    info!("Spawned {} visual block entities", spawned_blocks);
+
+    // Load inventory
+    *inventory = world_data.inventory.clone();
+    inventory.ensure_proper_size();
+    // ResMut automatically marks resources as changed when mutated
+
+    // Set player position if camera exists
+    if let Ok(camera_entity) = camera_query.single() {
+        commands.entity(camera_entity).insert(Transform {
+            translation: world_data.player_position,
+            rotation: world_data.player_rotation,
+            ..default()
+        });
+        info!("Set player position to: {:?}", world_data.player_position);
+    }
+
+    info!("Successfully loaded shared world data");
 }
