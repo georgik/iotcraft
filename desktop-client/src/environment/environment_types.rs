@@ -112,15 +112,15 @@ impl VoxelWorld {
 
 /// Serializable representation of a voxel block
 #[derive(Serialize, Deserialize)]
-struct VoxelBlockData {
-    x: i32,
-    y: i32,
-    z: i32,
-    block_type: BlockType,
+pub struct VoxelBlockData {
+    pub x: i32,
+    pub y: i32,
+    pub z: i32,
+    pub block_type: BlockType,
 }
 
 /// Serializable representation of the entire voxel map
 #[derive(Serialize, Deserialize)]
-struct VoxelMapData {
-    blocks: Vec<VoxelBlockData>,
+pub struct VoxelMapData {
+    pub blocks: Vec<VoxelBlockData>,
 }

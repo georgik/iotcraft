@@ -6,6 +6,7 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
 
+use super::mqtt_utils::generate_unique_client_id;
 use super::shared_world::*;
 use super::world_publisher::ChunkedWorldData; // Import from publisher
 use crate::config::MqttConfig;
@@ -82,67 +83,11 @@ fn initialize_world_discovery(
     thread::spawn(move || {
         info!("Starting world discovery thread...");
 
-        // Test initial connection
-        let mut opts = MqttOptions::new("iotcraft-world-discovery", &mqtt_host, mqtt_port);
-        opts.set_keep_alive(Duration::from_secs(30));
-        opts.set_clean_session(false);
-        opts.set_max_packet_size(1048576, 1048576); // Set max packet size to 1MB to match server
-
-        let (client, mut conn) = Client::new(opts, 10);
-
-        let mut initial_connection_success = false;
-        let mut connection_attempts = 0;
-
-        // Try initial connection
-        for event in conn.iter() {
-            match event {
-                Ok(Event::Incoming(Incoming::ConnAck(_))) => {
-                    info!("World discovery connected successfully - world sharing enabled");
-                    initial_connection_success = true;
-
-                    // Subscribe to world discovery topics
-                    if let Err(e) = client.subscribe("iotcraft/worlds/+/info", QoS::AtLeastOnce) {
-                        error!("Failed to subscribe to world info: {}", e);
-                        break;
-                    }
-                    if let Err(e) = client.subscribe("iotcraft/worlds/+/data", QoS::AtLeastOnce) {
-                        error!("Failed to subscribe to world data: {}", e);
-                        break;
-                    }
-                    if let Err(e) =
-                        client.subscribe("iotcraft/worlds/+/data/chunk", QoS::AtLeastOnce)
-                    {
-                        error!("Failed to subscribe to world data chunks: {}", e);
-                        break;
-                    }
-                    if let Err(e) = client.subscribe("iotcraft/worlds/+/changes", QoS::AtLeastOnce)
-                    {
-                        error!("Failed to subscribe to world changes: {}", e);
-                        break;
-                    }
-
-                    info!("Subscribed to world discovery topics");
-                    break;
-                }
-                Err(e) => {
-                    error!("Initial world discovery connection failed: {:?}", e);
-                    connection_attempts += 1;
-                    if connection_attempts > 2 {
-                        break;
-                    }
-                }
-                Ok(_) => {}
-            }
-        }
-
-        if !initial_connection_success {
-            info!("MQTT connection not available - world discovery disabled");
-            return; // Exit thread - world discovery is disabled
-        }
-
-        // Continue with normal world discovery
+        // Main discovery loop with reconnection handling
         loop {
-            let mut opts = MqttOptions::new("iotcraft-world-discovery", &mqtt_host, mqtt_port);
+            let client_id = generate_unique_client_id("iotcraft-world-discovery");
+            info!("World discovery reconnecting with client ID: {}", client_id);
+            let mut opts = MqttOptions::new(&client_id, &mqtt_host, mqtt_port);
             opts.set_keep_alive(Duration::from_secs(30));
             opts.set_clean_session(false);
             opts.set_max_packet_size(1048576, 1048576); // Set max packet size to 1MB to match server
@@ -153,12 +98,14 @@ fn initialize_world_discovery(
             let mut world_cache: HashMap<String, SharedWorldInfo> = HashMap::new();
             // Track chunks for reassembly
             let mut chunk_cache: HashMap<String, HashMap<u32, ChunkedWorldData>> = HashMap::new();
+            let mut last_cache_log = std::time::Instant::now();
 
             // Wait for connection and subscribe
             for event in conn.iter() {
                 match event {
                     Ok(Event::Incoming(Incoming::ConnAck(_))) => {
                         connected = true;
+                        info!("World discovery connected, subscribing to topics...");
 
                         // Subscribe to topics
                         if let Err(e) = client.subscribe("iotcraft/worlds/+/info", QoS::AtLeastOnce)
@@ -166,34 +113,129 @@ fn initialize_world_discovery(
                             error!("Failed to subscribe to world info: {}", e);
                             break;
                         }
+                        info!("Subscribed to iotcraft/worlds/+/info");
+
                         if let Err(e) = client.subscribe("iotcraft/worlds/+/data", QoS::AtLeastOnce)
                         {
                             error!("Failed to subscribe to world data: {}", e);
                             break;
                         }
+                        info!("Subscribed to iotcraft/worlds/+/data");
+
                         if let Err(e) =
                             client.subscribe("iotcraft/worlds/+/data/chunk", QoS::AtLeastOnce)
                         {
                             error!("Failed to subscribe to world data chunks: {}", e);
                             break;
                         }
+                        info!("Subscribed to iotcraft/worlds/+/data/chunk");
+
                         if let Err(e) =
                             client.subscribe("iotcraft/worlds/+/changes", QoS::AtLeastOnce)
                         {
                             error!("Failed to subscribe to world changes: {}", e);
                             break;
                         }
+                        info!("Subscribed to iotcraft/worlds/+/changes");
 
                         subscribed = true;
-                        info!("Successfully subscribed to all world discovery topics");
-                        break;
+                        info!(
+                            "Successfully subscribed to all world discovery topics, waiting for retained messages..."
+                        );
                     }
                     Ok(Event::Incoming(Incoming::Publish(p))) => {
-                        if !subscribed {
-                            continue;
+                        if subscribed {
+                            info!(
+                                "Received message on topic: {} (retained: {})",
+                                p.topic, p.retain
+                            );
+                            // Process retained messages immediately after subscription
+                            handle_discovery_message(
+                                &p,
+                                &mut world_cache,
+                                &mut chunk_cache,
+                                &response_tx,
+                            );
+
+                            // If this was a retained world info message, send immediate update
+                            if p.topic.contains("/info") {
+                                info!("Sending world list update after world info message");
+                                let _ = response_tx.send(DiscoveryResponse::WorldListUpdated {
+                                    worlds: world_cache.clone(),
+                                });
+                            }
                         }
-                        // We need chunk_cache here too, but it's in the inner loop
-                        // This initial loop is just for subscription, so we'll skip handling here
+                    }
+                    Ok(Event::Incoming(Incoming::SubAck(_))) => {
+                        if subscribed {
+                            info!(
+                                "Subscription acknowledged, continuing to wait for retained messages..."
+                            );
+                            // Continue in the blocking loop for a bit longer to collect retained messages
+                            let start_time = std::time::Instant::now();
+                            let mut retained_messages_received = 0;
+
+                            // Wait up to 2 seconds for retained messages after subscription acknowledgment
+                            while start_time.elapsed() < Duration::from_secs(2) {
+                                match conn.try_recv() {
+                                    Ok(Ok(Event::Incoming(Incoming::Publish(p)))) => {
+                                        info!(
+                                            "Processing retained/initial message on topic: {} (retained: {})",
+                                            p.topic, p.retain
+                                        );
+                                        handle_discovery_message(
+                                            &p,
+                                            &mut world_cache,
+                                            &mut chunk_cache,
+                                            &response_tx,
+                                        );
+
+                                        if p.topic.contains("/info") {
+                                            retained_messages_received += 1;
+                                            info!(
+                                                "Processed world info message ({})",
+                                                retained_messages_received
+                                            );
+                                        }
+                                    }
+                                    Ok(Ok(_)) => {} // Other events
+                                    Ok(Err(e)) => {
+                                        error!(
+                                            "Connection error while waiting for retained messages: {:?}",
+                                            e
+                                        );
+                                        break;
+                                    }
+                                    Err(rumqttc::TryRecvError::Empty) => {
+                                        // No more messages, wait a bit
+                                        thread::sleep(Duration::from_millis(50));
+                                    }
+                                    Err(rumqttc::TryRecvError::Disconnected) => {
+                                        error!(
+                                            "Connection lost while waiting for retained messages"
+                                        );
+                                        break;
+                                    }
+                                }
+                            }
+
+                            info!(
+                                "Finished collecting retained messages. Found {} worlds in cache",
+                                world_cache.len()
+                            );
+                            if !world_cache.is_empty() {
+                                info!(
+                                    "Sending initial world list update with {} cached worlds",
+                                    world_cache.len()
+                                );
+                                let _ = response_tx.send(DiscoveryResponse::WorldListUpdated {
+                                    worlds: world_cache.clone(),
+                                });
+                            }
+
+                            // Now break to enter the main processing loop
+                            break;
+                        }
                     }
                     Ok(_) => {}
                     Err(e) => {
@@ -236,6 +278,10 @@ fn initialize_world_discovery(
                 // Handle discovery requests (non-blocking)
                 match discovery_rx.try_recv() {
                     Ok(DiscoveryMessage::RefreshWorlds) => {
+                        info!(
+                            "Received RefreshWorlds request, sending {} cached worlds",
+                            world_cache.len()
+                        );
                         // Send current world cache
                         let _ = response_tx.send(DiscoveryResponse::WorldListUpdated {
                             worlds: world_cache.clone(),
@@ -246,6 +292,18 @@ fn initialize_world_discovery(
                         warn!("World discovery channel disconnected");
                         break;
                     }
+                }
+
+                // Periodically log world cache state for debugging
+                if last_cache_log.elapsed() > Duration::from_secs(10) {
+                    info!(
+                        "World discovery cache status: {} worlds cached",
+                        world_cache.len()
+                    );
+                    for (world_id, world_info) in &world_cache {
+                        info!("  - {} ({})", world_info.world_name, world_id);
+                    }
+                    last_cache_log = std::time::Instant::now();
                 }
 
                 thread::sleep(Duration::from_millis(10));
@@ -295,13 +353,19 @@ fn handle_discovery_message(
                         match serde_json::from_str::<SharedWorldInfo>(&payload_str) {
                             Ok(world_info) => {
                                 info!(
-                                    "Discovered world: {} by {}",
-                                    world_info.world_name, world_info.host_name
+                                    "Discovered world: {} (ID: {}) by {} - adding to cache",
+                                    world_info.world_name,
+                                    world_info.world_id,
+                                    world_info.host_name
                                 );
-                                world_cache.insert(world_id.to_string(), world_info);
+                                world_cache.insert(world_id.to_string(), world_info.clone());
+                                info!("World cache now contains {} worlds", world_cache.len());
                             }
                             Err(e) => {
-                                error!("Failed to parse world info: {}", e);
+                                error!(
+                                    "Failed to parse world info payload '{}': {}",
+                                    payload_str, e
+                                );
                             }
                         }
                     }

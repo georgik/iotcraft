@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use crate::world::WorldSaveData;
 
 /// Represents a shared world in the multiplayer system
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SharedWorldInfo {
     pub world_id: String,
     pub world_name: String,
@@ -220,9 +220,10 @@ fn handle_publish_world_events(
             };
 
             info!(
-                "World {} is now being hosted with ID: {}",
-                event.world_name, world_id
+                "World {} is now being hosted with ID: {} (public: {})",
+                event.world_name, world_id, event.is_public
             );
+            info!("Multiplayer mode changed to: {:?}", *multiplayer_mode);
         } else {
             warn!("Cannot publish world - no current world loaded");
         }

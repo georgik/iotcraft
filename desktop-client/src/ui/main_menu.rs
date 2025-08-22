@@ -40,6 +40,8 @@ impl Plugin for MainMenuPlugin {
                     world_selection_interaction.run_if(in_state(GameState::WorldSelection)),
                     delete_world_interaction.run_if(in_state(GameState::WorldSelection)),
                     online_world_interaction.run_if(in_state(GameState::WorldSelection)),
+                    refresh_online_worlds_interaction.run_if(in_state(GameState::WorldSelection)),
+                    update_online_worlds_ui.run_if(in_state(GameState::WorldSelection)),
                     gameplay_menu_interaction.run_if(in_state(GameState::GameplayMenu)),
                     handle_escape_key,
                 ),
@@ -141,6 +143,10 @@ pub struct SettingsMenu;
 /// Component for the Back to Main Menu button in settings
 #[derive(Component)]
 pub struct BackToMainMenuButton;
+
+/// Component for the Refresh Online Worlds button
+#[derive(Component)]
+pub struct RefreshOnlineWorldsButton;
 
 /// Game state enum
 #[derive(Debug, Clone, Eq, PartialEq, Hash, States, Default)]
@@ -420,7 +426,22 @@ fn setup_world_selection_menu(
     fonts: Res<Fonts>,
     mut refresh_events: EventWriter<RefreshOnlineWorldsEvent>,
 ) {
+    info!(
+        "Setting up world selection menu with {} local worlds and {} online worlds",
+        discovered_worlds.worlds.len(),
+        online_worlds.worlds.len()
+    );
+
+    // Log online worlds details
+    for (world_id, world_info) in &online_worlds.worlds {
+        info!(
+            "  Online world: {} ({}) by {}",
+            world_info.world_name, world_id, world_info.host_name
+        );
+    }
+
     // Refresh online worlds when entering the selection menu
+    info!("Sending RefreshOnlineWorldsEvent to update world list");
     refresh_events.write(RefreshOnlineWorldsEvent);
     commands
         .spawn((
@@ -653,26 +674,60 @@ fn setup_world_selection_menu(
                             ..default()
                         })
                         .with_children(|parent| {
-                            // Online worlds title
-                            parent.spawn((
-                                Text::new(get_localized_text(
-                                    &localization_bundle,
-                                    &localization_config,
-                                    "menu-online-worlds",
-                                    &[],
-                                )),
-                                TextFont {
-                                    font: fonts.regular.clone(),
-                                    font_size: 24.0,
-                                    font_smoothing: bevy::text::FontSmoothing::default(),
-                                    line_height: bevy::text::LineHeight::default(),
-                                },
-                                TextColor(Color::WHITE),
-                                Node {
+                            // Online worlds title and refresh button row
+                            parent
+                                .spawn(Node {
+                                    width: Val::Percent(100.0),
+                                    flex_direction: FlexDirection::Row,
+                                    justify_content: JustifyContent::SpaceBetween,
+                                    align_items: AlignItems::Center,
                                     margin: UiRect::bottom(Val::Px(10.0)),
                                     ..default()
-                                },
-                            ));
+                                })
+                                .with_children(|parent| {
+                                    // Online worlds title
+                                    parent.spawn((
+                                        Text::new(get_localized_text(
+                                            &localization_bundle,
+                                            &localization_config,
+                                            "menu-online-worlds",
+                                            &[],
+                                        )),
+                                        TextFont {
+                                            font: fonts.regular.clone(),
+                                            font_size: 24.0,
+                                            font_smoothing: bevy::text::FontSmoothing::default(),
+                                            line_height: bevy::text::LineHeight::default(),
+                                        },
+                                        TextColor(Color::WHITE),
+                                    ));
+                                    // Refresh button
+                                    parent
+                                        .spawn((
+                                            Button,
+                                            Node {
+                                                width: Val::Px(80.0),
+                                                height: Val::Px(30.0),
+                                                justify_content: JustifyContent::Center,
+                                                align_items: AlignItems::Center,
+                                                ..default()
+                                            },
+                                            BackgroundColor(Color::srgb(0.3, 0.5, 0.7)),
+                                            RefreshOnlineWorldsButton,
+                                        ))
+                                        .with_children(|parent| {
+                                            parent.spawn((
+                                                Text::new("Refresh"),
+                                                TextFont {
+                                                    font: fonts.regular.clone(),
+                                                    font_size: 12.0,
+                                                    font_smoothing: bevy::text::FontSmoothing::default(),
+                                                    line_height: bevy::text::LineHeight::default(),
+                                                },
+                                                TextColor(Color::WHITE),
+                                            ));
+                                        });
+                                });
 
                             // Online worlds scrollable container
                             parent
@@ -687,6 +742,7 @@ fn setup_world_selection_menu(
                                 })
                                 .insert(BorderColor(Color::srgb(0.2, 0.4, 0.6)))
                                 .insert(BackgroundColor(Color::srgba(0.0, 0.1, 0.2, 0.8)))
+                                .insert(OnlineWorldsList)
                                 .with_children(|parent| {
                                     // Online Worlds list
                                     if online_worlds.worlds.is_empty() {
@@ -939,6 +995,31 @@ fn online_world_interaction(
             }
             Interaction::None => {
                 *color = Color::srgb(0.2, 0.6, 0.3).into();
+            }
+        }
+    }
+}
+
+// Add refresh online worlds interaction handler
+fn refresh_online_worlds_interaction(
+    mut refresh_button_query: Query<
+        (&Interaction, &mut BackgroundColor),
+        (Changed<Interaction>, With<RefreshOnlineWorldsButton>),
+    >,
+    mut refresh_events: EventWriter<RefreshOnlineWorldsEvent>,
+) {
+    for (interaction, mut color) in refresh_button_query.iter_mut() {
+        match *interaction {
+            Interaction::Pressed => {
+                *color = Color::srgb(0.4, 0.6, 0.8).into();
+                info!("Manual refresh of online worlds requested");
+                refresh_events.write(RefreshOnlineWorldsEvent);
+            }
+            Interaction::Hovered => {
+                *color = Color::srgb(0.35, 0.55, 0.75).into();
+            }
+            Interaction::None => {
+                *color = Color::srgb(0.3, 0.5, 0.7).into();
             }
         }
     }
@@ -1398,6 +1479,213 @@ pub fn format_last_played_time(rfc3339_timestamp: &str) -> String {
 #[allow(dead_code)]
 pub fn generate_new_world_name() -> String {
     format!("NewWorld-{}", chrono::Utc::now().timestamp())
+}
+
+/// Component to mark the online worlds list container that needs to be updated
+#[derive(Component)]
+pub struct OnlineWorldsList;
+
+/// Track when the UI was last updated
+#[derive(Resource, Default)]
+struct OnlineWorldsUiState {
+    last_update_time: Option<std::time::Instant>,
+    last_world_count: usize,
+}
+
+/// System to update online worlds UI when the OnlineWorlds resource changes
+fn update_online_worlds_ui(
+    online_worlds: Res<OnlineWorlds>,
+    mut ui_state: Local<OnlineWorldsUiState>,
+    mut commands: Commands,
+    online_worlds_container: Query<Entity, With<OnlineWorldsList>>,
+    children_query: Query<&Children>,
+    localization_bundle: Res<LocalizationBundle>,
+    localization_config: Res<LocalizationConfig>,
+    fonts: Res<Fonts>,
+) {
+    // Check if we need to update the UI
+    let resource_changed = online_worlds.is_changed();
+    let timestamp_changed = online_worlds.last_updated != ui_state.last_update_time;
+    let count_changed = online_worlds.worlds.len() != ui_state.last_world_count;
+
+    let should_update = resource_changed || timestamp_changed || count_changed;
+
+    // Debug logging
+    if resource_changed || timestamp_changed || count_changed {
+        info!(
+            "UI update check: resource_changed={}, timestamp_changed={}, count_changed={} (current: {}, cached: {})",
+            resource_changed,
+            timestamp_changed,
+            count_changed,
+            online_worlds.worlds.len(),
+            ui_state.last_world_count
+        );
+        info!(
+            "Last updated: {:?} vs cached: {:?}",
+            online_worlds.last_updated, ui_state.last_update_time
+        );
+    }
+
+    if !should_update {
+        return;
+    }
+
+    info!(
+        "OnlineWorlds changed, updating UI with {} worlds",
+        online_worlds.worlds.len()
+    );
+
+    // Update tracking state
+    ui_state.last_update_time = online_worlds.last_updated;
+    ui_state.last_world_count = online_worlds.worlds.len();
+
+    // Find the online worlds container and rebuild its content
+    if let Ok(container_entity) = online_worlds_container.single() {
+        // Remove all existing children first
+        if let Ok(children) = children_query.get(container_entity) {
+            for child in children.iter() {
+                commands.entity(child).despawn();
+            }
+        }
+
+        // Add new content to the container
+        commands.entity(container_entity).with_children(|parent| {
+            if online_worlds.worlds.is_empty() {
+                // Show "No online worlds available" message
+                parent.spawn((
+                    Text::new("No online worlds available"),
+                    TextFont {
+                        font: fonts.regular.clone(),
+                        font_size: 14.0,
+                        font_smoothing: bevy::text::FontSmoothing::default(),
+                        line_height: bevy::text::LineHeight::default(),
+                    },
+                    TextColor(Color::srgb(0.6, 0.6, 0.6)),
+                    Node {
+                        align_self: AlignSelf::Center,
+                        margin: UiRect::all(Val::Px(20.0)),
+                        ..default()
+                    },
+                ));
+            } else {
+                for (world_id, world_info) in &online_worlds.worlds {
+                    info!(
+                        "Adding online world to UI: {} ({}) by {}",
+                        world_info.world_name, world_id, world_info.host_name
+                    );
+                    // Online world entry container
+                    parent
+                        .spawn(Node {
+                            width: Val::Percent(100.0),
+                            height: Val::Px(80.0),
+                            flex_direction: FlexDirection::Column,
+                            padding: UiRect::all(Val::Px(10.0)),
+                            margin: UiRect::bottom(Val::Px(5.0)),
+                            border: UiRect::all(Val::Px(1.0)),
+                            ..default()
+                        })
+                        .insert(BorderColor(Color::srgb(0.3, 0.5, 0.7)))
+                        .insert(BackgroundColor(Color::srgba(0.1, 0.2, 0.3, 0.6)))
+                        .with_children(|parent| {
+                            // World info row
+                            parent
+                                .spawn(Node {
+                                    width: Val::Percent(100.0),
+                                    flex_direction: FlexDirection::Row,
+                                    justify_content: JustifyContent::SpaceBetween,
+                                    align_items: AlignItems::Center,
+                                    margin: UiRect::bottom(Val::Px(5.0)),
+                                    ..default()
+                                })
+                                .with_children(|parent| {
+                                    // World name
+                                    parent.spawn((
+                                        Text::new(world_info.world_name.clone()),
+                                        TextFont {
+                                            font: fonts.regular.clone(),
+                                            font_size: 16.0,
+                                            font_smoothing: bevy::text::FontSmoothing::default(),
+                                            line_height: bevy::text::LineHeight::default(),
+                                        },
+                                        TextColor(Color::WHITE),
+                                    ));
+
+                                    // Player count
+                                    parent.spawn((
+                                        Text::new(format!(
+                                            "{}/{} players",
+                                            world_info.player_count, world_info.max_players
+                                        )),
+                                        TextFont {
+                                            font: fonts.regular.clone(),
+                                            font_size: 12.0,
+                                            font_smoothing: bevy::text::FontSmoothing::default(),
+                                            line_height: bevy::text::LineHeight::default(),
+                                        },
+                                        TextColor(Color::srgb(0.7, 0.9, 1.0)),
+                                    ));
+                                });
+
+                            // Host and join button row
+                            parent
+                                .spawn(Node {
+                                    width: Val::Percent(100.0),
+                                    flex_direction: FlexDirection::Row,
+                                    justify_content: JustifyContent::SpaceBetween,
+                                    align_items: AlignItems::Center,
+                                    ..default()
+                                })
+                                .with_children(|parent| {
+                                    // Host info
+                                    parent.spawn((
+                                        Text::new(format!("by {}", world_info.host_name)),
+                                        TextFont {
+                                            font: fonts.regular.clone(),
+                                            font_size: 11.0,
+                                            font_smoothing: bevy::text::FontSmoothing::default(),
+                                            line_height: bevy::text::LineHeight::default(),
+                                        },
+                                        TextColor(Color::srgb(0.6, 0.8, 0.9)),
+                                    ));
+
+                                    // Join button
+                                    parent
+                                        .spawn((
+                                            Button,
+                                            Node {
+                                                width: Val::Px(60.0),
+                                                height: Val::Px(25.0),
+                                                justify_content: JustifyContent::Center,
+                                                align_items: AlignItems::Center,
+                                                ..default()
+                                            },
+                                            BackgroundColor(Color::srgb(0.2, 0.6, 0.3)),
+                                            JoinOnlineWorldButton(world_id.clone()),
+                                        ))
+                                        .with_children(|parent| {
+                                            parent.spawn((
+                                                Text::new(get_localized_text(
+                                                    &localization_bundle,
+                                                    &localization_config,
+                                                    "menu-join-world",
+                                                    &[],
+                                                )),
+                                                TextFont {
+                                                    font: fonts.regular.clone(),
+                                                    font_size: 11.0,
+                                                    font_smoothing:
+                                                        bevy::text::FontSmoothing::default(),
+                                                    line_height: bevy::text::LineHeight::default(),
+                                                },
+                                                TextColor(Color::WHITE),
+                                            ));
+                                        });
+                                });
+                        });
+                }
+            }
+        });
+    }
 }
 
 #[cfg(test)]

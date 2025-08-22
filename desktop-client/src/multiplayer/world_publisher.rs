@@ -5,10 +5,12 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
 
+use super::mqtt_utils::generate_unique_client_id;
 use super::shared_world::*;
 use crate::config::MqttConfig;
 use crate::profile::PlayerProfile;
 use crate::world::WorldSaveData;
+use crate::world::*;
 
 /// Maximum size for MQTT messages (1MB to match server config)
 const MAX_MQTT_MESSAGE_SIZE: usize = 1048576;
@@ -205,7 +207,9 @@ fn initialize_world_publisher(
         info!("Starting world publisher thread...");
 
         // Test initial connection
-        let mut opts = MqttOptions::new("iotcraft-world-publisher", &mqtt_host, mqtt_port);
+        let client_id = generate_unique_client_id("iotcraft-world-publisher");
+        info!("World publisher using client ID: {}", client_id);
+        let mut opts = MqttOptions::new(&client_id, &mqtt_host, mqtt_port);
         opts.set_keep_alive(Duration::from_secs(30));
         opts.set_clean_session(true);
         opts.set_max_packet_size(1048576, 1048576); // Set max packet size to 1MB to match server
@@ -241,7 +245,9 @@ fn initialize_world_publisher(
 
         // Continue with normal world publishing
         loop {
-            let mut opts = MqttOptions::new("iotcraft-world-publisher", &mqtt_host, mqtt_port);
+            let client_id = generate_unique_client_id("iotcraft-world-publisher");
+            info!("World publisher reconnecting with client ID: {}", client_id);
+            let mut opts = MqttOptions::new(&client_id, &mqtt_host, mqtt_port);
             opts.set_keep_alive(Duration::from_secs(30));
             opts.set_clean_session(true);
             opts.set_max_packet_size(1048576, 1048576); // Set max packet size to 1MB to match server
@@ -328,11 +334,23 @@ fn handle_publish_message(client: &Client, message: PublishMessage) {
             // Publish world info to discovery topic
             let info_topic = format!("iotcraft/worlds/{}/info", world_info.world_id);
             if let Ok(payload) = serde_json::to_string(&world_info) {
+                info!(
+                    "Publishing world info to topic: {} with payload: {}",
+                    info_topic, payload
+                );
                 if let Err(e) = client.publish(&info_topic, QoS::AtLeastOnce, true, payload) {
                     error!("Failed to publish world info: {}", e);
                 } else {
-                    info!("Published world info for {}", world_info.world_name);
+                    info!(
+                        "Successfully published world info for {} with world_id: {}",
+                        world_info.world_name, world_info.world_id
+                    );
                 }
+            } else {
+                error!(
+                    "Failed to serialize world info for {}",
+                    world_info.world_name
+                );
             }
 
             // Check if world data needs chunking by measuring serialized byte length

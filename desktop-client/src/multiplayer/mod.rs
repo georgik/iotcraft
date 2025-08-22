@@ -1,7 +1,12 @@
+pub mod mqtt_utils;
 pub mod shared_world;
 pub mod world_discovery;
 pub mod world_publisher;
 
+#[cfg(test)]
+mod world_tests;
+
+pub use mqtt_utils::*;
 pub use shared_world::*;
 pub use world_discovery::*;
 pub use world_publisher::*;

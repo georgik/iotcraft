@@ -43,6 +43,7 @@ use console::console_types::{ListCommand, LookCommand, TeleportCommand};
 use console::*;
 use devices::*;
 use environment::*;
+use environment::{ChunkEventsPlugin, ChunkMqttPlugin, ChunkedVoxelWorld};
 use fonts::{FontPlugin, Fonts};
 use interaction::InteractionPlugin as MyInteractionPlugin;
 use inventory::{InventoryPlugin, PlayerInventory, handle_give_command};
@@ -1266,7 +1267,8 @@ fn main() {
         .insert_resource(mqtt_config)
         .insert_resource(profile::load_or_create_profile_with_override(
             args.player_id,
-        ));
+        ))
+        .init_resource::<ChunkedVoxelWorld>(); // Initialize chunk-based world alongside existing VoxelWorld
     // Script resources are now handled by the ScriptPlugin
 
     // Add default plugins and initialize AssetServer
@@ -1292,6 +1294,8 @@ fn main() {
         .add_plugins(DevicePlugin)
         .add_plugins(DevicePositioningPlugin)
         .add_plugins(EnvironmentPlugin)
+        .add_plugins(ChunkEventsPlugin) // Add chunk event system
+        .add_plugins(ChunkMqttPlugin) // Add chunk MQTT synchronization
         .add_plugins(MyInteractionPlugin)
         .add_plugins(MqttPlugin)
         .add_plugins(InventoryPlugin)
