@@ -5,10 +5,131 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
 
+use super::mqtt_utils::generate_unique_client_id;
 use super::shared_world::*;
 use crate::config::MqttConfig;
 use crate::profile::PlayerProfile;
 use crate::world::WorldSaveData;
+use crate::world::*;
+
+/// Maximum size for MQTT messages (1MB to match server config)
+const MAX_MQTT_MESSAGE_SIZE: usize = 1048576;
+
+/// Chunked message for large world data
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ChunkedWorldData {
+    pub chunk_id: String,  // Unique ID for this chunking operation
+    pub chunk_index: u32,  // Index of this chunk (0-based)
+    pub total_chunks: u32, // Total number of chunks
+    pub data: Vec<u8>,     // Chunk data (compressed)
+    pub world_id: String,  // Which world this chunk belongs to
+}
+
+/// Split world data into chunks that fit within MQTT message limits
+fn chunk_world_data(
+    world_data: &WorldSaveData,
+    world_id: &str,
+) -> Result<Vec<ChunkedWorldData>, String> {
+    // Serialize and compress the world data
+    let serialized = serde_json::to_vec(world_data)
+        .map_err(|e| format!("Failed to serialize world data: {}", e))?;
+
+    // Use deflate compression to reduce size
+    let mut compressed = Vec::new();
+    {
+        use std::io::Write;
+        let mut encoder =
+            flate2::write::DeflateEncoder::new(&mut compressed, flate2::Compression::best());
+        encoder
+            .write_all(&serialized)
+            .map_err(|e| format!("Failed to compress world data: {}", e))?;
+        encoder
+            .finish()
+            .map_err(|e| format!("Failed to finish compression: {}", e))?;
+    }
+
+    info!(
+        "World data compressed from {} bytes to {} bytes ({:.1}% reduction)",
+        serialized.len(),
+        compressed.len(),
+        (1.0 - compressed.len() as f64 / serialized.len() as f64) * 100.0
+    );
+
+    // Calculate target chunk size with conservative overhead estimate
+    // We need to account for: chunk_id (~50 chars), chunk_index (4 bytes),
+    // total_chunks (4 bytes), world_id (~50 chars), JSON structure (~200 bytes)
+    // Base64 encoding increases data size by ~33%, so be extra conservative
+    let target_chunk_data_size = (MAX_MQTT_MESSAGE_SIZE as f64 * 0.60) as usize; // Use 60% of limit for safety
+
+    let chunk_id = format!("{}_{}", world_id, chrono::Utc::now().timestamp_millis());
+    let mut chunks = Vec::new();
+    let mut offset = 0;
+    let mut chunk_index = 0;
+
+    // Split data into chunks and validate each one fits within MQTT limits
+    while offset < compressed.len() {
+        let remaining = compressed.len() - offset;
+        let chunk_size = std::cmp::min(target_chunk_data_size, remaining);
+        let chunk_data = compressed[offset..offset + chunk_size].to_vec();
+
+        let test_chunk = ChunkedWorldData {
+            chunk_id: chunk_id.clone(),
+            chunk_index,
+            total_chunks: 0, // Will be set later
+            data: chunk_data.clone(),
+            world_id: world_id.to_string(),
+        };
+
+        // Test if this chunk serializes within limits
+        if let Ok(serialized) = serde_json::to_vec(&test_chunk) {
+            if serialized.len() > MAX_MQTT_MESSAGE_SIZE {
+                if chunk_size <= 100 {
+                    return Err(format!(
+                        "Cannot create chunk small enough: {} bytes minimum",
+                        serialized.len()
+                    ));
+                }
+                // Reduce chunk size by 10% and try again
+                let new_chunk_size = (chunk_size as f64 * 0.9) as usize;
+                let new_chunk_data = compressed[offset..offset + new_chunk_size].to_vec();
+                chunks.push(ChunkedWorldData {
+                    chunk_id: chunk_id.clone(),
+                    chunk_index,
+                    total_chunks: 0, // Will be set later
+                    data: new_chunk_data,
+                    world_id: world_id.to_string(),
+                });
+                offset += new_chunk_size;
+            } else {
+                chunks.push(test_chunk);
+                offset += chunk_size;
+            }
+        } else {
+            return Err("Failed to serialize test chunk".to_string());
+        }
+
+        chunk_index += 1;
+
+        if chunk_index > 1000 {
+            return Err(format!(
+                "World too large: would require more than 1000 chunks"
+            ));
+        }
+    }
+
+    // Set the correct total_chunks for all chunks
+    let total_chunks = chunks.len() as u32;
+    for chunk in &mut chunks {
+        chunk.total_chunks = total_chunks;
+    }
+
+    info!(
+        "Split world data into {} chunks (target size: {}KB each)",
+        total_chunks,
+        target_chunk_data_size / 1024
+    );
+    Ok(chunks)
+}
 
 /// Resource for managing world publishing
 #[derive(Resource)]
@@ -35,6 +156,23 @@ pub enum PublishMessage {
     },
     BroadcastChange {
         change: WorldChange,
+    },
+    // New message types for state synchronization
+    PublishWorldState {
+        world_id: String,
+        world_data: WorldSaveData,
+        is_snapshot: bool,
+    },
+    PublishBlockChange {
+        world_id: String,
+        player_id: String,
+        player_name: String,
+        change_type: BlockChangeType,
+    },
+    PublishInventoryChange {
+        world_id: String,
+        player_id: String,
+        inventory: crate::inventory::PlayerInventory,
     },
 }
 
@@ -69,9 +207,12 @@ fn initialize_world_publisher(
         info!("Starting world publisher thread...");
 
         // Test initial connection
-        let mut opts = MqttOptions::new("iotcraft-world-publisher", &mqtt_host, mqtt_port);
+        let client_id = generate_unique_client_id("iotcraft-world-publisher");
+        info!("World publisher using client ID: {}", client_id);
+        let mut opts = MqttOptions::new(&client_id, &mqtt_host, mqtt_port);
         opts.set_keep_alive(Duration::from_secs(30));
         opts.set_clean_session(true);
+        opts.set_max_packet_size(1048576, 1048576); // Set max packet size to 1MB to match server
 
         let (_client, mut conn) = Client::new(opts, 10);
 
@@ -104,9 +245,12 @@ fn initialize_world_publisher(
 
         // Continue with normal world publishing
         loop {
-            let mut opts = MqttOptions::new("iotcraft-world-publisher", &mqtt_host, mqtt_port);
+            let client_id = generate_unique_client_id("iotcraft-world-publisher");
+            info!("World publisher reconnecting with client ID: {}", client_id);
+            let mut opts = MqttOptions::new(&client_id, &mqtt_host, mqtt_port);
             opts.set_keep_alive(Duration::from_secs(30));
             opts.set_clean_session(true);
+            opts.set_max_packet_size(1048576, 1048576); // Set max packet size to 1MB to match server
 
             let (client, mut conn) = Client::new(opts, 10);
             let mut connected = false;
@@ -190,20 +334,110 @@ fn handle_publish_message(client: &Client, message: PublishMessage) {
             // Publish world info to discovery topic
             let info_topic = format!("iotcraft/worlds/{}/info", world_info.world_id);
             if let Ok(payload) = serde_json::to_string(&world_info) {
+                info!(
+                    "Publishing world info to topic: {} with payload: {}",
+                    info_topic, payload
+                );
                 if let Err(e) = client.publish(&info_topic, QoS::AtLeastOnce, true, payload) {
                     error!("Failed to publish world info: {}", e);
                 } else {
-                    info!("Published world info for {}", world_info.world_name);
+                    info!(
+                        "Successfully published world info for {} with world_id: {}",
+                        world_info.world_name, world_info.world_id
+                    );
                 }
+            } else {
+                error!(
+                    "Failed to serialize world info for {}",
+                    world_info.world_name
+                );
             }
 
-            // Publish world data to data topic
-            let data_topic = format!("iotcraft/worlds/{}/data", world_info.world_id);
-            if let Ok(payload) = serde_json::to_string(&world_data) {
-                if let Err(e) = client.publish(&data_topic, QoS::AtLeastOnce, true, payload) {
-                    error!("Failed to publish world data: {}", e);
+            // Check if world data needs chunking by measuring serialized byte length
+            if let Ok(payload_bytes) = serde_json::to_vec(&world_data) {
+                let payload_size = payload_bytes.len();
+                if payload_size <= MAX_MQTT_MESSAGE_SIZE {
+                    // Small enough to send as single message
+                    let data_topic = format!("iotcraft/worlds/{}/data", world_info.world_id);
+                    if let Err(e) =
+                        client.publish(&data_topic, QoS::AtLeastOnce, true, payload_bytes)
+                    {
+                        error!("Failed to publish world data: {}", e);
+                    } else {
+                        info!(
+                            "Published world data for {} in single message ({} bytes)",
+                            world_info.world_name, payload_size
+                        );
+                    }
                 } else {
-                    info!("Published world data for {}", world_info.world_name);
+                    // Too large, use chunking
+                    info!(
+                        "World data is {} bytes, needs chunking (limit: {})",
+                        payload_bytes.len(),
+                        MAX_MQTT_MESSAGE_SIZE
+                    );
+                    match chunk_world_data(&world_data, &world_info.world_id) {
+                        Ok(chunks) => {
+                            let total_chunks = chunks.len();
+                            info!("Publishing large world data in {} chunks", total_chunks);
+
+                            // Send each chunk with size validation
+                            for chunk in &chunks {
+                                let chunk_topic =
+                                    format!("iotcraft/worlds/{}/data/chunk", world_info.world_id);
+                                if let Ok(chunk_payload_bytes) = serde_json::to_vec(chunk) {
+                                    let chunk_size = chunk_payload_bytes.len();
+                                    if chunk_size > MAX_MQTT_MESSAGE_SIZE {
+                                        error!(
+                                            "Chunk {}/{} is {} bytes, exceeds limit of {}",
+                                            chunk.chunk_index + 1,
+                                            chunk.total_chunks,
+                                            chunk_size,
+                                            MAX_MQTT_MESSAGE_SIZE
+                                        );
+                                        break;
+                                    }
+
+                                    if let Err(e) = client.publish(
+                                        &chunk_topic,
+                                        QoS::AtLeastOnce,
+                                        false,
+                                        chunk_payload_bytes,
+                                    ) {
+                                        error!(
+                                            "Failed to publish chunk {}/{}: {}",
+                                            chunk.chunk_index + 1,
+                                            chunk.total_chunks,
+                                            e
+                                        );
+                                        break;
+                                    } else {
+                                        info!(
+                                            "Published chunk {}/{} ({} bytes)",
+                                            chunk.chunk_index + 1,
+                                            chunk.total_chunks,
+                                            chunk_size
+                                        );
+                                    }
+                                } else {
+                                    error!(
+                                        "Failed to serialize chunk {}/{}",
+                                        chunk.chunk_index + 1,
+                                        chunk.total_chunks
+                                    );
+                                    break;
+                                }
+                            }
+
+                            info!(
+                                "Successfully published all {} chunks for {}",
+                                total_chunks, world_info.world_name
+                            );
+                        }
+                        Err(e) => {
+                            error!("Failed to chunk world data: {}", e);
+                        }
+                    }
                 }
             }
         }
@@ -226,6 +460,75 @@ fn handle_publish_message(client: &Client, message: PublishMessage) {
             if let Ok(payload) = serde_json::to_string(&change) {
                 if let Err(e) = client.publish(&change_topic, QoS::AtLeastOnce, false, payload) {
                     error!("Failed to broadcast world change: {}", e);
+                }
+            }
+        }
+        // New synchronization message handlers
+        PublishMessage::PublishWorldState {
+            world_id,
+            world_data,
+            is_snapshot,
+        } => {
+            let topic = if is_snapshot {
+                format!("iotcraft/worlds/{}/state/snapshot", world_id)
+            } else {
+                format!("iotcraft/worlds/{}/state/update", world_id)
+            };
+
+            if let Ok(payload) = serde_json::to_string(&world_data) {
+                // Use retain=true for snapshots, false for updates
+                if let Err(e) = client.publish(&topic, QoS::AtLeastOnce, is_snapshot, payload) {
+                    error!("Failed to publish world state to {}: {}", topic, e);
+                } else {
+                    info!("Published world state to {}", topic);
+                }
+            }
+        }
+        PublishMessage::PublishBlockChange {
+            world_id,
+            player_id,
+            player_name,
+            change_type,
+        } => {
+            let topic = match &change_type {
+                BlockChangeType::Placed { .. } => {
+                    format!("iotcraft/worlds/{}/state/blocks/placed", world_id)
+                }
+                BlockChangeType::Removed { .. } => {
+                    format!("iotcraft/worlds/{}/state/blocks/removed", world_id)
+                }
+            };
+
+            let change_message = serde_json::json!({
+                "player_id": player_id,
+                "player_name": player_name,
+                "timestamp": chrono::Utc::now().timestamp_millis(),
+                "change": change_type
+            });
+
+            if let Ok(payload) = serde_json::to_string(&change_message) {
+                if let Err(e) = client.publish(&topic, QoS::AtLeastOnce, false, payload) {
+                    error!("Failed to publish block change to {}: {}", topic, e);
+                }
+            }
+        }
+        PublishMessage::PublishInventoryChange {
+            world_id,
+            player_id,
+            inventory,
+        } => {
+            let topic = format!("iotcraft/worlds/{}/state/inventory/updates", world_id);
+
+            let inventory_message = serde_json::json!({
+                "player_id": player_id,
+                "timestamp": chrono::Utc::now().timestamp_millis(),
+                "inventory": inventory
+            });
+
+            if let Ok(payload) = serde_json::to_string(&inventory_message) {
+                // Retain inventory updates so new joiners get latest state
+                if let Err(e) = client.publish(&topic, QoS::AtLeastOnce, true, payload) {
+                    error!("Failed to publish inventory change to {}: {}", topic, e);
                 }
             }
         }

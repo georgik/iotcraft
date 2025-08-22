@@ -30,6 +30,8 @@ uuid = { version = "1.0", features = ["v4"] }
 bytes = "1.0"
 # Async channels for Bevy-compatible communication
 async-channel = "2.5"
+# Compression for chunked world data
+flate2 = "1.0"
 # Performance optimization dependencies
 bytemuck = { version = "1.16", features = ["derive"] } # GPU data alignment
 
@@ -68,6 +70,7 @@ tower = "0.5"
 tower-http = { version = "0.6", features = ["cors"] }
 clap = { version = "4.5", features = ["derive"] }
 tracing-subscriber = "0.3"
+env_logger = "0.10"
 dirs = "6.0"
 whoami = "1.5"
 tokio-util = { version = "0.7", features = ["codec"] }

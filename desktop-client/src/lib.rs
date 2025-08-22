@@ -3,6 +3,9 @@
 mod lib_gradual;
 
 #[cfg(target_arch = "wasm32")]
+mod lib_debug;
+
+#[cfg(target_arch = "wasm32")]
 mod web_menu;
 
 // Required modules for MQTT and profile support in WASM
@@ -23,3 +26,6 @@ mod player_avatar;
 
 #[cfg(target_arch = "wasm32")]
 pub use lib_gradual::*;
+
+#[cfg(target_arch = "wasm32")]
+pub use lib_debug::{debug_set_panic_hook, debug_start};

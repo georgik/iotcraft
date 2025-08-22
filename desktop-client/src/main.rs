@@ -43,6 +43,7 @@ use console::console_types::{ListCommand, LookCommand, TeleportCommand};
 use console::*;
 use devices::*;
 use environment::*;
+use environment::{ChunkEventsPlugin, ChunkMqttPlugin, ChunkedVoxelWorld};
 use fonts::{FontPlugin, Fonts};
 use interaction::InteractionPlugin as MyInteractionPlugin;
 use inventory::{InventoryPlugin, PlayerInventory, handle_give_command};
@@ -112,6 +113,9 @@ fn handle_place_block_command(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     asset_server: Res<AssetServer>,
+    mut block_change_events: EventWriter<multiplayer::BlockChangeEvent>,
+    multiplayer_mode: Res<multiplayer::MultiplayerMode>,
+    player_profile: Res<profile::PlayerProfile>,
 ) {
     if let Some(Ok(PlaceBlockCommand {
         block_type,
@@ -171,6 +175,23 @@ fn handle_place_block_command(
             },
             // Physics colliders are managed by PhysicsManagerPlugin based on distance and mode
         ));
+
+        // Generate block change event for multiplayer synchronization
+        if let multiplayer::MultiplayerMode::HostingWorld { world_id, .. }
+        | multiplayer::MultiplayerMode::JoinedWorld { world_id, .. } = &*multiplayer_mode
+        {
+            block_change_events.send(multiplayer::BlockChangeEvent {
+                world_id: world_id.clone(),
+                player_id: player_profile.player_id.clone(),
+                player_name: player_profile.player_name.clone(),
+                change_type: multiplayer::BlockChangeType::Placed {
+                    x,
+                    y,
+                    z,
+                    block_type,
+                },
+            });
+        }
 
         reply!(log, "Placed block at ({}, {}, {})", x, y, z);
     }
@@ -271,6 +292,9 @@ fn handle_remove_block_command(
     mut voxel_world: ResMut<VoxelWorld>,
     mut commands: Commands,
     query: Query<(Entity, &VoxelBlock)>,
+    mut block_change_events: EventWriter<multiplayer::BlockChangeEvent>,
+    multiplayer_mode: Res<multiplayer::MultiplayerMode>,
+    player_profile: Res<profile::PlayerProfile>,
 ) {
     if let Some(Ok(RemoveBlockCommand { x, y, z })) = log.take() {
         let position = IVec3::new(x, y, z);
@@ -281,6 +305,19 @@ fn handle_remove_block_command(
                     commands.entity(entity).despawn();
                 }
             }
+
+            // Generate block change event for multiplayer synchronization
+            if let multiplayer::MultiplayerMode::HostingWorld { world_id, .. }
+            | multiplayer::MultiplayerMode::JoinedWorld { world_id, .. } = &*multiplayer_mode
+            {
+                block_change_events.send(multiplayer::BlockChangeEvent {
+                    world_id: world_id.clone(),
+                    player_id: player_profile.player_id.clone(),
+                    player_name: player_profile.player_name.clone(),
+                    change_type: multiplayer::BlockChangeType::Removed { x, y, z },
+                });
+            }
+
             reply!(log, "Removed block at ({}, {}, {})", x, y, z);
         } else {
             reply!(log, "No block found at ({}, {}, {})", x, y, z);
@@ -1230,7 +1267,8 @@ fn main() {
         .insert_resource(mqtt_config)
         .insert_resource(profile::load_or_create_profile_with_override(
             args.player_id,
-        ));
+        ))
+        .init_resource::<ChunkedVoxelWorld>(); // Initialize chunk-based world alongside existing VoxelWorld
     // Script resources are now handled by the ScriptPlugin
 
     // Add default plugins and initialize AssetServer
@@ -1256,6 +1294,8 @@ fn main() {
         .add_plugins(DevicePlugin)
         .add_plugins(DevicePositioningPlugin)
         .add_plugins(EnvironmentPlugin)
+        .add_plugins(ChunkEventsPlugin) // Add chunk event system
+        .add_plugins(ChunkMqttPlugin) // Add chunk MQTT synchronization
         .add_plugins(MyInteractionPlugin)
         .add_plugins(MqttPlugin)
         .add_plugins(InventoryPlugin)

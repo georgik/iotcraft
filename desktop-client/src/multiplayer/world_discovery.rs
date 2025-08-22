@@ -6,7 +6,9 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
 
+use super::mqtt_utils::generate_unique_client_id;
 use super::shared_world::*;
+use super::world_publisher::ChunkedWorldData; // Import from publisher
 use crate::config::MqttConfig;
 use crate::world::*;
 
@@ -42,6 +44,12 @@ pub enum DiscoveryResponse {
     },
     WorldChangeReceived {
         change: WorldChange,
+    },
+    BlockChangeReceived {
+        world_id: String,
+        player_id: String,
+        player_name: String,
+        change_type: super::shared_world::BlockChangeType,
     },
 }
 
@@ -81,73 +89,29 @@ fn initialize_world_discovery(
     thread::spawn(move || {
         info!("Starting world discovery thread...");
 
-        // Test initial connection
-        let mut opts = MqttOptions::new("iotcraft-world-discovery", &mqtt_host, mqtt_port);
-        opts.set_keep_alive(Duration::from_secs(30));
-        opts.set_clean_session(false);
-
-        let (client, mut conn) = Client::new(opts, 10);
-
-        let mut initial_connection_success = false;
-        let mut connection_attempts = 0;
-
-        // Try initial connection
-        for event in conn.iter() {
-            match event {
-                Ok(Event::Incoming(Incoming::ConnAck(_))) => {
-                    info!("World discovery connected successfully - world sharing enabled");
-                    initial_connection_success = true;
-
-                    // Subscribe to world discovery topics
-                    if let Err(e) = client.subscribe("iotcraft/worlds/+/info", QoS::AtLeastOnce) {
-                        error!("Failed to subscribe to world info: {}", e);
-                        break;
-                    }
-                    if let Err(e) = client.subscribe("iotcraft/worlds/+/data", QoS::AtLeastOnce) {
-                        error!("Failed to subscribe to world data: {}", e);
-                        break;
-                    }
-                    if let Err(e) = client.subscribe("iotcraft/worlds/+/changes", QoS::AtLeastOnce)
-                    {
-                        error!("Failed to subscribe to world changes: {}", e);
-                        break;
-                    }
-
-                    info!("Subscribed to world discovery topics");
-                    break;
-                }
-                Err(e) => {
-                    error!("Initial world discovery connection failed: {:?}", e);
-                    connection_attempts += 1;
-                    if connection_attempts > 2 {
-                        break;
-                    }
-                }
-                Ok(_) => {}
-            }
-        }
-
-        if !initial_connection_success {
-            info!("MQTT connection not available - world discovery disabled");
-            return; // Exit thread - world discovery is disabled
-        }
-
-        // Continue with normal world discovery
+        // Main discovery loop with reconnection handling
         loop {
-            let mut opts = MqttOptions::new("iotcraft-world-discovery", &mqtt_host, mqtt_port);
+            let client_id = generate_unique_client_id("iotcraft-world-discovery");
+            info!("World discovery reconnecting with client ID: {}", client_id);
+            let mut opts = MqttOptions::new(&client_id, &mqtt_host, mqtt_port);
             opts.set_keep_alive(Duration::from_secs(30));
             opts.set_clean_session(false);
+            opts.set_max_packet_size(1048576, 1048576); // Set max packet size to 1MB to match server
 
             let (client, mut conn) = Client::new(opts, 10);
             let mut connected = false;
-            let subscribed = false;
+            let mut subscribed = false;
             let mut world_cache: HashMap<String, SharedWorldInfo> = HashMap::new();
+            // Track chunks for reassembly
+            let mut chunk_cache: HashMap<String, HashMap<u32, ChunkedWorldData>> = HashMap::new();
+            let mut last_cache_log = std::time::Instant::now();
 
             // Wait for connection and subscribe
             for event in conn.iter() {
                 match event {
                     Ok(Event::Incoming(Incoming::ConnAck(_))) => {
                         connected = true;
+                        info!("World discovery connected, subscribing to topics...");
 
                         // Subscribe to topics
                         if let Err(e) = client.subscribe("iotcraft/worlds/+/info", QoS::AtLeastOnce)
@@ -155,26 +119,146 @@ fn initialize_world_discovery(
                             error!("Failed to subscribe to world info: {}", e);
                             break;
                         }
+                        info!("Subscribed to iotcraft/worlds/+/info");
+
                         if let Err(e) = client.subscribe("iotcraft/worlds/+/data", QoS::AtLeastOnce)
                         {
                             error!("Failed to subscribe to world data: {}", e);
                             break;
                         }
+                        info!("Subscribed to iotcraft/worlds/+/data");
+
+                        if let Err(e) =
+                            client.subscribe("iotcraft/worlds/+/data/chunk", QoS::AtLeastOnce)
+                        {
+                            error!("Failed to subscribe to world data chunks: {}", e);
+                            break;
+                        }
+                        info!("Subscribed to iotcraft/worlds/+/data/chunk");
+
                         if let Err(e) =
                             client.subscribe("iotcraft/worlds/+/changes", QoS::AtLeastOnce)
                         {
                             error!("Failed to subscribe to world changes: {}", e);
                             break;
                         }
+                        info!("Subscribed to iotcraft/worlds/+/changes");
 
-                        let _ = subscribed; // Intentionally unused for now
-                        break;
+                        // Subscribe to block change topics for real-time synchronization
+                        if let Err(e) = client
+                            .subscribe("iotcraft/worlds/+/state/blocks/placed", QoS::AtLeastOnce)
+                        {
+                            error!("Failed to subscribe to block placements: {}", e);
+                            break;
+                        }
+                        info!("Subscribed to iotcraft/worlds/+/state/blocks/placed");
+
+                        if let Err(e) = client
+                            .subscribe("iotcraft/worlds/+/state/blocks/removed", QoS::AtLeastOnce)
+                        {
+                            error!("Failed to subscribe to block removals: {}", e);
+                            break;
+                        }
+                        info!("Subscribed to iotcraft/worlds/+/state/blocks/removed");
+
+                        subscribed = true;
+                        info!(
+                            "Successfully subscribed to all world discovery topics, waiting for retained messages..."
+                        );
                     }
                     Ok(Event::Incoming(Incoming::Publish(p))) => {
-                        if !subscribed {
-                            continue;
+                        if subscribed {
+                            info!(
+                                "Received message on topic: {} (retained: {})",
+                                p.topic, p.retain
+                            );
+                            // Process retained messages immediately after subscription
+                            handle_discovery_message(
+                                &p,
+                                &mut world_cache,
+                                &mut chunk_cache,
+                                &response_tx,
+                            );
+
+                            // If this was a retained world info message, send immediate update
+                            if p.topic.contains("/info") {
+                                info!("Sending world list update after world info message");
+                                let _ = response_tx.send(DiscoveryResponse::WorldListUpdated {
+                                    worlds: world_cache.clone(),
+                                });
+                            }
                         }
-                        handle_discovery_message(&p, &mut world_cache, &response_tx);
+                    }
+                    Ok(Event::Incoming(Incoming::SubAck(_))) => {
+                        if subscribed {
+                            info!(
+                                "Subscription acknowledged, continuing to wait for retained messages..."
+                            );
+                            // Continue in the blocking loop for a bit longer to collect retained messages
+                            let start_time = std::time::Instant::now();
+                            let mut retained_messages_received = 0;
+
+                            // Wait up to 2 seconds for retained messages after subscription acknowledgment
+                            while start_time.elapsed() < Duration::from_secs(2) {
+                                match conn.try_recv() {
+                                    Ok(Ok(Event::Incoming(Incoming::Publish(p)))) => {
+                                        info!(
+                                            "Processing retained/initial message on topic: {} (retained: {})",
+                                            p.topic, p.retain
+                                        );
+                                        handle_discovery_message(
+                                            &p,
+                                            &mut world_cache,
+                                            &mut chunk_cache,
+                                            &response_tx,
+                                        );
+
+                                        if p.topic.contains("/info") {
+                                            retained_messages_received += 1;
+                                            info!(
+                                                "Processed world info message ({})",
+                                                retained_messages_received
+                                            );
+                                        }
+                                    }
+                                    Ok(Ok(_)) => {} // Other events
+                                    Ok(Err(e)) => {
+                                        error!(
+                                            "Connection error while waiting for retained messages: {:?}",
+                                            e
+                                        );
+                                        break;
+                                    }
+                                    Err(rumqttc::TryRecvError::Empty) => {
+                                        // No more messages, wait a bit
+                                        thread::sleep(Duration::from_millis(50));
+                                    }
+                                    Err(rumqttc::TryRecvError::Disconnected) => {
+                                        error!(
+                                            "Connection lost while waiting for retained messages"
+                                        );
+                                        break;
+                                    }
+                                }
+                            }
+
+                            info!(
+                                "Finished collecting retained messages. Found {} worlds in cache",
+                                world_cache.len()
+                            );
+                            if !world_cache.is_empty() {
+                                info!(
+                                    "Sending initial world list update with {} cached worlds",
+                                    world_cache.len()
+                                );
+                                let _ = response_tx.send(DiscoveryResponse::WorldListUpdated {
+                                    worlds: world_cache.clone(),
+                                });
+                            }
+
+                            // Now break to enter the main processing loop
+                            break;
+                        }
                     }
                     Ok(_) => {}
                     Err(e) => {
@@ -191,13 +275,27 @@ fn initialize_world_discovery(
             }
 
             // Handle discovery and connection events
+            let mut loop_counter = 0;
+            let mut last_debug_log = std::time::Instant::now();
             loop {
                 // Handle connection events (non-blocking)
                 match conn.try_recv() {
                     Ok(Ok(Event::Incoming(Incoming::Publish(p)))) => {
-                        handle_discovery_message(&p, &mut world_cache, &response_tx);
+                        info!("📬 Main loop received MQTT message on topic: {}", p.topic);
+                        handle_discovery_message(
+                            &p,
+                            &mut world_cache,
+                            &mut chunk_cache,
+                            &response_tx,
+                        );
                     }
-                    Ok(Ok(_)) => {}
+                    Ok(Ok(other_event)) => {
+                        // Log other events occasionally to verify connection is alive
+                        if last_debug_log.elapsed() > Duration::from_secs(30) {
+                            info!("📡 Main loop received other MQTT event: {:?}", other_event);
+                            last_debug_log = std::time::Instant::now();
+                        }
+                    }
                     Ok(Err(e)) => {
                         error!("World discovery connection error: {:?}", e);
                         break;
@@ -209,9 +307,23 @@ fn initialize_world_discovery(
                     }
                 }
 
+                loop_counter += 1;
+                if loop_counter % 100000 == 0 && last_debug_log.elapsed() > Duration::from_secs(60)
+                {
+                    info!(
+                        "🔄 Main MQTT processing loop is active (iteration {})",
+                        loop_counter
+                    );
+                    last_debug_log = std::time::Instant::now();
+                }
+
                 // Handle discovery requests (non-blocking)
                 match discovery_rx.try_recv() {
                     Ok(DiscoveryMessage::RefreshWorlds) => {
+                        info!(
+                            "Received RefreshWorlds request, sending {} cached worlds",
+                            world_cache.len()
+                        );
                         // Send current world cache
                         let _ = response_tx.send(DiscoveryResponse::WorldListUpdated {
                             worlds: world_cache.clone(),
@@ -222,6 +334,18 @@ fn initialize_world_discovery(
                         warn!("World discovery channel disconnected");
                         break;
                     }
+                }
+
+                // Periodically log world cache state for debugging
+                if last_cache_log.elapsed() > Duration::from_secs(10) {
+                    info!(
+                        "World discovery cache status: {} worlds cached",
+                        world_cache.len()
+                    );
+                    for (world_id, world_info) in &world_cache {
+                        info!("  - {} ({})", world_info.world_name, world_id);
+                    }
+                    last_cache_log = std::time::Instant::now();
                 }
 
                 thread::sleep(Duration::from_millis(10));
@@ -238,16 +362,25 @@ fn initialize_world_discovery(
 fn handle_discovery_message(
     publish: &rumqttc::Publish,
     world_cache: &mut HashMap<String, SharedWorldInfo>,
+    chunk_cache: &mut HashMap<String, HashMap<u32, ChunkedWorldData>>,
     response_tx: &mpsc::Sender<DiscoveryResponse>,
 ) {
+    info!("Received MQTT message on topic: {}", publish.topic);
+
     let topic_parts: Vec<&str> = publish.topic.split('/').collect();
 
     if topic_parts.len() < 4 {
+        warn!("Invalid topic structure: {}", publish.topic);
         return;
     }
 
     let world_id = topic_parts[2];
     let message_type = topic_parts[3];
+
+    info!(
+        "Processing message for world_id: {}, type: {}",
+        world_id, message_type
+    );
 
     match message_type {
         "info" => {
@@ -262,13 +395,19 @@ fn handle_discovery_message(
                         match serde_json::from_str::<SharedWorldInfo>(&payload_str) {
                             Ok(world_info) => {
                                 info!(
-                                    "Discovered world: {} by {}",
-                                    world_info.world_name, world_info.host_name
+                                    "Discovered world: {} (ID: {}) by {} - adding to cache",
+                                    world_info.world_name,
+                                    world_info.world_id,
+                                    world_info.host_name
                                 );
-                                world_cache.insert(world_id.to_string(), world_info);
+                                world_cache.insert(world_id.to_string(), world_info.clone());
+                                info!("World cache now contains {} worlds", world_cache.len());
                             }
                             Err(e) => {
-                                error!("Failed to parse world info: {}", e);
+                                error!(
+                                    "Failed to parse world info payload '{}': {}",
+                                    payload_str, e
+                                );
                             }
                         }
                     }
@@ -284,22 +423,21 @@ fn handle_discovery_message(
             });
         }
         "data" => {
-            if !publish.payload.is_empty() {
-                match String::from_utf8(publish.payload.to_vec()) {
-                    Ok(payload_str) => match serde_json::from_str::<WorldSaveData>(&payload_str) {
-                        Ok(world_data) => {
-                            info!("Received world data for: {}", world_id);
-                            let _ = response_tx.send(DiscoveryResponse::WorldDataReceived {
-                                world_id: world_id.to_string(),
-                                world_data,
-                            });
-                        }
-                        Err(e) => {
-                            error!("Failed to parse world data: {}", e);
-                        }
-                    },
+            if topic_parts.len() >= 5 && topic_parts[4] == "chunk" {
+                // Handle chunked data
+                handle_chunk_message(publish, world_id, chunk_cache, response_tx);
+            } else if !publish.payload.is_empty() {
+                // Handle regular (non-chunked) data - try both binary and JSON
+                match try_parse_world_data(&publish.payload) {
+                    Ok(world_data) => {
+                        info!("Received world data for: {}", world_id);
+                        let _ = response_tx.send(DiscoveryResponse::WorldDataReceived {
+                            world_id: world_id.to_string(),
+                            world_data,
+                        });
+                    }
                     Err(e) => {
-                        error!("Failed to decode world data payload: {}", e);
+                        error!("Failed to parse world data: {}", e);
                     }
                 }
             }
@@ -317,10 +455,205 @@ fn handle_discovery_message(
                 error!("Failed to decode world change payload: {}", e);
             }
         },
+        "state" => {
+            // Handle block change messages
+            if topic_parts.len() >= 6 && topic_parts[4] == "blocks" {
+                let block_action = topic_parts[5]; // "placed" or "removed"
+
+                match String::from_utf8(publish.payload.to_vec()) {
+                    Ok(payload_str) => {
+                        match serde_json::from_str::<serde_json::Value>(&payload_str) {
+                            Ok(v) => {
+                                // Parse the block change message
+                                let player_id = v["player_id"].as_str().unwrap_or("").to_string();
+                                let player_name =
+                                    v["player_name"].as_str().unwrap_or("").to_string();
+
+                                if let Some(change_obj) = v["change"].as_object() {
+                                    let change_type = if block_action == "placed" {
+                                        if let Some(placed) = change_obj.get("Placed") {
+                                            super::shared_world::BlockChangeType::Placed {
+                                            x: placed["x"].as_i64().unwrap_or(0) as i32,
+                                            y: placed["y"].as_i64().unwrap_or(0) as i32,
+                                            z: placed["z"].as_i64().unwrap_or(0) as i32,
+                                            block_type: match placed["block_type"].as_str().unwrap_or("Stone") {
+                                                "Grass" => crate::environment::BlockType::Grass,
+                                                "Dirt" => crate::environment::BlockType::Dirt,
+                                                "Stone" => crate::environment::BlockType::Stone,
+                                                "QuartzBlock" => crate::environment::BlockType::QuartzBlock,
+                                                "GlassPane" => crate::environment::BlockType::GlassPane,
+                                                "CyanTerracotta" => crate::environment::BlockType::CyanTerracotta,
+                                                "Water" => crate::environment::BlockType::Water,
+                                                _ => crate::environment::BlockType::Stone,
+                                            },
+                                        }
+                                        } else {
+                                            error!("Invalid placed block change format");
+                                            return;
+                                        }
+                                    } else if block_action == "removed" {
+                                        if let Some(removed) = change_obj.get("Removed") {
+                                            super::shared_world::BlockChangeType::Removed {
+                                                x: removed["x"].as_i64().unwrap_or(0) as i32,
+                                                y: removed["y"].as_i64().unwrap_or(0) as i32,
+                                                z: removed["z"].as_i64().unwrap_or(0) as i32,
+                                            }
+                                        } else {
+                                            error!("Invalid removed block change format");
+                                            return;
+                                        }
+                                    } else {
+                                        error!("Unknown block action: {}", block_action);
+                                        return;
+                                    };
+
+                                    info!(
+                                        "🔄 Parsed block change for world {}: {:?} by {} - sending to response channel",
+                                        world_id, change_type, player_name
+                                    );
+
+                                    let send_result =
+                                        response_tx.send(DiscoveryResponse::BlockChangeReceived {
+                                            world_id: world_id.to_string(),
+                                            player_id,
+                                            player_name,
+                                            change_type,
+                                        });
+
+                                    if send_result.is_ok() {
+                                        info!(
+                                            "✅ Block change message sent to response channel successfully"
+                                        );
+                                    } else {
+                                        error!(
+                                            "❌ Failed to send block change to response channel: {:?}",
+                                            send_result
+                                        );
+                                    }
+                                } else {
+                                    error!("Block change message missing 'change' object");
+                                }
+                            }
+                            Err(e) => {
+                                error!("Failed to parse block change JSON: {}", e);
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        error!("Failed to decode block change payload: {}", e);
+                    }
+                }
+            }
+        }
         _ => {
             // Unknown message type
         }
     }
+}
+
+/// Try to parse world data from both binary and JSON formats
+fn try_parse_world_data(payload: &[u8]) -> Result<WorldSaveData, String> {
+    // First try direct JSON deserialization (for non-chunked data)
+    if let Ok(payload_str) = String::from_utf8(payload.to_vec()) {
+        if let Ok(world_data) = serde_json::from_str::<WorldSaveData>(&payload_str) {
+            return Ok(world_data);
+        }
+    }
+
+    // If that fails, try binary deserialization (for binary payloads)
+    serde_json::from_slice::<WorldSaveData>(payload)
+        .map_err(|e| format!("Failed to parse world data: {}", e))
+}
+
+/// Handle incoming chunk message and reassemble if complete
+fn handle_chunk_message(
+    publish: &rumqttc::Publish,
+    world_id: &str,
+    chunk_cache: &mut HashMap<String, HashMap<u32, ChunkedWorldData>>,
+    response_tx: &mpsc::Sender<DiscoveryResponse>,
+) {
+    // Parse the chunk from binary payload
+    match serde_json::from_slice::<ChunkedWorldData>(&publish.payload) {
+        Ok(chunk) => {
+            info!(
+                "Received chunk {}/{} for world {} (chunk_id: {})",
+                chunk.chunk_index + 1,
+                chunk.total_chunks,
+                world_id,
+                chunk.chunk_id
+            );
+
+            // Store the chunk
+            let chunk_map = chunk_cache
+                .entry(chunk.chunk_id.clone())
+                .or_insert_with(HashMap::new);
+            chunk_map.insert(chunk.chunk_index, chunk.clone());
+
+            // Check if we have all chunks
+            if chunk_map.len() == chunk.total_chunks as usize {
+                info!(
+                    "All chunks received for {}, reassembling...",
+                    chunk.chunk_id
+                );
+
+                match reassemble_chunks(chunk_map) {
+                    Ok(world_data) => {
+                        info!("Successfully reassembled world data for: {}", world_id);
+                        let _ = response_tx.send(DiscoveryResponse::WorldDataReceived {
+                            world_id: world_id.to_string(),
+                            world_data,
+                        });
+
+                        // Clean up the chunk cache for this chunk_id
+                        chunk_cache.remove(&chunk.chunk_id);
+                    }
+                    Err(e) => {
+                        error!("Failed to reassemble chunks for {}: {}", chunk.chunk_id, e);
+                        // Clean up failed assembly
+                        chunk_cache.remove(&chunk.chunk_id);
+                    }
+                }
+            }
+        }
+        Err(e) => {
+            error!("Failed to parse chunk message: {}", e);
+        }
+    }
+}
+
+/// Reassemble chunks into world data
+fn reassemble_chunks(chunk_map: &HashMap<u32, ChunkedWorldData>) -> Result<WorldSaveData, String> {
+    // Sort chunks by index and concatenate data
+    let mut sorted_chunks: Vec<_> = chunk_map.iter().collect();
+    sorted_chunks.sort_by_key(|(index, _)| *index);
+
+    let mut reassembled_data = Vec::new();
+    for (expected_index, (actual_index, chunk)) in sorted_chunks.iter().enumerate() {
+        if **actual_index != expected_index as u32 {
+            return Err(format!(
+                "Missing chunk at index {}, found index {}",
+                expected_index, actual_index
+            ));
+        }
+        reassembled_data.extend_from_slice(&chunk.data);
+    }
+
+    // Decompress the data
+    let decompressed = decompress_data(&reassembled_data)
+        .map_err(|e| format!("Failed to decompress data: {}", e))?;
+
+    // Deserialize the world data
+    serde_json::from_slice::<WorldSaveData>(&decompressed)
+        .map_err(|e| format!("Failed to deserialize world data: {}", e))
+}
+
+/// Decompress data using deflate
+fn decompress_data(compressed: &[u8]) -> Result<Vec<u8>, std::io::Error> {
+    use std::io::Read;
+    let mut decoder = flate2::read::DeflateDecoder::new(compressed);
+    let mut decompressed = Vec::new();
+    decoder.read_to_end(&mut decompressed)?;
+    Ok(decompressed)
 }
 
 fn handle_discovery_requests(
@@ -340,12 +673,14 @@ fn process_discovery_responses(
     mut commands: Commands,
     mut voxel_world: ResMut<crate::environment::VoxelWorld>,
     existing_blocks_query: Query<Entity, With<crate::environment::VoxelBlock>>,
+    voxel_blocks_query: Query<(Entity, &crate::environment::VoxelBlock)>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     asset_server: Res<AssetServer>,
     mut inventory: ResMut<crate::inventory::PlayerInventory>,
     camera_query: Query<Entity, With<crate::camera_controllers::CameraController>>,
     multiplayer_mode: Res<MultiplayerMode>,
+    player_profile: Res<crate::profile::PlayerProfile>,
 ) {
     if let Some(rx) = world_discovery.world_rx.lock().unwrap().as_ref() {
         while let Ok(response) = rx.try_recv() {
@@ -362,7 +697,17 @@ fn process_discovery_responses(
                     world_id,
                     world_data,
                 } => {
-                    // Only load world data if we're joining this specific world
+                    // Always cache the world data when received
+                    info!(
+                        "Caching world data for: {} ({} blocks)",
+                        world_id,
+                        world_data.blocks.len()
+                    );
+                    online_worlds
+                        .world_data_cache
+                        .insert(world_id.clone(), world_data.clone());
+
+                    // Also load it immediately if we're already in this world
                     if let MultiplayerMode::JoinedWorld {
                         world_id: joined_id,
                         ..
@@ -401,6 +746,63 @@ fn process_discovery_responses(
                             }
                         }
                         MultiplayerMode::SinglePlayer => {}
+                    }
+                }
+                DiscoveryResponse::BlockChangeReceived {
+                    world_id,
+                    player_id,
+                    player_name,
+                    change_type,
+                } => {
+                    info!(
+                        "📨 Received block change for world {}: {:?} by {} (player_id: {})",
+                        world_id, change_type, player_name, player_id
+                    );
+                    info!("🔍 Current multiplayer mode: {:?}", &*multiplayer_mode);
+                    info!("👤 Current player ID: {}", player_profile.player_id);
+
+                    // Check if this change is from the current player (avoid duplicate block creation)
+                    if player_id == player_profile.player_id {
+                        info!("🚫 Ignoring block change from self to prevent duplicate creation");
+                        continue; // Skip processing our own changes, but continue processing other messages
+                    }
+
+                    // Apply block changes if we're in the same world and from a different player
+                    match &*multiplayer_mode {
+                        MultiplayerMode::JoinedWorld {
+                            world_id: joined_world,
+                            ..
+                        }
+                        | MultiplayerMode::HostingWorld {
+                            world_id: joined_world,
+                            ..
+                        } => {
+                            info!(
+                                "🌍 Checking world match: joined_world={} vs received_world={}",
+                                joined_world, world_id
+                            );
+                            if *joined_world == world_id {
+                                info!(
+                                    "✅ World matches! Applying block change from other player: {:?}",
+                                    change_type
+                                );
+                                apply_block_change(
+                                    change_type,
+                                    &player_name,
+                                    &mut commands,
+                                    &mut voxel_world,
+                                    &voxel_blocks_query,
+                                    &mut meshes,
+                                    &mut materials,
+                                    &asset_server,
+                                );
+                            } else {
+                                info!("❌ World doesn't match: {} != {}", joined_world, world_id);
+                            }
+                        }
+                        MultiplayerMode::SinglePlayer => {
+                            info!("🚫 In SinglePlayer mode, ignoring block change");
+                        }
                     }
                 }
             }
@@ -550,6 +952,80 @@ fn apply_world_change(
         }
         WorldChangeType::PlayerLeft { player_name, .. } => {
             info!("Player left: {}", player_name);
+        }
+    }
+}
+
+fn apply_block_change(
+    change_type: super::shared_world::BlockChangeType,
+    player_name: &str,
+    commands: &mut Commands,
+    voxel_world: &mut crate::environment::VoxelWorld,
+    voxel_blocks_query: &Query<(Entity, &crate::environment::VoxelBlock)>,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<StandardMaterial>,
+    asset_server: &AssetServer,
+) {
+    match change_type {
+        super::shared_world::BlockChangeType::Placed {
+            x,
+            y,
+            z,
+            block_type,
+        } => {
+            let pos = IVec3::new(x, y, z);
+            voxel_world.blocks.insert(pos, block_type);
+
+            // Spawn visual block
+            let cube_mesh = meshes.add(Cuboid::new(
+                crate::environment::CUBE_SIZE,
+                crate::environment::CUBE_SIZE,
+                crate::environment::CUBE_SIZE,
+            ));
+            let texture_path = match block_type {
+                crate::environment::BlockType::Grass => "textures/grass.webp",
+                crate::environment::BlockType::Dirt => "textures/dirt.webp",
+                crate::environment::BlockType::Stone => "textures/stone.webp",
+                crate::environment::BlockType::QuartzBlock => "textures/quartz_block.webp",
+                crate::environment::BlockType::GlassPane => "textures/glass_pane.webp",
+                crate::environment::BlockType::CyanTerracotta => "textures/cyan_terracotta.webp",
+                crate::environment::BlockType::Water => "textures/water.webp",
+            };
+            let texture: Handle<Image> = asset_server.load(texture_path);
+            let material = materials.add(StandardMaterial {
+                base_color_texture: Some(texture),
+                ..default()
+            });
+
+            commands.spawn((
+                Mesh3d(cube_mesh),
+                MeshMaterial3d(material),
+                Transform::from_translation(pos.as_vec3()),
+                crate::environment::VoxelBlock { position: pos },
+            ));
+
+            info!(
+                "Applied block placement from {}: {:?} at ({}, {}, {})",
+                player_name, block_type, x, y, z
+            );
+        }
+        super::shared_world::BlockChangeType::Removed { x, y, z } => {
+            let pos = IVec3::new(x, y, z);
+            voxel_world.blocks.remove(&pos);
+
+            // Despawn visual block by finding the entity at this position
+            for (entity, block) in voxel_blocks_query.iter() {
+                if block.position == pos {
+                    commands.entity(entity).despawn();
+                    info!("Despawned block entity at position ({}, {}, {})", x, y, z);
+                    break;
+                }
+            }
+
+            info!(
+                "Applied block removal from {}: ({}, {}, {})",
+                player_name, x, y, z
+            );
         }
     }
 }

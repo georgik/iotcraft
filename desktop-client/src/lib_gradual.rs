@@ -65,7 +65,7 @@ impl DeviceType {
 
 /// Web-compatible device entity component
 #[derive(Component)]
-struct DeviceEntity {
+pub struct DeviceEntity {
     pub device_id: String,
     pub device_type: String,
 }
@@ -74,19 +74,19 @@ struct DeviceEntity {
 
 /// Component to mark remote player entities
 #[derive(Component)]
-struct RemotePlayer;
+pub struct RemotePlayer;
 
 // Multiplayer types are imported from either web MQTT or desktop multiplayer modules
 
 /// Multiplayer connection status
 #[derive(Resource, Default)]
-struct MultiplayerConnectionStatus {
+pub struct MultiplayerConnectionStatus {
     pub connection_available: bool,
 }
 
 /// Timer for position updates (10 Hz)
 #[derive(Resource)]
-struct PositionTimer {
+pub struct PositionTimer {
     timer: Timer,
     last_position: Option<Vec3>,
 }
@@ -102,7 +102,7 @@ impl Default for PositionTimer {
 
 /// World ID resource
 #[derive(Resource, Debug, Clone)]
-struct WorldId(pub String);
+pub struct WorldId(pub String);
 
 impl Default for WorldId {
     fn default() -> Self {
@@ -113,7 +113,7 @@ impl Default for WorldId {
 // ============ TOUCH CONTROL SYSTEMS ============
 
 /// Setup touch control areas based on screen size
-fn setup_touch_areas(mut touch_state: ResMut<TouchInputState>, windows: Query<&Window>) {
+pub fn setup_touch_areas(mut touch_state: ResMut<TouchInputState>, windows: Query<&Window>) {
     if let Ok(window) = windows.single() {
         let window_width = window.resolution.width();
         let window_height = window.resolution.height();
@@ -138,7 +138,7 @@ fn setup_touch_areas(mut touch_state: ResMut<TouchInputState>, windows: Query<&W
 }
 
 /// Enhanced camera control system with continuous touch support for mobile devices
-fn touch_camera_control_system(
+pub fn touch_camera_control_system(
     time: Res<Time>,
     mut camera_controller: ResMut<CameraController>,
     keyboard_input: Res<ButtonInput<KeyCode>>,
@@ -451,8 +451,7 @@ fn touch_camera_control_system(
     // Handle mouse capture (escape key is handled by menu system)
     for mut window in &mut windows {
         if mouse_button_input.just_pressed(MouseButton::Left) && window.focused {
-            window.cursor_options.grab_mode = bevy::window::CursorGrabMode::Locked;
-            window.cursor_options.visible = false;
+            safe_set_cursor_grab_mode(&mut window, bevy::window::CursorGrabMode::Locked, false);
             info!(
                 "Mouse captured for camera control. Use WASD to move, mouse to look around. Touch controls: left side = move, right side = look."
             );
@@ -475,12 +474,113 @@ fn now_ts() -> u64 {
     }
 }
 
-/// Set up panic hook for better error reporting in web console
+/// Detect if we're running on a mobile/touch device
+#[cfg(target_arch = "wasm32")]
+fn is_mobile_device() -> bool {
+    if let Some(window) = web_sys::window() {
+        let navigator = window.navigator();
+        if let Ok(user_agent) = navigator.user_agent() {
+            let ua = user_agent.to_lowercase();
+            let is_mobile = ua.contains("mobile")
+                || ua.contains("android")
+                || ua.contains("iphone")
+                || ua.contains("ipad")
+                || ua.contains("ipod")
+                || ua.contains("blackberry")
+                || ua.contains("webos");
+            if is_mobile {
+                return true;
+            }
+        }
+
+        // Also check for touch support
+        if let Ok(has_touch) = js_sys::Reflect::has(&window, &"ontouchstart".into()) {
+            if has_touch {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn is_mobile_device() -> bool {
+    false // Desktop platforms are never mobile
+}
+
+/// Safely set cursor grab mode, avoiding requestPointerLock on mobile devices
+pub fn safe_set_cursor_grab_mode(
+    window: &mut Window,
+    grab_mode: bevy::window::CursorGrabMode,
+    visible: bool,
+) {
+    if grab_mode == bevy::window::CursorGrabMode::Locked && is_mobile_device() {
+        info!("📱 Skipping cursor lock on mobile device - using touch controls instead");
+        #[cfg(target_arch = "wasm32")]
+        web_sys::console::log_1(
+            &"📱 Skipping cursor lock on mobile device - using touch controls instead".into(),
+        );
+        return;
+    }
+
+    window.cursor_options.grab_mode = grab_mode;
+    window.cursor_options.visible = visible;
+
+    match grab_mode {
+        bevy::window::CursorGrabMode::Locked => {
+            info!("🖱️ Mouse cursor locked for camera control");
+        }
+        bevy::window::CursorGrabMode::None => {
+            info!("🖱️ Mouse cursor released");
+        }
+        _ => {}
+    }
+}
+
+/// Set up enhanced panic hook for better error reporting in web console
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn set_panic_hook() {
-    console_error_panic_hook::set_once();
-    web_sys::console::log_1(&"Panic hook initialized for IoTCraft".into());
+    std::panic::set_hook(Box::new(|info| {
+        let mut msg = String::new();
+
+        if let Some(payload) = info.payload().downcast_ref::<&str>() {
+            msg.push_str(&format!("💥 PANIC: {}", payload));
+        } else if let Some(payload) = info.payload().downcast_ref::<String>() {
+            msg.push_str(&format!("💥 PANIC: {}", payload));
+        } else {
+            msg.push_str("💥 PANIC: (no message)");
+        }
+
+        if let Some(location) = info.location() {
+            msg.push_str(&format!(
+                " at {}:{}:{}",
+                location.file(),
+                location.line(),
+                location.column()
+            ));
+        }
+
+        // Log to both console and web_sys
+        eprintln!("{}", msg);
+        web_sys::console::error_1(&msg.clone().into());
+
+        // Try to show error in the UI if possible
+        if let Some(window) = web_sys::window() {
+            if let Some(document) = window.document() {
+                if let Some(element) = document.get_element_by_id("errorMessage") {
+                    element.set_text_content(Some(&format!("WASM Panic: {}", msg)));
+                }
+                if let Some(error_div) = document.get_element_by_id("error") {
+                    if let Some(html_element) = error_div.dyn_ref::<web_sys::HtmlElement>() {
+                        let _ = html_element.style().set_property("display", "block");
+                    }
+                }
+            }
+        }
+    }));
+
+    web_sys::console::log_1(&"Enhanced panic hook initialized for IoTCraft".into());
 }
 
 /// Manual initialization function for WASM
@@ -524,7 +624,7 @@ pub fn start() {
                         resolution: (1280.0, 720.0).into(),
                         canvas: Some("#canvas".to_owned()),
                         fit_canvas_to_parent: true,
-                        prevent_default_event_handling: true, // Prevent browser touch conflicts
+                        prevent_default_event_handling: false, // Allow browser events for better iPad compatibility
                         ..default()
                     }),
                     ..default()
@@ -574,7 +674,7 @@ pub fn start() {
 
 /// Basic scene components
 #[derive(Component)]
-struct DemoCube;
+pub struct DemoCube;
 
 #[derive(Component)]
 struct Ground;
@@ -600,7 +700,7 @@ pub struct CameraController {
 
 /// Touch input state for mobile controls with joystick behavior
 #[derive(Resource, Default)]
-struct TouchInputState {
+pub struct TouchInputState {
     /// Current touch for look control (camera rotation)
     look_touch_id: Option<u64>,
     last_look_position: Option<Vec2>,
@@ -626,10 +726,10 @@ struct TouchInputState {
 struct TouchControlsUI;
 
 #[derive(Component)]
-struct JoystickBase;
+pub struct JoystickBase;
 
 #[derive(Component)]
-struct JoystickKnob;
+pub struct JoystickKnob;
 
 #[derive(Component)]
 struct TouchZoneIndicator;
@@ -638,7 +738,7 @@ struct TouchZoneIndicator;
 struct TouchInstructions;
 
 impl CameraController {
-    fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             enabled: false, // Start disabled - menu system will enable it
             sensitivity: 2.0,
@@ -650,7 +750,7 @@ impl CameraController {
     }
 }
 
-fn setup_basic_scene(
+pub fn setup_basic_scene(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
@@ -922,7 +1022,7 @@ fn setup_basic_scene(
         "IoTCraft Enhanced Web Scene completed! Total blocks: ~700+ | Features: Terrain, Hills, Water, Devices, Tower"
     );
 }
-fn rotate_cube(time: Res<Time>, mut query: Query<&mut Transform, With<DemoCube>>) {
+pub fn rotate_cube(time: Res<Time>, mut query: Query<&mut Transform, With<DemoCube>>) {
     for mut transform in &mut query {
         transform.rotate_y(time.delta_secs() * 0.5);
     }
@@ -1034,8 +1134,7 @@ fn camera_control_system(
     // Handle mouse capture (escape key is handled by menu system)
     for mut window in &mut windows {
         if mouse_button_input.just_pressed(MouseButton::Left) && window.focused {
-            window.cursor_options.grab_mode = bevy::window::CursorGrabMode::Locked;
-            window.cursor_options.visible = false;
+            safe_set_cursor_grab_mode(&mut window, bevy::window::CursorGrabMode::Locked, false);
             info!(
                 "Mouse captured for camera control. Use WASD to move, mouse to look around. Press Escape to open menu."
             );
@@ -1044,7 +1143,7 @@ fn camera_control_system(
 }
 
 /// Process device announcements received via MQTT and spawn devices visually
-fn process_device_announcements(
+pub fn process_device_announcements(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
@@ -1203,7 +1302,7 @@ fn process_device_announcements(
 
 /// Web-compatible FPS logging
 #[cfg(target_arch = "wasm32")]
-fn log_fps(time: Res<Time>, mut timer: Local<Timer>) {
+pub fn log_fps(time: Res<Time>, mut timer: Local<Timer>) {
     // Initialize timer to log every 10 seconds (less frequent for web)
     if timer.duration() == std::time::Duration::ZERO {
         *timer = Timer::from_seconds(10.0, TimerMode::Repeating);
@@ -1223,7 +1322,7 @@ fn log_fps(_time: Res<Time>) {
 // ============ MULTIPLAYER SYSTEMS ============
 
 /// Setup multiplayer connections (simplified for web)
-fn setup_multiplayer_connections(
+pub fn setup_multiplayer_connections(
     mut commands: Commands,
     profile: Res<crate::profile::PlayerProfile>,
 ) {
@@ -1249,12 +1348,12 @@ fn setup_multiplayer_connections(
 }
 
 /// Update position timer
-fn update_position_timer(mut timer: ResMut<PositionTimer>, time: Res<Time>) {
+pub fn update_position_timer(mut timer: ResMut<PositionTimer>, time: Res<Time>) {
     timer.timer.tick(time.delta());
 }
 
 /// Publish local player pose (simplified for web)
-fn publish_local_pose(
+pub fn publish_local_pose(
     profile: Res<crate::profile::PlayerProfile>,
     mut timer: ResMut<PositionTimer>,
     pose_sender: Option<Res<PoseSender>>,
@@ -1320,7 +1419,7 @@ fn publish_local_pose(
 }
 
 /// Apply remote poses to spawn/update player avatars
-fn apply_remote_poses(
+pub fn apply_remote_poses(
     profile: Res<crate::profile::PlayerProfile>,
     pose_receiver: Option<Res<PoseReceiver>>,
     mut commands: Commands,
@@ -1412,7 +1511,7 @@ fn apply_remote_poses(
 // ============ TOUCH UI SYSTEMS ============
 
 /// Setup touch control UI with virtual joystick and touch areas
-fn setup_touch_ui(
+pub fn setup_touch_ui(
     mut commands: Commands,
     mut touch_state: ResMut<TouchInputState>,
     windows: Query<&Window>,
@@ -1527,7 +1626,7 @@ fn setup_touch_ui(
 }
 
 /// Update touch UI based on current touch state
-fn update_touch_ui(
+pub fn update_touch_ui(
     touch_state: Res<TouchInputState>,
     mut joystick_base_query: Query<
         (&mut Node, &mut Visibility),
