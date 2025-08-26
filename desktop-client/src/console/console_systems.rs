@@ -1,17 +1,24 @@
+#[cfg(feature = "console")]
+use crate::{console::ConsoleCommand, reply};
+#[cfg(feature = "console")]
 use bevy::prelude::*;
-use bevy_console::{ConsoleCommand, reply};
-use log::info;
+#[cfg(feature = "console")]
+use log::{error, info};
+#[cfg(feature = "console")]
 use rumqttc::{Client, Event, MqttOptions, Outgoing, QoS};
+#[cfg(feature = "console")]
 use serde_json::json;
+#[cfg(feature = "console")]
 use std::time::Duration;
 
+#[cfg(feature = "console")]
 use super::console_types::*;
+#[cfg(feature = "console")]
 use crate::config::MqttConfig;
+#[cfg(feature = "console")]
 use crate::devices::{DeviceEntity, device_positioning::DevicePositionUpdateEvent};
 
-// Console handler functions are implemented in main.rs
-// This module only provides shared types and handler functions
-
+#[cfg(feature = "console")]
 pub fn handle_spawn_door_command(
     mut log: ConsoleCommand<SpawnDoorCommand>,
     mqtt_config: Res<MqttConfig>,
@@ -52,6 +59,7 @@ pub fn handle_spawn_door_command(
     }
 }
 
+#[cfg(feature = "console")]
 pub fn handle_move_command(
     mut log: ConsoleCommand<MoveCommand>,
     mut device_query: Query<(&mut Transform, &DeviceEntity)>,
@@ -92,6 +100,7 @@ pub fn handle_move_command(
     }
 }
 
+#[cfg(feature = "console")]
 pub fn handle_test_error_command(
     mut log: ConsoleCommand<TestErrorCommand>,
     mut error_resource: ResMut<crate::ui::error_indicator::ErrorResource>,
@@ -110,6 +119,7 @@ pub fn handle_test_error_command(
     }
 }
 
+#[cfg(feature = "console")]
 pub fn handle_list_command(
     mut log: ConsoleCommand<ListCommand>,
     device_query: Query<(&Transform, &DeviceEntity)>,

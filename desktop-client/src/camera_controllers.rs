@@ -11,7 +11,7 @@ use crate::ui::GameState;
 use bevy::{
     input::mouse::{AccumulatedMouseMotion, AccumulatedMouseScroll, MouseScrollUnit},
     prelude::*,
-    window::CursorGrabMode,
+    // window::CursorGrabMode, // Unused in Bevy 0.17
 };
 use std::{f32::consts::*, fmt};
 
@@ -171,7 +171,7 @@ fn sync_camera_controller_with_transform(
 
 fn run_camera_controller(
     time: Res<Time>,
-    mut windows: Query<&mut Window>,
+    _windows: Query<&Window>,
     accumulated_mouse_motion: Res<AccumulatedMouseMotion>,
     accumulated_mouse_scroll: Res<AccumulatedMouseScroll>,
     key_input: Res<ButtonInput<KeyCode>>,
@@ -195,10 +195,8 @@ fn run_camera_controller(
         // Start with mouse not captured (main menu will handle initial state)
 
         // Don't capture mouse on startup - main menu handles cursor state
-        for mut window in &mut windows {
-            window.cursor_options.grab_mode = CursorGrabMode::None;
-            window.cursor_options.visible = true;
-        }
+        // In Bevy 0.17, cursor options are managed separately from Window
+        // This initialization is handled by the main menu system
 
         info!("{}", *controller);
     }
@@ -241,9 +239,9 @@ fn run_camera_controller(
     // This ensures no conflicts with our main menu and ESC key handling
 
     // Handle mouse input - Apply rotation when in game state and cursor is actually grabbed
-    let is_cursor_grabbed = windows
-        .iter()
-        .any(|window| window.cursor_options.grab_mode == CursorGrabMode::Locked);
+    // In Bevy 0.17, we need to check cursor state differently since it's managed by a separate system
+    // For now, assume cursor is grabbed when in game state (this is managed by main menu system)
+    let is_cursor_grabbed = *game_state.get() == GameState::InGame;
 
     if accumulated_mouse_motion.delta != Vec2::ZERO
         && *game_state.get() == GameState::InGame

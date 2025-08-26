@@ -1,186 +1,113 @@
-use bevy::prelude::*;
-use bevy_console::ConsoleCommand;
-use clap::Parser;
+// Console command types that are only available when console feature is enabled
 
-// Console commands for bevy_console
-#[derive(Parser, ConsoleCommand)]
-#[command(name = "blink")]
+#[cfg(feature = "console")]
+#[derive(Clone, Debug)]
 pub struct BlinkCommand {
-    /// Action to perform: start or stop
     pub action: String,
 }
 
-#[derive(Parser, ConsoleCommand)]
-#[command(name = "mqtt")]
+#[cfg(feature = "console")]
+#[derive(Clone, Debug)]
 pub struct MqttCommand {
-    /// MQTT action: status or reconnect
     pub action: String,
 }
 
-#[derive(Parser, ConsoleCommand)]
-#[command(name = "spawn")]
+#[cfg(feature = "console")]
+#[derive(Clone, Debug)]
 pub struct SpawnCommand {
-    /// Device ID
     pub device_id: String,
-    /// X coordinate
     pub x: f32,
-    /// Y coordinate
     pub y: f32,
-    /// Z coordinate
     pub z: f32,
 }
 
-#[derive(Parser, ConsoleCommand)]
-#[command(name = "spawn_door")]
+#[cfg(feature = "console")]
+#[derive(Clone, Debug)]
 pub struct SpawnDoorCommand {
-    /// Device ID
     pub device_id: String,
-    /// X coordinate
     pub x: f32,
-    /// Y coordinate
     pub y: f32,
-    /// Z coordinate
     pub z: f32,
 }
 
-#[derive(Parser, ConsoleCommand)]
-#[command(name = "load")]
-pub struct LoadCommand {
-    /// Script file to load and execute
-    pub filename: String,
-}
-
-#[derive(Parser, ConsoleCommand)]
-#[command(name = "move")]
-pub struct MoveCommand {
-    /// Device ID to move
-    pub device_id: String,
-    /// X coordinate
-    pub x: f32,
-    /// Y coordinate
-    pub y: f32,
-    /// Z coordinate
-    pub z: f32,
-}
-
-#[derive(Parser, ConsoleCommand)]
-#[command(name = "place")]
+#[cfg(feature = "console")]
+#[derive(Clone, Debug)]
 pub struct PlaceBlockCommand {
-    /// Block type: grass, dirt, or stone
     pub block_type: String,
-    /// X coordinate
     pub x: i32,
-    /// Y coordinate
     pub y: i32,
-    /// Z coordinate
     pub z: i32,
 }
 
-#[derive(Parser, ConsoleCommand)]
-#[command(name = "remove")]
+#[cfg(feature = "console")]
+#[derive(Clone, Debug)]
 pub struct RemoveBlockCommand {
-    /// X coordinate
     pub x: i32,
-    /// Y coordinate
     pub y: i32,
-    /// Z coordinate
     pub z: i32,
 }
 
-#[derive(Parser, ConsoleCommand)]
-#[command(name = "wall")]
+#[cfg(feature = "console")]
+#[derive(Clone, Debug)]
 pub struct WallCommand {
-    /// Block type: grass, dirt, or stone
     pub block_type: String,
-    /// X1 coordinate
     pub x1: i32,
-    /// Y1 coordinate
     pub y1: i32,
-    /// Z1 coordinate
     pub z1: i32,
-    /// X2 coordinate
     pub x2: i32,
-    /// Y2 coordinate
     pub y2: i32,
-    /// Z2 coordinate
     pub z2: i32,
 }
 
-#[derive(Parser, ConsoleCommand)]
-#[command(name = "save_map")]
+#[cfg(feature = "console")]
+#[derive(Clone, Debug)]
 pub struct SaveMapCommand {
-    /// Filename to save the map to
     pub filename: String,
 }
 
-#[derive(Parser, ConsoleCommand)]
-#[command(name = "load_map")]
+#[cfg(feature = "console")]
+#[derive(Clone, Debug)]
 pub struct LoadMapCommand {
-    /// Filename to load the map from
     pub filename: String,
 }
 
-#[derive(Parser, ConsoleCommand)]
-#[command(name = "give")]
+#[cfg(feature = "console")]
+#[derive(Clone, Debug)]
 pub struct GiveCommand {
-    /// Item type to give (grass, dirt, stone, quartz_block, glass_pane, cyan_terracotta)
     pub item_type: String,
-    /// Number of items to give (default: 64)
-    #[arg(default_value_t = 64)]
     pub count: u32,
 }
 
-#[derive(Parser, ConsoleCommand)]
-#[command(name = "test_error")]
+#[cfg(feature = "console")]
+#[derive(Clone, Debug)]
 pub struct TestErrorCommand {
-    /// Error message to display
     pub message: String,
 }
 
-#[derive(Parser, ConsoleCommand)]
-#[command(name = "tp")]
+#[cfg(feature = "console")]
+#[derive(Clone, Debug)]
 pub struct TeleportCommand {
-    /// X coordinate
     pub x: f32,
-    /// Y coordinate
     pub y: f32,
-    /// Z coordinate
     pub z: f32,
 }
 
-#[derive(Parser, ConsoleCommand)]
-#[command(name = "look")]
+#[cfg(feature = "console")]
+#[derive(Clone, Debug)]
 pub struct LookCommand {
-    /// Yaw angle in degrees (horizontal rotation)
     pub yaw: f32,
-    /// Pitch angle in degrees (vertical rotation)
     pub pitch: f32,
 }
 
-#[derive(Parser, ConsoleCommand)]
-#[command(name = "list")]
-pub struct ListCommand {
-    // No parameters - lists all connected devices
+#[cfg(feature = "console")]
+#[derive(Clone, Debug)]
+pub struct MoveCommand {
+    pub device_id: String,
+    pub x: f32,
+    pub y: f32,
+    pub z: f32,
 }
 
-#[derive(Resource)]
-pub struct BlinkState {
-    pub blinking: bool,
-    pub timer: Timer,
-    pub light_state: bool,
-    pub last_sent: bool,
-}
-
-impl Default for BlinkState {
-    fn default() -> Self {
-        Self {
-            blinking: false,
-            light_state: false,
-            timer: Timer::from_seconds(1.0, TimerMode::Repeating),
-            last_sent: false,
-        }
-    }
-}
-
-#[derive(Component)]
-pub struct BlinkCube;
+#[cfg(feature = "console")]
+#[derive(Clone, Debug)]
+pub struct ListCommand {}

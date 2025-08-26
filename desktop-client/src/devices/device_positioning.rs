@@ -1,8 +1,9 @@
 use super::device_types::*;
 use crate::config::MqttConfig;
+#[cfg(feature = "console")]
+use crate::console::ConsoleOpen;
 use crate::fonts::Fonts;
 use bevy::prelude::*;
-use bevy_console::ConsoleOpen;
 use log::{error, info};
 use rumqttc::{Client, Event, MqttOptions, Outgoing, QoS};
 use serde_json::json;
@@ -37,7 +38,7 @@ pub struct DragState {
 }
 
 /// Events for position updates
-#[derive(Event)]
+#[derive(Event, BufferedEvent)]
 pub struct DevicePositionUpdateEvent {
     pub device_id: String,
     pub new_position: Vec3,
@@ -149,10 +150,15 @@ fn handle_device_drag_input(
     >,
     mut commands: Commands,
     mut drag_state: ResMut<DragState>,
-    console_open: Res<ConsoleOpen>,
+    #[cfg(feature = "console")] game_state: Res<State<crate::ui::GameState>>,
 ) {
     // Don't interact when console is open
-    if console_open.open {
+    #[cfg(feature = "console")]
+    if *game_state.get() == crate::ui::GameState::ConsoleOpen {
+        return;
+    }
+    #[cfg(not(feature = "console"))]
+    if false {
         return;
     }
 
@@ -259,10 +265,15 @@ fn handle_device_dragging(
     keyboard_input: Res<ButtonInput<KeyCode>>,
     mut drag_state: ResMut<DragState>,
     mut commands: Commands,
-    console_open: Res<ConsoleOpen>,
+    #[cfg(feature = "console")] game_state: Res<State<crate::ui::GameState>>,
 ) {
     // Don't interact when console is open
-    if console_open.open {
+    #[cfg(feature = "console")]
+    if *game_state.get() == crate::ui::GameState::ConsoleOpen {
+        return;
+    }
+    #[cfg(not(feature = "console"))]
+    if false {
         return;
     }
 
@@ -384,9 +395,14 @@ fn draw_drag_gizmos(
     device_query: Query<&GlobalTransform, With<DeviceEntity>>,
     dragged_query: Query<&GlobalTransform, (With<DeviceEntity>, With<BeingDragged>)>,
     drag_state: Res<DragState>,
-    console_open: Res<ConsoleOpen>,
+    #[cfg(feature = "console")] game_state: Res<State<crate::ui::GameState>>,
 ) {
-    if console_open.open {
+    #[cfg(feature = "console")]
+    if *game_state.get() == crate::ui::GameState::ConsoleOpen {
+        return;
+    }
+    #[cfg(not(feature = "console"))]
+    if false {
         return;
     }
 
@@ -495,9 +511,14 @@ pub fn draw_drag_feedback(
     mut gizmos: Gizmos,
     device_query: Query<&GlobalTransform, With<DeviceEntity>>,
     dragged_query: Query<&GlobalTransform, (With<DeviceEntity>, With<BeingDragged>)>,
-    console_open: Res<ConsoleOpen>,
+    #[cfg(feature = "console")] game_state: Res<State<crate::ui::GameState>>,
 ) {
-    if console_open.open {
+    #[cfg(feature = "console")]
+    if *game_state.get() == crate::ui::GameState::ConsoleOpen {
+        return;
+    }
+    #[cfg(not(feature = "console"))]
+    if false {
         return;
     }
 

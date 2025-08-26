@@ -1,4 +1,5 @@
 use crate::ui::GameState;
+#[cfg(feature = "physics")]
 use avian3d::prelude::*;
 use bevy::prelude::*;
 
@@ -192,16 +193,8 @@ fn player_movement(
     keyboard_input: Res<ButtonInput<KeyCode>>,
     mut player_mode: ResMut<PlayerMode>,
     mut commands: Commands,
-    mut camera_query: Query<
-        (
-            Entity,
-            &mut Transform,
-            Option<&mut LinearVelocity>,
-            Option<&mut PlayerMovement>,
-        ),
-        With<Camera>,
-    >,
-    spatial_query: SpatialQuery,
+    mut camera_query: Query<(Entity, &mut Transform, Option<&mut PlayerMovement>), With<Camera>>,
+    #[cfg(feature = "physics")] spatial_query: SpatialQuery,
     voxel_world: Res<crate::environment::VoxelWorld>,
     game_state: Res<State<GameState>>,
 ) {
@@ -219,8 +212,7 @@ fn player_movement(
         return;
     }
 
-    let (camera_entity, transform, _linear_velocity, player_movement) =
-        camera_entities.into_iter().next().unwrap();
+    let (camera_entity, transform, player_movement) = camera_entities.into_iter().next().unwrap();
 
     // Debug logging every few seconds to understand what's happening
     static mut LAST_SYSTEM_DEBUG: f64 = 0.0;
@@ -292,6 +284,7 @@ fn player_movement(
                         &keyboard_input,
                         transform,
                         &mut movement,
+                        #[cfg(feature = "physics")]
                         &spatial_query,
                         &voxel_world,
                         should_skip_jump,
@@ -575,7 +568,7 @@ fn handle_physics_free_walking_movement(
     keyboard_input: &Res<ButtonInput<KeyCode>>,
     mut transform: Mut<Transform>,
     movement: &mut PlayerMovement,
-    _spatial_query: &SpatialQuery,
+    #[cfg(feature = "physics")] _spatial_query: &SpatialQuery,
     voxel_world: &Res<crate::environment::VoxelWorld>,
     should_skip_jump: bool,
 ) {

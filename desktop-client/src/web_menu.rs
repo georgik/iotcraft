@@ -122,19 +122,23 @@ fn setup_settings_menu(_commands: Commands) {
 fn setup_in_game(
     mut windows: Query<&mut Window>,
     mut camera_controller: ResMut<crate::CameraController>,
+    mut cursor_options_query: Query<&mut bevy::window::CursorOptions>,
 ) {
     info!("Entering game - enabling camera control");
 
     // Enable camera controller
     camera_controller.enabled = true;
 
-    // Try to grab mouse for in-game experience (safe for mobile)
-    for mut window in &mut windows {
-        crate::lib_gradual::safe_set_cursor_grab_mode(
-            &mut window,
-            bevy::window::CursorGrabMode::Locked,
-            false,
-        );
+    // Try to grab mouse for in-game experience (safe for mobile) using lib_gradual helper
+    if let Ok(mut cursor_options) = cursor_options_query.single_mut() {
+        for mut window in &mut windows {
+            crate::lib_gradual::safe_set_cursor_grab_mode(
+                &mut window,
+                Some(&mut cursor_options),
+                bevy::window::CursorGrabMode::Locked,
+                false,
+            );
+        }
     }
 }
 
@@ -164,14 +168,17 @@ fn cleanup_settings_menu(mut commands: Commands, query: Query<Entity, With<Setti
 
 fn cleanup_in_game(
     mut windows: Query<&mut Window>,
+    mut cursor_options_query: Query<&mut bevy::window::CursorOptions>,
     _camera_controller: ResMut<crate::CameraController>,
 ) {
     info!("Exiting game - releasing camera control");
 
     // Release mouse when leaving game
-    for mut window in &mut windows {
-        window.cursor_options.grab_mode = bevy::window::CursorGrabMode::None;
-        window.cursor_options.visible = true;
+    if let Ok(mut cursor_options) = cursor_options_query.single_mut() {
+        for _window in &mut windows {
+            cursor_options.grab_mode = bevy::window::CursorGrabMode::None;
+            cursor_options.visible = true;
+        }
     }
 }
 

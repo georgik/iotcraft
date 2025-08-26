@@ -1,10 +1,12 @@
+#[cfg(feature = "console")]
 use crate::console::GiveCommand;
 use crate::environment::{BlockType, VoxelWorld};
 use crate::inventory::{
     BreakBlockEvent, GiveItemEvent, ItemType, PlaceBlockEvent, PlayerInventory,
 };
+#[cfg(feature = "console")]
+use crate::{console::ConsoleCommand, reply};
 use bevy::prelude::*;
-use bevy_console::{ConsoleCommand, reply};
 
 /// System to handle give item events
 pub fn give_item_system(
@@ -246,6 +248,7 @@ pub fn break_block_system(
 }
 
 /// Console command handler for giving items to player
+#[cfg(feature = "console")]
 pub fn handle_give_command(
     mut log: ConsoleCommand<GiveCommand>,
     mut inventory: ResMut<PlayerInventory>,

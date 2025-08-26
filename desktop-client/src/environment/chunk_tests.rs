@@ -233,7 +233,7 @@ mod tests {
 
         // Get chunks in radius 1 from (0,0,0)
         let chunks = world.get_chunks_in_radius(ChunkCoordinate::new(0, 0, 0), 1);
-        assert_eq!(chunks.len(), 2); // Should include chunks (0,0,0) and (1,0,0) and (0,1,0)
+        assert_eq!(chunks.len(), 3); // Should include chunks (0,0,0) and (1,0,0) and (0,1,0)
 
         // Get chunks in radius 0 from (1,0,0)
         let chunks = world.get_chunks_in_radius(ChunkCoordinate::new(1, 0, 0), 0);

@@ -3,6 +3,7 @@ use bevy::prelude::*;
 
 use super::environment_types::*;
 use crate::camera_controllers::CameraController;
+#[cfg(feature = "console")]
 use crate::console::BlinkCube;
 use crate::mqtt::TemperatureResource;
 use crate::script::script_types::PendingCommands;
@@ -26,7 +27,10 @@ impl Plugin for EnvironmentPlugin {
                             !setup_complete.0
                         })
                         .run_if(resource_exists::<PendingCommands>),
+                    #[cfg(feature = "console")]
                     blinking_system,
+                    #[cfg(not(feature = "console"))]
+                    noop_blinking_system,
                     rotate_logo_system,
                     update_thermometer_material,
                     update_thermometer_scale,
@@ -121,6 +125,7 @@ fn setup_environment(
     ));
 }
 
+#[cfg(feature = "console")]
 fn blinking_system(
     time: Res<Time>,
     mut blink_state: ResMut<crate::console::BlinkState>,
@@ -128,22 +133,26 @@ fn blinking_system(
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
     if blink_state.blinking {
-        blink_state.timer.tick(time.delta());
-        if blink_state.timer.just_finished() {
-            for mesh_material in &query {
-                let handle = mesh_material.clone();
-                if let Some(mat) = materials.get_mut(&handle) {
-                    if mat.base_color == Color::WHITE {
-                        blink_state.light_state = false;
-                        mat.base_color = Color::srgb(0.2, 0.2, 0.2);
-                    } else {
-                        blink_state.light_state = true;
-                        mat.base_color = Color::WHITE;
-                    }
+        // Update light state using the update_state method
+        blink_state.update_state(&time);
+
+        // Apply visual changes to materials when state changes
+        for mesh_material in &query {
+            let handle = mesh_material.clone();
+            if let Some(mat) = materials.get_mut(&handle) {
+                if blink_state.light_state {
+                    mat.base_color = Color::WHITE;
+                } else {
+                    mat.base_color = Color::srgb(0.2, 0.2, 0.2);
                 }
             }
         }
     }
+}
+
+#[cfg(not(feature = "console"))]
+fn noop_blinking_system() {
+    // No-op when console feature is disabled
 }
 
 fn rotate_logo_system(time: Res<Time>, mut query: Query<&mut Transform, With<LogoCube>>) {

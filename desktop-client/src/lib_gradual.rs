@@ -449,9 +449,9 @@ pub fn touch_camera_control_system(
     }
 
     // Handle mouse capture (escape key is handled by menu system)
-    for mut window in &mut windows {
+    // Note: Cursor options are now managed separately, web version doesn't need active cursor management
+    for window in &windows {
         if mouse_button_input.just_pressed(MouseButton::Left) && window.focused {
-            safe_set_cursor_grab_mode(&mut window, bevy::window::CursorGrabMode::Locked, false);
             info!(
                 "Mouse captured for camera control. Use WASD to move, mouse to look around. Touch controls: left side = move, right side = look."
             );
@@ -510,7 +510,8 @@ fn is_mobile_device() -> bool {
 
 /// Safely set cursor grab mode, avoiding requestPointerLock on mobile devices
 pub fn safe_set_cursor_grab_mode(
-    window: &mut Window,
+    _window: &mut Window,
+    cursor_options: Option<&mut bevy::window::CursorOptions>,
     grab_mode: bevy::window::CursorGrabMode,
     visible: bool,
 ) {
@@ -523,8 +524,10 @@ pub fn safe_set_cursor_grab_mode(
         return;
     }
 
-    window.cursor_options.grab_mode = grab_mode;
-    window.cursor_options.visible = visible;
+    if let Some(cursor_opts) = cursor_options {
+        cursor_opts.grab_mode = grab_mode;
+        cursor_opts.visible = visible;
+    }
 
     match grab_mode {
         bevy::window::CursorGrabMode::Locked => {
@@ -621,7 +624,7 @@ pub fn start() {
                 .set(WindowPlugin {
                     primary_window: Some(Window {
                         title: "IoTCraft Desktop Client - Web Version".to_string(),
-                        resolution: (1280.0, 720.0).into(),
+                        resolution: bevy::window::WindowResolution::new(1280, 720),
                         canvas: Some("#canvas".to_owned()),
                         fit_canvas_to_parent: true,
                         prevent_default_event_handling: false, // Allow browser events for better iPad compatibility
@@ -1132,9 +1135,12 @@ fn camera_control_system(
     }
 
     // Handle mouse capture (escape key is handled by menu system)
-    for mut window in &mut windows {
+    // Note: Cursor options are now managed separately, web version doesn't need active cursor management
+    for window in &windows {
         if mouse_button_input.just_pressed(MouseButton::Left) && window.focused {
-            safe_set_cursor_grab_mode(&mut window, bevy::window::CursorGrabMode::Locked, false);
+            info!(
+                "Mouse captured for camera control. Use WASD to move, mouse to look around. Press Escape to open menu."
+            );
             info!(
                 "Mouse captured for camera control. Use WASD to move, mouse to look around. Press Escape to open menu."
             );
@@ -1595,7 +1601,7 @@ pub fn setup_touch_ui(
                             ..default()
                         },
                         BackgroundColor(Color::srgba(0.3, 0.3, 0.3, 0.4)),
-                        BorderColor(Color::srgba(0.8, 0.8, 0.8, 0.6)),
+                        BorderColor::all(Color::srgba(0.8, 0.8, 0.8, 0.6)),
                         BorderRadius::all(Val::Px(60.0)), // Circular
                         Visibility::Hidden,               // Start hidden
                         JoystickBase,
@@ -1639,7 +1645,7 @@ pub fn update_touch_ui(
         let window_height = window.resolution.height();
 
         // Update joystick base position and visibility
-        if let Ok((mut base_style, mut base_visibility)) = joystick_base_query.get_single_mut() {
+        if let Ok((mut base_style, mut base_visibility)) = joystick_base_query.single_mut() {
             if touch_state.joystick_active {
                 // Show joystick and position it at touch center
                 *base_visibility = Visibility::Visible;
@@ -1647,7 +1653,7 @@ pub fn update_touch_ui(
                 base_style.bottom = Val::Px(window_height - touch_state.joystick_center.y - 60.0); // Flip Y coordinate
 
                 // Update knob position within base
-                if let Ok(mut knob_style) = joystick_knob_query.get_single_mut() {
+                if let Ok(mut knob_style) = joystick_knob_query.single_mut() {
                     // Clamp joystick offset to base radius (60px)
                     let max_offset = 35.0; // Half the base radius minus knob radius
                     let clamped_offset = if touch_state.joystick_offset.length() > max_offset {

@@ -10,8 +10,16 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 # Core dependencies that work on both desktop and web
-bevy = { version = "0.16.1", features = ["webp"] }
-bevy_console = "0.14.1"
+#bevy = { version = "0.16.1", features = ["webp"] }
+bevy = { git = "https://github.com/bevyengine/bevy.git", rev = "335e39f", features = ["webp"] }
+
+# Optional physics engine - enable with --features physics
+avian3d = { git = "https://github.com/Jondolf/avian.git", branch = "main", optional = true }
+
+# Optional debug console implementations
+# Legacy bevy_console (desktop only) - enable with --features console-bevy
+bevy_console = { version = "0.14.1", default-features = false, optional = true }
+
 tracing = "0.1"
 log = "0.4"
 serde = { version = "1.0", features = ["derive"] }
@@ -23,7 +31,6 @@ fluent = "0.17.0"
 fluent-bundle = "0.16.0"
 fluent-syntax = "0.12.0"
 unic-langid = "0.9.6"
-avian3d = "0.3.1"
 futures = "0.3"
 anyhow = "1.0"
 uuid = { version = "1.0", features = ["v4"] }
@@ -104,6 +111,15 @@ strip = true
 chrono = "0.4"
 
 # Workspace for xtask
+[features]
+default = ["console"]
+physics = ["dep:avian3d"]
+# Console implementations (choose one)
+console-bevy = ["dep:bevy_console"]  # Legacy desktop-only console
+# Convenience feature aliases
+console = []                          # Default to Simple console (no extra deps)
+
+
 [workspace]
 members = [".", "xtask"]
 

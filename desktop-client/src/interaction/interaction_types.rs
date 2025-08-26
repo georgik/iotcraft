@@ -21,7 +21,7 @@ pub struct LampState {
 }
 
 /// Event sent when a door state should be changed
-#[derive(Event)]
+#[derive(Event, BufferedEvent)]
 pub struct DoorToggleEvent {
     pub device_id: String,
     pub new_state: bool, // true for open, false for closed
@@ -41,14 +41,14 @@ pub struct GhostBlockState {
 }
 
 /// Event sent when a player interacts with a block
-#[derive(Event)]
+#[derive(Event, BufferedEvent)]
 pub struct InteractionEvent {
     pub entity: Entity,
     pub interaction_type: InteractionType,
 }
 
 /// Event sent when a lamp state should be changed
-#[derive(Event)]
+#[derive(Event, BufferedEvent)]
 pub struct LampToggleEvent {
     pub device_id: String,
     pub new_state: bool,

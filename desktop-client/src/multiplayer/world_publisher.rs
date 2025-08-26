@@ -10,7 +10,6 @@ use super::shared_world::*;
 use crate::config::MqttConfig;
 use crate::profile::PlayerProfile;
 use crate::world::WorldSaveData;
-use crate::world::*;
 
 /// Maximum size for MQTT messages (1MB to match server config)
 const MAX_MQTT_MESSAGE_SIZE: usize = 1048576;
