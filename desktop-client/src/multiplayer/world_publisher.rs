@@ -489,6 +489,11 @@ fn handle_publish_message(client: &Client, message: PublishMessage) {
             player_name,
             change_type,
         } => {
+            info!(
+                "🚀 MQTT Publisher: Received block change to publish - world: {}, player: {} ({}), change: {:?}",
+                world_id, player_name, player_id, change_type
+            );
+
             let topic = match &change_type {
                 BlockChangeType::Placed { .. } => {
                     format!("iotcraft/worlds/{}/state/blocks/placed", world_id)
@@ -498,6 +503,8 @@ fn handle_publish_message(client: &Client, message: PublishMessage) {
                 }
             };
 
+            info!("📡 Publishing to MQTT topic: {}", topic);
+
             let change_message = serde_json::json!({
                 "player_id": player_id,
                 "player_name": player_name,
@@ -505,9 +512,24 @@ fn handle_publish_message(client: &Client, message: PublishMessage) {
                 "change": change_type
             });
 
-            if let Ok(payload) = serde_json::to_string(&change_message) {
-                if let Err(e) = client.publish(&topic, QoS::AtLeastOnce, false, payload) {
-                    error!("Failed to publish block change to {}: {}", topic, e);
+            match serde_json::to_string(&change_message) {
+                Ok(payload) => {
+                    info!("📦 Serialized payload: {}", payload);
+
+                    match client.publish(&topic, QoS::AtLeastOnce, false, payload) {
+                        Ok(()) => {
+                            info!(
+                                "✅ Successfully published block change to MQTT topic {}",
+                                topic
+                            );
+                        }
+                        Err(e) => {
+                            error!("❌ Failed to publish block change to {}: {}", topic, e);
+                        }
+                    }
+                }
+                Err(e) => {
+                    error!("❌ Failed to serialize block change message: {}", e);
                 }
             }
         }

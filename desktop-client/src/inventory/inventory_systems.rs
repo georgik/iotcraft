@@ -209,13 +209,29 @@ pub fn place_block_multiplayer_sync_system(
     inventory: Res<PlayerInventory>,
 ) {
     for event in place_block_events.read() {
+        info!(
+            "🔄 Processing block placement event at {:?} - current multiplayer mode: {:?}",
+            event.position, &*multiplayer_mode
+        );
+
         // Only send multiplayer events when in multiplayer mode
         if let crate::multiplayer::MultiplayerMode::HostingWorld { world_id, .. }
         | crate::multiplayer::MultiplayerMode::JoinedWorld { world_id, .. } = &*multiplayer_mode
         {
+            info!(
+                "✅ In multiplayer mode (world_id: {}), checking inventory for selected item",
+                world_id
+            );
+
             // Get the block type from the player's selected inventory item
             if let Some(selected_item) = inventory.get_selected_item() {
                 let ItemType::Block(block_type) = selected_item.item_type;
+
+                info!(
+                    "🧱 Found selected item: {:?}, generating MQTT event for player {} ({})",
+                    block_type, player_profile.player_name, player_profile.player_id
+                );
+
                 block_change_events.write(crate::multiplayer::BlockChangeEvent {
                     world_id: world_id.clone(),
                     player_id: player_profile.player_id.clone(),
@@ -229,10 +245,20 @@ pub fn place_block_multiplayer_sync_system(
                 });
 
                 info!(
-                    "Sent multiplayer block change event: {:?} at {:?}",
-                    block_type, event.position
+                    "📡 Sent multiplayer block change event: {:?} at {:?} for world {}",
+                    block_type, event.position, world_id
+                );
+            } else {
+                warn!(
+                    "❌ No selected item in inventory when placing block at {:?}",
+                    event.position
                 );
             }
+        } else {
+            info!(
+                "🚫 Not in multiplayer mode, skipping MQTT publish for block at {:?}",
+                event.position
+            );
         }
     }
 }

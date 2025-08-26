@@ -65,10 +65,21 @@ pub fn load_or_create_profile_with_override(player_id_override: Option<String>) 
 
     // Override player ID if provided
     if let Some(id) = player_id_override {
-        profile.player_id = id;
+        profile.player_id = format!("player-{}", id); // Ensure it's properly formatted
         // Don't save overridden profile to disk to avoid conflicts
+        log::info!(
+            "Player profile override active: player_id={}, player_name={}",
+            profile.player_id,
+            profile.player_name
+        );
         return profile;
     }
+
+    log::info!(
+        "Loaded player profile from disk: player_id={}, player_name={}",
+        profile.player_id,
+        profile.player_name
+    );
 
     // Save profile to disk only if not using override
     if let Ok(json) = serde_json::to_string_pretty(&profile) {
@@ -100,7 +111,12 @@ pub fn load_or_create_profile_with_override(player_id_override: Option<String>) 
 
     // Track if we used an override
     let used_override = if let Some(id) = player_id_override {
-        profile.player_id = id;
+        profile.player_id = format!("player-{}", id); // Ensure consistent formatting
+        log::info!(
+            "Player profile override active (web): player_id={}, player_name={}",
+            profile.player_id,
+            profile.player_name
+        );
         true
     } else {
         false
@@ -122,4 +138,59 @@ pub fn load_or_create_profile_with_override(player_id_override: Option<String>) 
     }
 
     profile
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_player_profile_default_generation() {
+        let profile = PlayerProfile::default();
+        // Should have a player ID that starts with "player-" and is followed by hex
+        assert!(profile.player_id.starts_with("player-"));
+        assert!(profile.player_id.len() > 7); // "player-" + some hex
+        // Should have a username
+        assert!(!profile.player_name.is_empty());
+    }
+
+    #[test]
+    fn test_player_profile_override_native() {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let profile = load_or_create_profile_with_override(Some("test-123".to_string()));
+            assert_eq!(profile.player_id, "player-test-123");
+        }
+    }
+
+    #[test]
+    fn test_player_profile_override_formats_correctly() {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            // Test various input formats
+            let test_cases = [
+                ("2", "player-2"),
+                ("test-player", "player-test-player"),
+                ("abc123", "player-abc123"),
+            ];
+
+            for (input, expected) in test_cases {
+                let profile = load_or_create_profile_with_override(Some(input.to_string()));
+                assert_eq!(profile.player_id, expected, "Failed for input: {}", input);
+            }
+        }
+    }
+
+    #[test]
+    fn test_different_player_ids_are_unique() {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let profile1 = load_or_create_profile_with_override(Some("1".to_string()));
+            let profile2 = load_or_create_profile_with_override(Some("2".to_string()));
+
+            assert_eq!(profile1.player_id, "player-1");
+            assert_eq!(profile2.player_id, "player-2");
+            assert_ne!(profile1.player_id, profile2.player_id);
+        }
+    }
 }

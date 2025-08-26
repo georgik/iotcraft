@@ -22,6 +22,7 @@ use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::config::MqttConfig;
+use crate::multiplayer::mqtt_utils::generate_unique_client_id;
 use crate::profile::PlayerProfile;
 
 #[derive(Resource, Debug, Clone)]
@@ -134,11 +135,10 @@ fn start_multiplayer_connections(
     let subscribe_topic = format!("iotcraft/worlds/{}/players/+/pose", world.0);
     let host = mqtt.host.clone();
     let port = mqtt.port;
-    let client_id = format!("desktop-{}", profile.player_id);
 
     // Subscriber thread - persistent connection for receiving poses
     let sub_host = host.clone();
-    let sub_client_id = format!("{}-sub", client_id);
+    let sub_client_id = generate_unique_client_id("multiplayer-pose-sub");
     thread::spawn(move || {
         info!("Starting multiplayer pose subscriber...");
 
@@ -189,7 +189,9 @@ fn start_multiplayer_connections(
 
         // If we got here, initial connection worked - continue with normal multiplayer operation
         loop {
-            let mut opts = MqttOptions::new(&sub_client_id, &sub_host, port);
+            // Generate a new unique client ID for each reconnection attempt
+            let reconnect_client_id = generate_unique_client_id("multiplayer-pose-sub");
+            let mut opts = MqttOptions::new(&reconnect_client_id, &sub_host, port);
             opts.set_keep_alive(Duration::from_secs(30));
             opts.set_clean_session(true);
 
@@ -237,7 +239,7 @@ fn start_multiplayer_connections(
 
     // Publisher thread - persistent connection for publishing poses
     let pub_host = host.clone();
-    let pub_client_id = format!("{}-pub", client_id);
+    let pub_client_id = generate_unique_client_id("multiplayer-pose-pub");
     let publish_topic_template = format!("iotcraft/worlds/{}/players", world.0);
     let _disconnect_topic = format!(
         "{}/{}/disconnect",
@@ -288,7 +290,9 @@ fn start_multiplayer_connections(
 
         // Continue with normal multiplayer publishing
         loop {
-            let mut opts = MqttOptions::new(&pub_client_id, &pub_host, port);
+            // Generate a new unique client ID for each reconnection attempt
+            let reconnect_client_id = generate_unique_client_id("multiplayer-pose-pub");
+            let mut opts = MqttOptions::new(&reconnect_client_id, &pub_host, port);
             opts.set_keep_alive(Duration::from_secs(30));
             opts.set_clean_session(true);
 

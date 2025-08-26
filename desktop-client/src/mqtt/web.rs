@@ -10,6 +10,7 @@ use web_sys::{BinaryType, ErrorEvent, MessageEvent, WebSocket};
 
 use super::mqtt_types::*;
 use crate::config::MqttConfig;
+use crate::multiplayer::mqtt_utils::generate_unique_client_id;
 use crate::profile::PlayerProfile;
 
 // Import multiplayer types
@@ -315,7 +316,7 @@ pub fn spawn_web_mqtt_subscriber(
     commands.insert_resource(PoseReceiver(Mutex::new(pose_rx)));
     commands.insert_resource(PoseSender(Mutex::new(outgoing_pose_tx)));
 
-    let client_id = format!("web-{}", profile.player_id);
+    let client_id = generate_unique_client_id("web-mqtt-client");
     let world_id = "default"; // Use default world for web client
     let pose_subscribe_topic = format!("iotcraft/worlds/{}/players/+/pose", world_id);
 

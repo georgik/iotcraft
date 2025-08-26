@@ -101,7 +101,7 @@ struct Args {
     #[arg(short, long)]
     mqtt_server: Option<String>,
     /// Player ID override for multiplayer testing (default: auto-generated)
-    #[arg(short, long)]
+    #[arg(short = 'p', long = "player-id")]
     player_id: Option<String>,
     /// Run in MCP (Model Context Protocol) server mode
     #[arg(long)]
@@ -1192,6 +1192,40 @@ fn execute_pending_commands(
 
 /// Tests for core game commands to prevent regressions
 #[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::Parser;
+
+    #[test]
+    fn test_cli_player_id_short_form() {
+        // Test the short form -p argument
+        let args = Args::try_parse_from(&["iotcraft", "-p", "test-123"]).unwrap();
+        assert_eq!(args.player_id, Some("test-123".to_string()));
+    }
+
+    #[test]
+    fn test_cli_player_id_long_form() {
+        // Test the long form --player-id argument
+        let args = Args::try_parse_from(&["iotcraft", "--player-id", "test-456"]).unwrap();
+        assert_eq!(args.player_id, Some("test-456".to_string()));
+    }
+
+    #[test]
+    fn test_cli_player_id_numeric() {
+        // Test numeric player IDs like the one used in the logs
+        let args = Args::try_parse_from(&["iotcraft", "-p", "2"]).unwrap();
+        assert_eq!(args.player_id, Some("2".to_string()));
+    }
+
+    #[test]
+    fn test_cli_no_player_id() {
+        // Test when no player ID is provided
+        let args = Args::try_parse_from(&["iotcraft"]).unwrap();
+        assert_eq!(args.player_id, None);
+    }
+}
+
+#[cfg(test)]
 mod wall_command_tests {
     use super::*;
 
@@ -1632,6 +1666,8 @@ fn update_diagnostics_content(
     local_profile: Res<crate::profile::PlayerProfile>,
     temperature: Res<TemperatureResource>,
     time: Res<Time>,
+    multiplayer_mode: Res<crate::multiplayer::MultiplayerMode>,
+    multiplayer_status: Res<crate::multiplayer::MultiplayerConnectionStatus>,
 ) {
     if !diagnostics_visible.visible {
         return;
@@ -1706,6 +1742,31 @@ fn update_diagnostics_content(
                 "🔄 Connecting to MQTT broker..."
             };
 
+            // Get multiplayer mode information
+            let multiplayer_mode_text = match &*multiplayer_mode {
+                crate::multiplayer::MultiplayerMode::SinglePlayer => "🚫 SinglePlayer",
+                crate::multiplayer::MultiplayerMode::HostingWorld {
+                    world_id,
+                    is_published,
+                } => {
+                    if *is_published {
+                        "🏠 Hosting (Public)"
+                    } else {
+                        "🏠 Hosting (Private)"
+                    }
+                }
+                crate::multiplayer::MultiplayerMode::JoinedWorld {
+                    world_id,
+                    host_player,
+                } => "👥 Joined World",
+            };
+
+            let multiplayer_enabled = if multiplayer_status.connection_available {
+                "✅ Enabled"
+            } else {
+                "❌ Disabled"
+            };
+
             let uptime = time.elapsed_secs();
             let minutes = (uptime / 60.0) as u32;
             let seconds = (uptime % 60.0) as u32;
@@ -1721,6 +1782,8 @@ fn update_diagnostics_content(
                 \n\
                 - MULTIPLAYER INFORMATION\n\
                 MQTT Broker: {}\n\
+                Multiplayer Status: {}\n\
+                Multiplayer Mode: {}\n\
                 Connected Players: {} (1 local + {} remote)\n\
                 {}\n\
                 \n\
@@ -1742,6 +1805,8 @@ fn update_diagnostics_content(
                 yaw_degrees, pitch_degrees,
                 selected_slot, selected_item,
                 mqtt_connection_status,
+                multiplayer_enabled,
+                multiplayer_mode_text,
                 remote_player_count + 1, remote_player_count,
                 players_text,
                 block_count,

@@ -200,6 +200,7 @@ impl Plugin for SharedWorldPlugin {
                     handle_refresh_online_worlds_events,
                     handle_block_change_events,
                     handle_world_state_received_events,
+                    auto_enable_multiplayer_when_mqtt_available,
                 ),
             );
     }
@@ -332,29 +333,57 @@ fn handle_block_change_events(
     use crate::multiplayer::world_publisher::PublishMessage;
 
     for event in block_change_events.read() {
+        info!(
+            "🎯 Received BlockChangeEvent for world {} by {}: {:?}",
+            event.world_id, event.player_name, event.change_type
+        );
+        info!("🌍 Current multiplayer mode: {:?}", &*multiplayer_mode);
+
         match &*multiplayer_mode {
             MultiplayerMode::HostingWorld { world_id, .. }
             | MultiplayerMode::JoinedWorld { world_id, .. } => {
+                info!("✅ In multiplayer mode with world_id: {}", world_id);
                 if event.world_id == *world_id {
                     info!(
-                        "Publishing block change for world {}: {:?} by {}",
+                        "🚀 World IDs match! Publishing block change for world {}: {:?} by {}",
                         world_id, event.change_type, event.player_name
                     );
 
+                    let publish_tx_available = world_publisher.publish_tx.lock().unwrap().is_some();
+                    info!("📡 World publisher TX available: {}", publish_tx_available);
+
                     if let Some(tx) = world_publisher.publish_tx.lock().unwrap().as_ref() {
-                        if let Err(e) = tx.send(PublishMessage::PublishBlockChange {
+                        info!("📤 Sending block change to MQTT publisher thread...");
+
+                        let send_result = tx.send(PublishMessage::PublishBlockChange {
                             world_id: event.world_id.clone(),
                             player_id: event.player_id.clone(),
                             player_name: event.player_name.clone(),
                             change_type: event.change_type.clone(),
-                        }) {
-                            error!("Failed to send block change publish message: {}", e);
+                        });
+
+                        match send_result {
+                            Ok(()) => {
+                                info!("✅ Successfully sent block change to MQTT publisher!");
+                            }
+                            Err(e) => {
+                                error!("❌ Failed to send block change publish message: {}", e);
+                            }
                         }
+                    } else {
+                        error!(
+                            "❌ World publisher TX channel is None - MQTT publisher not initialized!"
+                        );
                     }
+                } else {
+                    warn!(
+                        "⚠️  World ID mismatch: event world {} != current world {}",
+                        event.world_id, world_id
+                    );
                 }
             }
             MultiplayerMode::SinglePlayer => {
-                // No MQTT publishing in single player mode
+                info!("🚫 In SinglePlayer mode, skipping MQTT publishing for block change");
             }
         }
     }
@@ -486,4 +515,38 @@ fn load_shared_world_data(
     }
 
     info!("Successfully loaded shared world data");
+}
+
+/// System that automatically enables multiplayer mode when MQTT is available and a world is loaded
+fn auto_enable_multiplayer_when_mqtt_available(
+    mut multiplayer_mode: ResMut<MultiplayerMode>,
+    multiplayer_status: Res<crate::multiplayer::MultiplayerConnectionStatus>,
+    current_world: Option<Res<crate::world::CurrentWorld>>,
+    player_profile: Res<crate::profile::PlayerProfile>,
+) {
+    // Only auto-enable if we're currently in SinglePlayer mode
+    if let MultiplayerMode::SinglePlayer = &*multiplayer_mode {
+        // Check if MQTT is available and we have a world loaded
+        if multiplayer_status.connection_available && current_world.is_some() {
+            let current_world = current_world.unwrap();
+
+            // Generate a world ID based on the current world name and player ID
+            let world_id = format!("{}_{}", current_world.name, player_profile.player_id);
+
+            info!(
+                "🚀 Auto-enabling multiplayer mode! MQTT available and world '{}' loaded. World ID: {}",
+                current_world.name, world_id
+            );
+
+            *multiplayer_mode = MultiplayerMode::HostingWorld {
+                world_id,
+                is_published: false, // Auto-enabled as private by default
+            };
+
+            info!(
+                "✅ Multiplayer mode automatically set to: {:?}",
+                *multiplayer_mode
+            );
+        }
+    }
 }
