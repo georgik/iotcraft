@@ -1,0 +1,129 @@
+use bevy::prelude::*;
+
+use crate::console::bevy_ui_console::BevyUiConsole;
+use crate::console::console_trait::{Console, ConsoleConfig, ConsoleManager};
+use crate::console::simple_console::SimpleConsole;
+
+// Import different console implementations based on features
+#[cfg(feature = "console-slint")]
+use crate::console::slint_console::SlintConsole;
+
+#[cfg(feature = "console-bevy")]
+use crate::console::bevy_console_adapter::BevyConsoleAdapter;
+
+/// Plugin that provides console functionality with swappable backends
+pub struct ConsolePlugin;
+
+impl Plugin for ConsolePlugin {
+    fn build(&self, app: &mut App) {
+        // Initialize the console config and state
+        app.init_resource::<ConsoleConfig>()
+            .init_resource::<crate::console::ConsoleOpen>();
+
+        // Choose console implementation based on available features
+        let console_impl: Box<dyn Console> = {
+            #[cfg(feature = "console-slint")]
+            {
+                info!("Using Bevy UI console implementation");
+                Box::new(BevyUiConsole::new())
+            }
+
+            #[cfg(all(feature = "console-bevy", not(feature = "console-slint")))]
+            {
+                info!("Using legacy Bevy console implementation");
+                Box::new(BevyConsoleAdapter::new())
+            }
+
+            #[cfg(not(any(feature = "console-slint", feature = "console-bevy")))]
+            {
+                info!("Using Bevy UI console implementation");
+                Box::new(BevyUiConsole::new())
+            }
+        };
+
+        // Create and insert the console manager
+        let mut console_manager = ConsoleManager::new(console_impl);
+        console_manager.console.initialize(app);
+        app.insert_resource(console_manager);
+
+        // Add console message events
+        app.add_event::<ConsoleMessageEvent>();
+
+        // Add console systems - fix system scheduling
+        app.add_systems(Update, handle_console_toggle)
+            .add_systems(Update, update_console)
+            .add_systems(Update, handle_console_messages);
+
+        info!("Console plugin initialized");
+    }
+}
+
+/// Null console implementation for when no console features are enabled
+struct NullConsole;
+
+impl NullConsole {
+    fn new() -> Self {
+        Self
+    }
+}
+
+impl Console for NullConsole {
+    fn initialize(&mut self, _app: &mut App) {}
+    fn process_input(&mut self, _input: &str) -> crate::console::console_trait::ConsoleResult {
+        crate::console::console_trait::ConsoleResult::Error("Console not available".to_string())
+    }
+    fn add_output(&mut self, _message: &str) {}
+    fn clear_output(&mut self) {}
+    fn toggle_visibility(&mut self) {}
+    fn is_visible(&self) -> bool {
+        false
+    }
+    fn update(&mut self, _world: &mut World) {}
+    fn get_render_data(&self) -> Option<crate::console::console_trait::ConsoleRenderData> {
+        None
+    }
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+}
+
+/// System to handle console toggle key
+fn handle_console_toggle(
+    mut console_manager: ResMut<ConsoleManager>,
+    config: Res<ConsoleConfig>,
+    keyboard_input: Res<ButtonInput<KeyCode>>,
+) {
+    if keyboard_input.just_pressed(config.toggle_key) {
+        console_manager.toggle();
+    }
+}
+
+/// System to update the console each frame
+fn update_console(console_manager: ResMut<ConsoleManager>) {
+    // For now, just do nothing - the console manager will handle updates internally
+    // TODO: Implement proper console update logic that doesn't require &mut World
+}
+
+/// Event for sending messages to the console from other systems
+#[derive(Event, BufferedEvent, Clone)]
+pub struct ConsoleMessageEvent {
+    pub message: String,
+}
+
+/// System to handle console message events
+pub fn handle_console_messages(
+    mut console_manager: ResMut<ConsoleManager>,
+    mut message_events: EventReader<ConsoleMessageEvent>,
+) {
+    for event in message_events.read() {
+        console_manager.add_message(&event.message);
+    }
+}
+
+/// Convenience function to send a message to the console
+pub fn send_console_message(message: String, event_writer: &mut EventWriter<ConsoleMessageEvent>) {
+    event_writer.write(ConsoleMessageEvent { message });
+}

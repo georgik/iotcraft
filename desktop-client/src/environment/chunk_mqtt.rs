@@ -218,7 +218,7 @@ fn handle_chunk_mqtt_responses(
                     );
 
                     // Send event for further processing
-                    chunk_data_events.send(ChunkDataReceivedEvent {
+                    chunk_data_events.write(ChunkDataReceivedEvent {
                         world_id,
                         chunk_data,
                         sender_player_id,

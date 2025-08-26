@@ -4,7 +4,7 @@ use super::BlockType;
 use super::chunk_types::*;
 
 /// Events for chunk-based MQTT synchronization
-#[derive(Event)]
+#[derive(Event, BufferedEvent)]
 pub struct ChunkChangeEvent {
     pub chunk_coordinate: ChunkCoordinate,
     pub change_type: ChunkChangeType,
@@ -32,14 +32,14 @@ pub enum ChunkChangeType {
 }
 
 /// Event for publishing world metadata
-#[derive(Event)]
+#[derive(Event, BufferedEvent)]
 pub struct PublishWorldMetadataEvent {
     pub world_id: String,
     pub metadata: ChunkedWorldMetadata,
 }
 
 /// Event for requesting chunk data from MQTT
-#[derive(Event)]
+#[derive(Event, BufferedEvent)]
 pub struct RequestChunkDataEvent {
     pub world_id: String,
     pub chunk_coordinate: ChunkCoordinate,
@@ -47,7 +47,7 @@ pub struct RequestChunkDataEvent {
 }
 
 /// Event for receiving chunk data from MQTT
-#[derive(Event)]
+#[derive(Event, BufferedEvent)]
 pub struct ChunkDataReceivedEvent {
     pub world_id: String,
     pub chunk_data: ChunkData,
@@ -55,14 +55,14 @@ pub struct ChunkDataReceivedEvent {
 }
 
 /// Event for chunk metadata updates
-#[derive(Event)]
+#[derive(Event, BufferedEvent)]
 pub struct ChunkMetadataUpdateEvent {
     pub world_id: String,
     pub metadata: ChunkMetadata,
 }
 
 /// Event to signal that chunks should be loaded around a player
-#[derive(Event)]
+#[derive(Event, BufferedEvent)]
 pub struct LoadChunksAroundPlayerEvent {
     pub player_id: String,
     pub position: Vec3,
@@ -70,7 +70,7 @@ pub struct LoadChunksAroundPlayerEvent {
 }
 
 /// Event to signal that chunks should be unloaded
-#[derive(Event)]
+#[derive(Event, BufferedEvent)]
 pub struct UnloadChunksEvent {
     pub chunk_coordinates: Vec<ChunkCoordinate>,
     pub world_id: String,
@@ -200,7 +200,7 @@ fn chunk_loader_system(
             }
 
             // Send event for MQTT synchronization
-            load_events.send(LoadChunksAroundPlayerEvent {
+            load_events.write(LoadChunksAroundPlayerEvent {
                 player_id: "local_player".to_string(), // TODO: Get actual player ID
                 position: transform.translation,
                 load_radius: loader.load_radius,

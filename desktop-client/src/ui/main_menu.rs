@@ -52,6 +52,7 @@ impl Plugin for MainMenuPlugin {
 /// System to ensure cursor is grabbed when entering the game
 fn grab_cursor_on_game_start(
     mut windows: Query<&mut Window>,
+    mut cursor_options_query: Query<&mut bevy::window::CursorOptions>,
     mut camera_controller_query: Query<&mut crate::camera_controllers::CameraController>,
 ) {
     for mut window in &mut windows {
@@ -60,12 +61,15 @@ fn grab_cursor_on_game_start(
         // Center the cursor before grabbing it to ensure raycasting starts from screen center
         let screen_center = Vec2::new(window.width() / 2.0, window.height() / 2.0);
         window.set_cursor_position(Some(screen_center));
+    }
 
-        window.cursor_options.grab_mode = bevy::window::CursorGrabMode::Locked;
-        window.cursor_options.visible = false;
+    // Update cursor options using the new component system in Bevy 0.17
+    if let Ok(mut cursor_options) = cursor_options_query.single_mut() {
+        cursor_options.grab_mode = bevy::window::CursorGrabMode::Locked;
+        cursor_options.visible = false;
         info!(
-            "Cursor grab mode after setting: {:?}, cursor positioned at screen center",
-            window.cursor_options.grab_mode
+            "Cursor grab mode set to: {:?}, visible: {}",
+            cursor_options.grab_mode, cursor_options.visible
         );
     }
 
@@ -559,7 +563,7 @@ fn setup_world_selection_menu(
                                     padding: UiRect::all(Val::Px(10.0)),
                                     ..default()
                                 })
-                                .insert(BorderColor(Color::srgb(0.3, 0.3, 0.3)))
+                                .insert(BorderColor::all(Color::srgb(0.3, 0.3, 0.3)))
                                 .insert(BackgroundColor(Color::srgba(0.1, 0.1, 0.1, 0.8)))
                                 .with_children(|parent| {
                                     // Local Worlds list
@@ -740,7 +744,7 @@ fn setup_world_selection_menu(
                                     padding: UiRect::all(Val::Px(10.0)),
                                     ..default()
                                 })
-                                .insert(BorderColor(Color::srgb(0.2, 0.4, 0.6)))
+                                .insert(BorderColor::all(Color::srgb(0.2, 0.4, 0.6)))
                                 .insert(BackgroundColor(Color::srgba(0.0, 0.1, 0.2, 0.8)))
                                 .insert(OnlineWorldsList)
                                 .with_children(|parent| {
@@ -775,7 +779,7 @@ fn setup_world_selection_menu(
                                                     border: UiRect::all(Val::Px(1.0)),
                                                     ..default()
                                                 })
-                                                .insert(BorderColor(Color::srgb(0.3, 0.5, 0.7)))
+                                                .insert(BorderColor::all(Color::srgb(0.3, 0.5, 0.7)))
                                                 .insert(BackgroundColor(Color::srgba(0.1, 0.2, 0.3, 0.6)))
                                                 .with_children(|parent| {
                                                     // World info row
@@ -1027,15 +1031,15 @@ fn refresh_online_worlds_interaction(
 
 fn setup_gameplay_menu(
     mut commands: Commands,
-    mut windows: Query<&mut Window>,
+    mut cursor_options_query: Query<&mut bevy::window::CursorOptions>,
     localization_bundle: Res<LocalizationBundle>,
     localization_config: Res<LocalizationConfig>,
 ) {
     // Release cursor when entering gameplay menu to allow UI interaction
-    for mut window in &mut windows {
+    if let Ok(mut cursor_options) = cursor_options_query.single_mut() {
         info!("Releasing cursor for gameplay menu - setting to None");
-        window.cursor_options.grab_mode = bevy::window::CursorGrabMode::None;
-        window.cursor_options.visible = true;
+        cursor_options.grab_mode = bevy::window::CursorGrabMode::None;
+        cursor_options.visible = true;
     }
     commands
         .spawn((
@@ -1584,7 +1588,7 @@ fn update_online_worlds_ui(
                             border: UiRect::all(Val::Px(1.0)),
                             ..default()
                         })
-                        .insert(BorderColor(Color::srgb(0.3, 0.5, 0.7)))
+                        .insert(BorderColor::all(Color::srgb(0.3, 0.5, 0.7)))
                         .insert(BackgroundColor(Color::srgba(0.1, 0.2, 0.3, 0.6)))
                         .with_children(|parent| {
                             // World info row

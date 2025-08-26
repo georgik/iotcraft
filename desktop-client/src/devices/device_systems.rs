@@ -4,6 +4,7 @@ use log::info;
 use serde_json;
 
 use super::device_types::*;
+#[cfg(feature = "console")]
 use crate::console::BlinkCube;
 use crate::interaction::{Interactable, InteractionType};
 
@@ -99,6 +100,7 @@ pub fn listen_for_device_announcements(
                                     // Add device-specific components
                                     match device_type {
                                         DeviceType::Lamp => {
+                                            #[cfg(feature = "console")]
                                             entity_commands.insert(BlinkCube);
                                             entity_commands.insert(Interactable {
                                                 interaction_type: InteractionType::ToggleLamp,

@@ -1,12 +1,13 @@
 use bevy::prelude::*;
 use bevy::window::CursorGrabMode;
-use bevy_console::{
-    AddConsoleCommand, ConsoleCommand, ConsoleConfiguration, ConsoleOpen, ConsolePlugin,
-    ConsoleSet, PrintConsoleLine, reply,
-};
+
+// Console imports - only available with console feature
+#[cfg(feature = "console")]
+use crate::console::ConsolePlugin;
+
 #[cfg(not(target_arch = "wasm32"))]
 use clap::Parser;
-use log::{error, info, warn};
+use log::{info, warn};
 use rumqttc::{Client, Event, MqttOptions, Outgoing, QoS};
 use serde_json::json;
 use std::time::Duration;
@@ -39,28 +40,31 @@ mod world;
 // Re-export types for easier access
 use camera_controllers::{CameraController, CameraControllerPlugin};
 use config::MqttConfig;
+#[cfg(feature = "console")]
 use console::console_types::{ListCommand, LookCommand, TeleportCommand};
+#[cfg(feature = "console")]
 use console::*;
 use devices::*;
 use environment::*;
 use environment::{ChunkEventsPlugin, ChunkMqttPlugin, ChunkedVoxelWorld};
 use fonts::{FontPlugin, Fonts};
 use interaction::InteractionPlugin as MyInteractionPlugin;
-use inventory::{InventoryPlugin, PlayerInventory, handle_give_command};
+use inventory::{InventoryPlugin, PlayerInventory};
 use localization::{LocalizationConfig, LocalizationPlugin};
 use minimap::MinimapPlugin;
 use mqtt::{MqttPlugin, *};
 use multiplayer::{
     MultiplayerPlugin, SharedWorldPlugin, WorldDiscoveryPlugin, WorldPublisherPlugin,
 };
-use physics::PhysicsManagerPlugin;
+// use physics::PhysicsManagerPlugin; // Unused currently
 use player_avatar::PlayerAvatarPlugin;
 use player_controller::PlayerControllerPlugin;
 use shared_materials::SharedMaterialsPlugin;
 use ui::{CrosshairPlugin, ErrorIndicatorPlugin, GameState, InventoryUiPlugin, MainMenuPlugin};
 use world::WorldPlugin;
 
-// Define handle_blink_command function for console
+// Console command handlers - only available with console feature
+#[cfg(feature = "console")]
 fn handle_blink_command(
     mut log: ConsoleCommand<BlinkCommand>,
     mut blink_state: ResMut<BlinkState>,
@@ -106,6 +110,7 @@ struct Args {
     mcp: bool,
 }
 
+#[cfg(feature = "console")]
 fn handle_place_block_command(
     mut log: ConsoleCommand<PlaceBlockCommand>,
     mut voxel_world: ResMut<VoxelWorld>,
@@ -180,7 +185,7 @@ fn handle_place_block_command(
         if let multiplayer::MultiplayerMode::HostingWorld { world_id, .. }
         | multiplayer::MultiplayerMode::JoinedWorld { world_id, .. } = &*multiplayer_mode
         {
-            block_change_events.send(multiplayer::BlockChangeEvent {
+            block_change_events.write(multiplayer::BlockChangeEvent {
                 world_id: world_id.clone(),
                 player_id: player_profile.player_id.clone(),
                 player_name: player_profile.player_name.clone(),
@@ -197,6 +202,7 @@ fn handle_place_block_command(
     }
 }
 
+#[cfg(feature = "console")]
 fn handle_wall_command(
     mut log: ConsoleCommand<WallCommand>,
     mut voxel_world: ResMut<VoxelWorld>,
@@ -287,6 +293,7 @@ fn handle_wall_command(
     }
 }
 
+#[cfg(feature = "console")]
 fn handle_remove_block_command(
     mut log: ConsoleCommand<RemoveBlockCommand>,
     mut voxel_world: ResMut<VoxelWorld>,
@@ -310,7 +317,7 @@ fn handle_remove_block_command(
             if let multiplayer::MultiplayerMode::HostingWorld { world_id, .. }
             | multiplayer::MultiplayerMode::JoinedWorld { world_id, .. } = &*multiplayer_mode
             {
-                block_change_events.send(multiplayer::BlockChangeEvent {
+                block_change_events.write(multiplayer::BlockChangeEvent {
                     world_id: world_id.clone(),
                     player_id: player_profile.player_id.clone(),
                     player_name: player_profile.player_name.clone(),
@@ -325,6 +332,7 @@ fn handle_remove_block_command(
     }
 }
 
+#[cfg(feature = "console")]
 fn handle_save_map_command(mut log: ConsoleCommand<SaveMapCommand>, voxel_world: Res<VoxelWorld>) {
     if let Some(Ok(SaveMapCommand { filename })) = log.take() {
         match voxel_world.save_to_file(&filename) {
@@ -349,6 +357,7 @@ fn handle_save_map_command(mut log: ConsoleCommand<SaveMapCommand>, voxel_world:
     }
 }
 
+#[cfg(feature = "console")]
 fn handle_teleport_command(
     mut log: ConsoleCommand<TeleportCommand>,
     mut camera_query: Query<(&mut Transform, &mut CameraController), With<Camera>>,
@@ -366,6 +375,7 @@ fn handle_teleport_command(
     }
 }
 
+#[cfg(feature = "console")]
 fn handle_look_command(
     mut log: ConsoleCommand<LookCommand>,
     mut camera_query: Query<(&mut Transform, &mut CameraController), With<Camera>>,
@@ -405,6 +415,7 @@ fn handle_look_command(
     }
 }
 
+#[cfg(feature = "console")]
 fn handle_load_map_command(
     mut log: ConsoleCommand<LoadMapCommand>,
     mut voxel_world: ResMut<VoxelWorld>,
@@ -466,8 +477,9 @@ fn handle_load_map_command(
                     ));
 
                     // Add WaterBlock component for water blocks to enable water detection
+                    #[cfg(feature = "physics")]
                     if *block_type == BlockType::Water {
-                        entity_commands.insert(crate::physics::WaterBlock);
+                        entity_commands.insert(crate::physics::physics_manager::WaterBlock);
                     }
                 }
 
@@ -491,11 +503,19 @@ fn handle_load_map_command(
     }
 }
 
+// Helper function to write to console if available
+#[cfg(feature = "console")]
+fn write_to_console(writer: &mut Option<EventWriter<PrintConsoleLine>>, message: String) {
+    if let Some(console) = writer {
+        console.write(PrintConsoleLine::new(message));
+    }
+}
+
 fn execute_pending_commands(
     mut pending_commands: ResMut<crate::script::script_types::PendingCommands>,
-    mut print_console_line: EventWriter<PrintConsoleLine>,
+    #[cfg(feature = "console")] mut print_console_line: Option<EventWriter<PrintConsoleLine>>,
     mut command_executed_events: EventWriter<CommandExecutedEvent>,
-    mut blink_state: ResMut<BlinkState>,
+    #[cfg(feature = "console")] mut blink_state: ResMut<BlinkState>,
     temperature: Res<TemperatureResource>,
     mqtt_config: Res<MqttConfig>,
     mut voxel_world: ResMut<VoxelWorld>,
@@ -532,21 +552,33 @@ fn execute_pending_commands(
                     let action = parts[1];
                     match action {
                         "start" => {
-                            blink_state.blinking = true;
-                            print_console_line
-                                .write(PrintConsoleLine::new("Blink started".to_string()));
+                            #[cfg(feature = "console")]
+                            {
+                                blink_state.blinking = true;
+                                write_to_console(
+                                    &mut print_console_line,
+                                    "Blink started".to_string(),
+                                );
+                            }
                             info!("Blink started via script");
                         }
                         "stop" => {
-                            blink_state.blinking = false;
-                            print_console_line
-                                .write(PrintConsoleLine::new("Blink stopped".to_string()));
+                            #[cfg(feature = "console")]
+                            {
+                                blink_state.blinking = false;
+                                write_to_console(
+                                    &mut print_console_line,
+                                    "Blink stopped".to_string(),
+                                );
+                            }
                             info!("Blink stopped via script");
                         }
                         _ => {
-                            print_console_line.write(PrintConsoleLine::new(
+                            #[cfg(feature = "console")]
+                            write_to_console(
+                                &mut print_console_line,
                                 "Usage: blink [start|stop]".to_string(),
-                            ));
+                            );
                         }
                     }
                 }
@@ -561,7 +593,8 @@ fn execute_pending_commands(
                             } else {
                                 "Connecting to MQTT broker..."
                             };
-                            print_console_line.write(PrintConsoleLine::new(status.to_string()));
+                            #[cfg(feature = "console")]
+                            write_to_console(&mut print_console_line, status.to_string());
                             info!("MQTT status requested via script");
                         }
                         "temp" => {
@@ -570,12 +603,15 @@ fn execute_pending_commands(
                             } else {
                                 "No temperature data available".to_string()
                             };
-                            print_console_line.write(PrintConsoleLine::new(temp_msg));
+                            #[cfg(feature = "console")]
+                            write_to_console(&mut print_console_line, temp_msg);
                         }
                         _ => {
-                            print_console_line.write(PrintConsoleLine::new(
+                            #[cfg(feature = "console")]
+                            write_to_console(
+                                &mut print_console_line,
                                 "Usage: mqtt [status|temp]".to_string(),
-                            ));
+                            );
                         }
                     }
                 }
@@ -643,7 +679,8 @@ fn execute_pending_commands(
 
                                 let result_msg =
                                     format!("Spawn command sent for device {}", device_id);
-                                print_console_line.write(PrintConsoleLine::new(result_msg.clone()));
+                                #[cfg(feature = "console")]
+                                write_to_console(&mut print_console_line, result_msg.clone());
 
                                 // Emit command executed event if this was from MCP
                                 if let Some(req_id) = request_id.clone() {
@@ -701,7 +738,8 @@ fn execute_pending_commands(
 
                                 let result_msg =
                                     format!("Spawn door command sent for device {}", device_id);
-                                print_console_line.write(PrintConsoleLine::new(result_msg.clone()));
+                                #[cfg(feature = "console")]
+                                write_to_console(&mut print_console_line, result_msg.clone());
 
                                 // Emit command executed event if this was from MCP
                                 if let Some(req_id) = request_id.clone() {
@@ -732,8 +770,11 @@ fn execute_pending_commands(
                                     _ => {
                                         let error_msg =
                                             format!("Invalid block type: {}", block_type_str);
-                                        print_console_line
-                                            .write(PrintConsoleLine::new(error_msg.clone()));
+                                        #[cfg(feature = "console")]
+                                        write_to_console(
+                                            &mut print_console_line,
+                                            error_msg.clone(),
+                                        );
 
                                         // Emit error event if this was from MCP
                                         if let Some(req_id) = request_id.clone() {
@@ -794,7 +835,8 @@ fn execute_pending_commands(
                                     "Placed {} block at ({}, {}, {})",
                                     block_type_str, x, y, z
                                 );
-                                print_console_line.write(PrintConsoleLine::new(result_msg.clone()));
+                                #[cfg(feature = "console")]
+                                write_to_console(&mut print_console_line, result_msg.clone());
 
                                 // Emit command executed event if this was from MCP
                                 if let Some(req_id) = request_id.clone() {
@@ -826,7 +868,8 @@ fn execute_pending_commands(
                                     format!("No block found at ({}, {}, {})", x, y, z)
                                 };
 
-                                print_console_line.write(PrintConsoleLine::new(result_msg.clone()));
+                                #[cfg(feature = "console")]
+                                write_to_console(&mut print_console_line, result_msg.clone());
 
                                 // Emit command executed event if this was from MCP
                                 if let Some(req_id) = request_id.clone() {
@@ -857,19 +900,21 @@ fn execute_pending_commands(
                             }
                             "water" => crate::inventory::ItemType::Block(BlockType::Water),
                             _ => {
-                                print_console_line.write(PrintConsoleLine::new(format!(
-                                    "Invalid item type: {}",
-                                    item_type_str
-                                )));
+                                #[cfg(feature = "console")]
+                                write_to_console(
+                                    &mut print_console_line,
+                                    format!("Invalid item type: {}", item_type_str),
+                                );
                                 continue;
                             }
                         };
 
                         inventory.add_items(item_type, quantity as u32);
-                        print_console_line.write(PrintConsoleLine::new(format!(
-                            "Added {} x {}",
-                            quantity, item_type_str
-                        )));
+                        #[cfg(feature = "console")]
+                        write_to_console(
+                            &mut print_console_line,
+                            format!("Added {} x {}", quantity, item_type_str),
+                        );
                     }
                 }
             }
@@ -891,11 +936,13 @@ fn execute_pending_commands(
                                                 "cyan_terracotta" => BlockType::CyanTerracotta,
                                                 "water" => BlockType::Water,
                                                 _ => {
-                                                    print_console_line.write(
-                                                        PrintConsoleLine::new(format!(
+                                                    #[cfg(feature = "console")]
+                                                    write_to_console(
+                                                        &mut print_console_line,
+                                                        format!(
                                                             "Invalid block type: {}",
                                                             block_type_str
-                                                        )),
+                                                        ),
                                                     );
                                                     continue;
                                                 }
@@ -1007,8 +1054,11 @@ fn execute_pending_commands(
                                                 z2,
                                                 blocks_added
                                             );
-                                            print_console_line
-                                                .write(PrintConsoleLine::new(result_msg.clone()));
+                                            #[cfg(feature = "console")]
+                                            write_to_console(
+                                                &mut print_console_line,
+                                                result_msg.clone(),
+                                            );
 
                                             // Emit command executed event if this was from MCP
                                             if let Some(req_id) = request_id.clone() {
@@ -1038,15 +1088,18 @@ fn execute_pending_commands(
                                     // Set the camera position
                                     transform.translation = Vec3::new(x, y, z);
 
-                                    print_console_line.write(PrintConsoleLine::new(format!(
-                                        "Teleported to ({:.1}, {:.1}, {:.1})",
-                                        x, y, z
-                                    )));
+                                    #[cfg(feature = "console")]
+                                    write_to_console(
+                                        &mut print_console_line,
+                                        format!("Teleported to ({:.1}, {:.1}, {:.1})", x, y, z),
+                                    );
                                     info!("Camera teleported to ({:.1}, {:.1}, {:.1})", x, y, z);
                                 } else {
-                                    print_console_line.write(PrintConsoleLine::new(
+                                    #[cfg(feature = "console")]
+                                    write_to_console(
+                                        &mut print_console_line,
                                         "Error: Could not find camera to teleport".to_string(),
-                                    ));
+                                    );
                                 }
                             }
                         }
@@ -1077,19 +1130,25 @@ fn execute_pending_commands(
                                     camera_controller.pitch,
                                 );
 
-                                print_console_line.write(PrintConsoleLine::new(format!(
-                                    "Set look angles to yaw: {:.1}°, pitch: {:.1}°",
-                                    yaw, pitch
-                                )));
+                                #[cfg(feature = "console")]
+                                write_to_console(
+                                    &mut print_console_line,
+                                    format!(
+                                        "Set look angles to yaw: {:.1}°, pitch: {:.1}°",
+                                        yaw, pitch
+                                    ),
+                                );
                                 info!(
                                     "Camera look angles set to yaw: {:.1}°, pitch: {:.1}°",
                                     yaw, pitch
                                 );
                             } else {
-                                print_console_line.write(PrintConsoleLine::new(
+                                #[cfg(feature = "console")]
+                                write_to_console(
+                                    &mut print_console_line,
                                     "Error: Could not find camera to set look direction"
                                         .to_string(),
-                                ));
+                                );
                             }
                         }
                     }
@@ -1117,7 +1176,8 @@ fn execute_pending_commands(
                     format!("Devices:\n{}", device_list.join("\n"))
                 };
 
-                print_console_line.write(PrintConsoleLine::new(result_text.clone()));
+                #[cfg(feature = "console")]
+                write_to_console(&mut print_console_line, result_text.clone());
                 info!("Executed list command, found {} devices", device_list.len());
 
                 // Emit command executed event if this was from MCP
@@ -1129,10 +1189,11 @@ fn execute_pending_commands(
                 }
             }
             _ => {
-                print_console_line.write(PrintConsoleLine::new(format!(
-                    "Unknown command: {}",
-                    command
-                )));
+                #[cfg(feature = "console")]
+                write_to_console(
+                    &mut print_console_line,
+                    format!("Unknown command: {}", command),
+                );
             }
         }
     }
@@ -1283,15 +1344,23 @@ fn main() {
         });
 
     app.add_plugins(FontPlugin) // Keep FontPlugin for any additional font-related systems
-        .add_plugins(LocalizationPlugin) // Load localization after fonts
-        .add_plugins(avian3d::PhysicsPlugins::default()) // Add physics engine
-        .add_plugins(PhysicsManagerPlugin) // Add physics optimization manager
-        .add_plugins(CameraControllerPlugin)
+        .add_plugins(LocalizationPlugin); // Load localization after fonts
+
+    // Add physics plugins conditionally
+    #[cfg(feature = "physics")]
+    app.add_plugins(avian3d::PhysicsPlugins::default()) // Add physics engine
+        .add_plugins(PhysicsManagerPlugin); // Add physics optimization manager
+
+    app.add_plugins(CameraControllerPlugin)
         .add_plugins(PlayerControllerPlugin) // Add player controller for walking/flying modes
         .add_plugins(script::script_systems::ScriptPlugin) // Add script plugin early for PendingCommands resource
-        .add_plugins(SharedMaterialsPlugin) // Add shared materials for optimized rendering
-        .add_plugins(ConsolePlugin)
-        .add_plugins(DevicePlugin)
+        .add_plugins(SharedMaterialsPlugin); // Add shared materials for optimized rendering
+
+    // Add console plugin conditionally
+    #[cfg(feature = "console")]
+    app.add_plugins(ConsolePlugin);
+
+    app.add_plugins(DevicePlugin)
         .add_plugins(DevicePositioningPlugin)
         .add_plugins(EnvironmentPlugin)
         .add_plugins(ChunkEventsPlugin) // Add chunk event system
@@ -1320,52 +1389,38 @@ fn main() {
         app.add_plugins(mcp::McpPlugin);
     }
 
-    app.init_state::<GameState>()
-        .insert_resource(ConsoleConfiguration {
-            keys: vec![KeyCode::F12],
-            left_pos: 200.0,
-            top_pos: 100.0,
-            height: 400.0,
-            width: 800.0,
-            ..default()
-        })
-        .add_console_command::<BlinkCommand, _>(handle_blink_command)
-        .add_console_command::<MqttCommand, _>(handle_mqtt_command)
-        .add_console_command::<SpawnCommand, _>(handle_spawn_command)
-        .add_console_command::<SpawnDoorCommand, _>(
-            crate::console::console_systems::handle_spawn_door_command,
-        )
-        .add_console_command::<MoveCommand, _>(crate::console::console_systems::handle_move_command)
-        .add_console_command::<PlaceBlockCommand, _>(handle_place_block_command)
-        .add_console_command::<RemoveBlockCommand, _>(handle_remove_block_command)
-        .add_console_command::<WallCommand, _>(handle_wall_command)
-        .add_console_command::<SaveMapCommand, _>(handle_save_map_command)
-        .add_console_command::<LoadMapCommand, _>(handle_load_map_command)
-        .add_console_command::<GiveCommand, _>(handle_give_command)
-        .add_console_command::<TestErrorCommand, _>(
-            crate::console::console_systems::handle_test_error_command,
-        )
-        .add_console_command::<TeleportCommand, _>(handle_teleport_command)
-        .add_console_command::<LookCommand, _>(handle_look_command)
-        .add_console_command::<ListCommand, _>(crate::console::console_systems::handle_list_command)
-        .insert_resource(BlinkState::default())
-        // .add_systems(Update, draw_cursor) // Disabled: InteractionPlugin handles cursor drawing
-        .add_systems(
-            Update,
-            (
-                blink_publisher_system,
-                rotate_logo_system,
-                crate::devices::device_positioning::draw_drag_feedback,
-            ),
-        )
-        .add_systems(Update, manage_camera_controller)
-        .add_systems(Update, handle_console_t_key.after(ConsoleSet::Commands))
-        .add_systems(Update, handle_mouse_capture.after(ConsoleSet::Commands))
+    app.init_state::<GameState>();
+
+    // Console is now managed by ConsolePlugin - no additional configuration needed
+
+    #[cfg(feature = "console")]
+    app.insert_resource(BlinkState::default());
+
+    // .add_systems(Update, draw_cursor) // Disabled: InteractionPlugin handles cursor drawing
+    app.add_systems(
+        Update,
+        (
+            rotate_logo_system,
+            crate::devices::device_positioning::draw_drag_feedback,
+        ),
+    );
+
+    // Add console-specific systems only when console feature is enabled
+    #[cfg(feature = "console")]
+    app.add_systems(Update, blink_publisher_system);
+
+    app.add_systems(Update, manage_camera_controller)
+        .add_systems(Update, handle_mouse_capture);
+
+    // Add console-dependent systems only when console feature is enabled
+    #[cfg(feature = "console")]
+    app.add_systems(Update, handle_console_t_key.after(ConsoleSet::Commands))
         .add_systems(
             Update,
             crate::console::esc_handling::handle_esc_key.after(ConsoleSet::Commands),
-        )
-        .init_resource::<DiagnosticsVisible>()
+        );
+
+    app.init_resource::<DiagnosticsVisible>()
         .add_systems(Startup, setup_diagnostics_ui)
         .add_systems(Update, execute_pending_commands)
         .add_systems(Update, handle_inventory_input)
@@ -1374,6 +1429,7 @@ fn main() {
         .run();
 }
 
+#[cfg(feature = "console")]
 fn handle_mqtt_command(
     mut log: ConsoleCommand<MqttCommand>,
     temperature: Res<TemperatureResource>,
@@ -1405,6 +1461,7 @@ fn handle_mqtt_command(
     }
 }
 
+#[cfg(feature = "console")]
 fn handle_spawn_command(mut log: ConsoleCommand<SpawnCommand>, mqtt_config: Res<MqttConfig>) {
     if let Some(Ok(SpawnCommand { device_id, x, y, z })) = log.take() {
         info!("Console command: spawn {} {} {} {}", device_id, x, y, z);
@@ -1444,9 +1501,10 @@ fn handle_spawn_command(mut log: ConsoleCommand<SpawnCommand>, mqtt_config: Res<
     }
 }
 
+#[cfg(feature = "console")]
 fn blink_publisher_system(
     mut blink_state: ResMut<BlinkState>,
-    device_query: Query<&DeviceEntity, With<BlinkCube>>,
+    #[cfg(feature = "console")] device_query: Query<&DeviceEntity, With<BlinkCube>>,
     mqtt_config: Res<MqttConfig>,
 ) {
     if blink_state.light_state != blink_state.last_sent {
@@ -1509,6 +1567,7 @@ fn rotate_logo_system(time: Res<Time>, mut query: Query<&mut Transform, With<Log
 }
 
 // System to manage camera controller state based on console state
+#[cfg(feature = "console")]
 fn manage_camera_controller(
     console_open: Res<ConsoleOpen>,
     mut camera_query: Query<&mut CameraController, With<Camera>>,
@@ -1516,6 +1575,15 @@ fn manage_camera_controller(
     if let Ok(mut camera_controller) = camera_query.single_mut() {
         // Disable camera controller when console is open
         camera_controller.enabled = !console_open.open;
+    }
+}
+
+// Alternative system when console feature is disabled
+#[cfg(not(feature = "console"))]
+fn manage_camera_controller(mut camera_query: Query<&mut CameraController, With<Camera>>) {
+    if let Ok(mut camera_controller) = camera_query.single_mut() {
+        // Always enable camera controller when console is not available
+        camera_controller.enabled = true;
     }
 }
 
@@ -1736,6 +1804,7 @@ fn setup_diagnostics_ui(mut commands: Commands, fonts: Res<Fonts>) {
 // System to handle mouse capture when window is clicked...
 fn handle_mouse_capture(
     mut windows: Query<&mut Window>,
+    mut cursor_options_query: Query<&mut bevy::window::CursorOptions>,
     mouse_button_input: Res<ButtonInput<MouseButton>>,
     game_state: Res<State<GameState>>,
 ) {
@@ -1747,16 +1816,20 @@ fn handle_mouse_capture(
                 continue;
             }
 
-            // Only capture if cursor is currently not captured
-            if window.cursor_options.grab_mode == CursorGrabMode::None {
-                window.cursor_options.grab_mode = CursorGrabMode::Locked;
-                window.cursor_options.visible = false;
+            // Query for cursor options - now in separate component in Bevy 0.17
+            if let Ok(mut cursor_options) = cursor_options_query.single_mut() {
+                // Only capture if cursor is currently not captured
+                if cursor_options.grab_mode == CursorGrabMode::None {
+                    cursor_options.grab_mode = CursorGrabMode::Locked;
+                    cursor_options.visible = false;
+                }
             }
         }
     }
 }
 
 // System to handle 't' key to open console (only when closed)
+#[cfg(feature = "console")]
 fn handle_console_t_key(
     mut console_open: ResMut<ConsoleOpen>,
     keyboard_input: Res<ButtonInput<KeyCode>>,
@@ -1774,6 +1847,7 @@ fn handle_console_t_key(
 }
 
 // System to handle inventory slot selection with number keys and mouse wheel
+#[cfg(feature = "console")]
 fn handle_inventory_input(
     keyboard_input: Res<ButtonInput<KeyCode>>,
     mut inventory: ResMut<PlayerInventory>,
@@ -1783,6 +1857,66 @@ fn handle_inventory_input(
 ) {
     // Don't handle input when console is open or in any menu state
     if console_open.open || *game_state.get() != GameState::InGame {
+        return;
+    }
+
+    // Handle mouse wheel for inventory slot switching
+    if accumulated_mouse_scroll.delta.y != 0.0 {
+        let current_slot = inventory.selected_slot;
+        let new_slot = if accumulated_mouse_scroll.delta.y > 0.0 {
+            // Scroll up - previous slot (wraps around)
+            if current_slot == 0 {
+                8
+            } else {
+                current_slot - 1
+            }
+        } else {
+            // Scroll down - next slot (wraps around)
+            if current_slot == 8 {
+                0
+            } else {
+                current_slot + 1
+            }
+        };
+
+        if new_slot != current_slot {
+            inventory.select_slot(new_slot);
+            info!("Selected inventory slot {}", new_slot + 1);
+        }
+    }
+
+    // Handle number keys 1-9 for slot selection
+    let key_mappings = [
+        (KeyCode::Digit1, 0),
+        (KeyCode::Digit2, 1),
+        (KeyCode::Digit3, 2),
+        (KeyCode::Digit4, 3),
+        (KeyCode::Digit5, 4),
+        (KeyCode::Digit6, 5),
+        (KeyCode::Digit7, 6),
+        (KeyCode::Digit8, 7),
+        (KeyCode::Digit9, 8),
+    ];
+
+    for (key, slot) in key_mappings {
+        if keyboard_input.just_pressed(key) {
+            inventory.select_slot(slot);
+            info!("Selected inventory slot {}", slot + 1);
+            break;
+        }
+    }
+}
+
+// Alternative system for inventory input when console feature is disabled
+#[cfg(not(feature = "console"))]
+fn handle_inventory_input(
+    keyboard_input: Res<ButtonInput<KeyCode>>,
+    mut inventory: ResMut<PlayerInventory>,
+    accumulated_mouse_scroll: Res<bevy::input::mouse::AccumulatedMouseScroll>,
+    game_state: Res<State<GameState>>,
+) {
+    // Don't handle input when in any menu state (console not available to check)
+    if *game_state.get() != GameState::InGame {
         return;
     }
 

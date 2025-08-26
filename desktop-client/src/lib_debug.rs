@@ -53,7 +53,7 @@ pub fn debug_start() {
                 .set(WindowPlugin {
                     primary_window: Some(Window {
                         title: "IoTCraft DEBUG - iPad Crash Diagnosis".to_string(),
-                        resolution: (1280.0, 720.0).into(),
+                        resolution: bevy::window::WindowResolution::new(1280, 720),
                         canvas: Some("#canvas".to_owned()),
                         fit_canvas_to_parent: true,
                         prevent_default_event_handling: false,
@@ -116,9 +116,9 @@ struct DebugState {
 }
 
 fn setup_full_debug_scene(
-    mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
+    commands: Commands,
+    meshes: ResMut<Assets<Mesh>>,
+    materials: ResMut<Assets<StandardMaterial>>,
     asset_server: Res<AssetServer>,
 ) {
     web_sys::console::log_1(&"🚨 DEBUG: Setting up FULL IoTCraft scene...".into());

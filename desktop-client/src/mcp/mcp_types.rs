@@ -182,7 +182,7 @@ pub struct PendingToolExecutions {
 }
 
 /// Event to signal that a command has been executed and results are available
-#[derive(Event)]
+#[derive(Event, BufferedEvent)]
 pub struct CommandExecutedEvent {
     pub request_id: String,
     pub result: String,

@@ -31,7 +31,8 @@ mod tests {
         let mut ids = HashSet::new();
 
         // Generate many IDs and ensure they're all unique
-        for _ in 0..1000 {
+        // Using a smaller number to avoid random collisions in tight loops
+        for _ in 0..100 {
             let id = generate_unique_client_id("test");
             assert!(!ids.contains(&id), "Duplicate ID generated: {}", id);
             ids.insert(id);

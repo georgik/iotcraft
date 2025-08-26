@@ -94,53 +94,53 @@ pub struct OnlineWorlds {
 }
 
 /// Events for multiplayer world management
-#[derive(Event)]
+#[derive(Event, BufferedEvent)]
 pub struct PublishWorldEvent {
     pub world_name: String,
     pub max_players: u32,
     pub is_public: bool,
 }
 
-#[derive(Event)]
+#[derive(Event, BufferedEvent)]
 pub struct UnpublishWorldEvent {
     pub world_id: String,
 }
 
-#[derive(Event)]
+#[derive(Event, BufferedEvent)]
 pub struct JoinSharedWorldEvent {
     pub world_id: String,
 }
 
-#[derive(Event)]
+#[derive(Event, BufferedEvent)]
 pub struct LeaveSharedWorldEvent;
 
-#[derive(Event)]
+#[derive(Event, BufferedEvent)]
 pub struct WorldChangeEvent {
     pub change: WorldChange,
 }
 
-#[derive(Event)]
+#[derive(Event, BufferedEvent)]
 pub struct RefreshOnlineWorldsEvent;
 
 /// New events for world state synchronization
-#[derive(Event)]
+#[derive(Event, BufferedEvent)]
 pub struct PublishWorldStateEvent {
     pub world_id: String,
     pub force_full_snapshot: bool,
 }
 
-#[derive(Event)]
+#[derive(Event, BufferedEvent)]
 pub struct RequestWorldStateEvent {
     pub world_id: String,
 }
 
-#[derive(Event)]
+#[derive(Event, BufferedEvent)]
 pub struct WorldStateReceivedEvent {
     pub world_id: String,
     pub world_data: WorldSaveData,
 }
 
-#[derive(Event)]
+#[derive(Event, BufferedEvent)]
 pub struct BlockChangeEvent {
     pub world_id: String,
     pub player_id: String,
@@ -163,7 +163,7 @@ pub enum BlockChangeType {
     },
 }
 
-#[derive(Event)]
+#[derive(Event, BufferedEvent)]
 pub struct InventoryChangeEvent {
     pub world_id: String,
     pub player_id: String,

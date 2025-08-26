@@ -1,11 +1,14 @@
-use crate::environment::{CUBE_SIZE, VoxelBlock};
+// use crate::environment::{CUBE_SIZE, VoxelBlock}; // Unused currently
+#[cfg(feature = "physics")]
 use crate::player_controller::PlayerMode;
+#[cfg(feature = "physics")]
 use avian3d::prelude::*;
 use bevy::prelude::*;
 
 /// Plugin for managing physics optimization
 pub struct PhysicsManagerPlugin;
 
+#[cfg(feature = "physics")]
 impl Plugin for PhysicsManagerPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(PhysicsConfig::default())
@@ -19,6 +22,13 @@ impl Plugin for PhysicsManagerPlugin {
                 )
                     .run_if(|mode: Res<PlayerMode>| *mode == PlayerMode::Walking),
             );
+    }
+}
+
+#[cfg(not(feature = "physics"))]
+impl Plugin for PhysicsManagerPlugin {
+    fn build(&self, _app: &mut App) {
+        // No-op when physics feature is disabled
     }
 }
 
@@ -53,6 +63,7 @@ pub struct HasPhysicsCollider;
 pub struct WaterBlock;
 
 /// Configure physics settings for optimal performance
+#[cfg(feature = "physics")]
 fn configure_physics_settings(mut commands: Commands) {
     // Configure physics for better performance with static world
     commands.insert_resource(Gravity(Vec3::new(0.0, -9.81, 0.0))); // Normal gravity strength
@@ -61,6 +72,7 @@ fn configure_physics_settings(mut commands: Commands) {
 }
 
 /// System to prevent player from falling through the world
+#[cfg(feature = "physics")]
 fn prevent_player_fall_through_world(
     mut player_query: Query<(&mut Transform, Option<&mut LinearVelocity>), With<Camera>>,
     physics_config: Res<PhysicsConfig>,
@@ -92,6 +104,7 @@ fn prevent_player_fall_through_world(
 /// System to manage which blocks have physics colliders based on player position
 /// Only runs in walking mode for optimal performance
 /// Water blocks are excluded from having solid colliders to allow player movement
+#[cfg(feature = "physics")]
 fn manage_block_physics_distance_based(
     mut commands: Commands,
     physics_config: Res<PhysicsConfig>,
