@@ -29,7 +29,6 @@ mod ui;
 use mcp::mcp_types::CommandExecutedEvent;
 
 mod multiplayer;
-mod physics;
 mod player_avatar;
 mod player_controller;
 mod profile;
@@ -56,7 +55,6 @@ use mqtt::{MqttPlugin, *};
 use multiplayer::{
     MultiplayerPlugin, SharedWorldPlugin, WorldDiscoveryPlugin, WorldPublisherPlugin,
 };
-// use physics::PhysicsManagerPlugin; // Unused currently
 use player_avatar::PlayerAvatarPlugin;
 use player_controller::PlayerControllerPlugin;
 use shared_materials::SharedMaterialsPlugin;
@@ -273,7 +271,6 @@ fn handle_wall_command(
                         VoxelBlock {
                             position: IVec3::new(x, y, z),
                         },
-                        // Physics colliders are managed by PhysicsManagerPlugin based on distance and mode
                     ));
                 }
             }
@@ -475,12 +472,6 @@ fn handle_load_map_command(
                         },
                         // Physics colliders are managed by PhysicsManagerPlugin based on distance and mode
                     ));
-
-                    // Add WaterBlock component for water blocks to enable water detection
-                    #[cfg(feature = "physics")]
-                    if *block_type == BlockType::Water {
-                        entity_commands.insert(crate::physics::physics_manager::WaterBlock);
-                    }
                 }
 
                 reply!(
@@ -1345,11 +1336,6 @@ fn main() {
 
     app.add_plugins(FontPlugin) // Keep FontPlugin for any additional font-related systems
         .add_plugins(LocalizationPlugin); // Load localization after fonts
-
-    // Add physics plugins conditionally
-    #[cfg(feature = "physics")]
-    app.add_plugins(avian3d::PhysicsPlugins::default()) // Add physics engine
-        .add_plugins(PhysicsManagerPlugin); // Add physics optimization manager
 
     app.add_plugins(CameraControllerPlugin)
         .add_plugins(PlayerControllerPlugin) // Add player controller for walking/flying modes

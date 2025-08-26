@@ -1,6 +1,4 @@
 use crate::ui::GameState;
-#[cfg(feature = "physics")]
-use avian3d::prelude::*;
 use bevy::prelude::*;
 
 /// Plugin for player controller functionality
@@ -194,7 +192,6 @@ fn player_movement(
     mut player_mode: ResMut<PlayerMode>,
     mut commands: Commands,
     mut camera_query: Query<(Entity, &mut Transform, Option<&mut PlayerMovement>), With<Camera>>,
-    #[cfg(feature = "physics")] spatial_query: SpatialQuery,
     voxel_world: Res<crate::environment::VoxelWorld>,
     game_state: Res<State<GameState>>,
 ) {
@@ -284,8 +281,6 @@ fn player_movement(
                         &keyboard_input,
                         transform,
                         &mut movement,
-                        #[cfg(feature = "physics")]
-                        &spatial_query,
                         &voxel_world,
                         should_skip_jump,
                     );
@@ -568,7 +563,6 @@ fn handle_physics_free_walking_movement(
     keyboard_input: &Res<ButtonInput<KeyCode>>,
     mut transform: Mut<Transform>,
     movement: &mut PlayerMovement,
-    #[cfg(feature = "physics")] _spatial_query: &SpatialQuery,
     voxel_world: &Res<crate::environment::VoxelWorld>,
     should_skip_jump: bool,
 ) {

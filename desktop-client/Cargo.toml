@@ -13,8 +13,6 @@ crate-type = ["cdylib", "rlib"]
 #bevy = { version = "0.16.1", features = ["webp"] }
 bevy = { git = "https://github.com/bevyengine/bevy.git", rev = "335e39f", features = ["webp"] }
 
-# Optional physics engine - enable with --features physics
-avian3d = { git = "https://github.com/Jondolf/avian.git", branch = "main", optional = true }
 
 # Optional debug console implementations
 # Legacy bevy_console (desktop only) - enable with --features console-bevy
@@ -113,7 +111,6 @@ chrono = "0.4"
 # Workspace for xtask
 [features]
 default = ["console"]
-physics = ["dep:avian3d"]
 # Console implementations (choose one)
 console-bevy = ["dep:bevy_console"]  # Legacy desktop-only console
 # Convenience feature aliases

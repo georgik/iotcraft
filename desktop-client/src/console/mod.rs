@@ -10,9 +10,6 @@ pub mod simple_console;
 // Console infrastructure (replacement for bevy_console)
 pub mod console_infrastructure;
 
-#[cfg(feature = "console-slint")]
-pub mod slint_console;
-
 // Legacy console components (kept for compatibility during transition)
 pub mod console_helpers;
 pub mod console_systems;

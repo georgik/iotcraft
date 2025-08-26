@@ -6,8 +6,6 @@ use crate::console::simple_console::SimpleConsole;
 use crate::ui::GameState;
 
 // Import different console implementations based on features
-#[cfg(feature = "console-slint")]
-use crate::console::slint_console::SlintConsole;
 
 #[cfg(feature = "console-bevy")]
 use crate::console::bevy_console_adapter::BevyConsoleAdapter;
@@ -23,19 +21,13 @@ impl Plugin for ConsolePlugin {
 
         // Choose console implementation based on available features
         let console_impl: Box<dyn Console> = {
-            #[cfg(feature = "console-slint")]
-            {
-                info!("Using Bevy UI console implementation");
-                Box::new(BevyUiConsole::new())
-            }
-
-            #[cfg(all(feature = "console-bevy", not(feature = "console-slint")))]
+            #[cfg(feature = "console-bevy")]
             {
                 info!("Using legacy Bevy console implementation");
                 Box::new(BevyConsoleAdapter::new())
             }
 
-            #[cfg(not(any(feature = "console-slint", feature = "console-bevy")))]
+            #[cfg(not(feature = "console-bevy"))]
             {
                 info!("Using Bevy UI console implementation");
                 Box::new(BevyUiConsole::new())

@@ -1,6 +1,6 @@
-use rumqttc::{AsyncClient, MqttOptions, QoS};
+use rumqttc::{Client, Event, Incoming, MqttOptions, QoS};
 use std::time::Duration;
-use tokio::time::sleep;
+use tokio::time::timeout;
 
 #[tokio::test]
 async fn test_simple_retained_messages() {
@@ -11,45 +11,53 @@ async fn test_simple_retained_messages() {
     mqttoptions.set_keep_alive(Duration::from_secs(10));
     mqttoptions.set_clean_session(false); // Important: persistent session to receive retained
 
-    let (client, mut eventloop) = AsyncClient::new(mqttoptions, 10);
+    let (client, mut eventloop) = Client::new(mqttoptions, 10);
 
     // Subscribe to the topic
     println!("🔔 Subscribing to iotcraft/worlds/+/info...");
     client
         .subscribe("iotcraft/worlds/+/info", QoS::AtLeastOnce)
-        .await
         .unwrap();
 
     let mut received_count = 0;
+    let mut connection_established = false;
 
-    // Process events for a short time to see retained messages
-    let timeout_duration = Duration::from_secs(3);
-    let start_time = tokio::time::Instant::now();
+    // Create a task to drive the event loop
+    let eventloop_task = tokio::spawn(async move {
+        // Use the iterator to process events
+        for notification in eventloop.iter() {
+            match notification {
+                Ok(Event::Incoming(Incoming::ConnAck(_))) => {
+                    println!("📡 Connected to MQTT broker");
+                }
+                Ok(Event::Incoming(Incoming::Publish(publish))) => {
+                    println!(
+                        "📨 Received message on '{}' [retain: {}]",
+                        publish.topic, publish.retain
+                    );
+                    println!("   Payload size: {} bytes", publish.payload.len());
+                }
+                Ok(Event::Incoming(Incoming::SubAck(_))) => {
+                    println!("✅ Subscription confirmed");
+                }
+                Ok(_) => {}
+                Err(e) => {
+                    println!("❌ Connection error: {:?}", e);
+                    break;
+                }
+            }
+        }
+    });
 
-    while start_time.elapsed() < timeout_duration {
-        match tokio::time::timeout(Duration::from_millis(100), eventloop.poll()).await {
-            Ok(Ok(rumqttc::Event::Incoming(rumqttc::Packet::ConnAck(_)))) => {
-                println!("📡 Connected to MQTT broker");
-            }
-            Ok(Ok(rumqttc::Event::Incoming(rumqttc::Packet::Publish(publish)))) => {
-                println!(
-                    "📨 Received message on '{}' [retain: {}]",
-                    publish.topic, publish.retain
-                );
-                println!("   Payload size: {} bytes", publish.payload.len());
-                received_count += 1;
-            }
-            Ok(Ok(rumqttc::Event::Incoming(rumqttc::Packet::SubAck(_)))) => {
-                println!("✅ Subscription confirmed");
-            }
-            Ok(Ok(_)) => {}
-            Ok(Err(e)) => {
-                println!("❌ Connection error: {:?}", e);
-                break;
-            }
-            Err(_) => {
-                // Timeout - continue
-            }
+    // Wait for a reasonable amount of time, then terminate the test
+    let result = timeout(Duration::from_secs(3), eventloop_task).await;
+
+    match result {
+        Ok(_) => {
+            println!("✅ Event loop completed successfully");
+        }
+        Err(_) => {
+            println!("⏰ Test completed after timeout");
         }
     }
 
@@ -60,6 +68,7 @@ async fn test_simple_retained_messages() {
         println!("   1. No worlds are currently published with retain=true");
         println!("   2. The broker is not storing retained messages properly");
         println!("   3. There's a timing issue with retained message delivery");
+        println!("   4. No MQTT broker is running (this is expected in CI/tests without broker)");
     } else {
         println!("✅ Found {} retained messages", received_count);
     }

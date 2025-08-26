@@ -2,7 +2,7 @@ use bevy::prelude::*;
 use std::any::Any;
 
 /// Trait that defines the interface for console implementations
-/// This allows us to swap between different console backends (bevy_console, slint, etc.)
+/// This allows us to swap between different console backends (bevy_console, custom UI, etc.)
 pub trait Console: Send + Sync {
     /// Initialize the console (called during startup)
     fn initialize(&mut self, app: &mut App);
