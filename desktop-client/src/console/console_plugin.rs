@@ -99,7 +99,7 @@ fn handle_console_toggle(
     mut game_state: ResMut<NextState<GameState>>,
     current_state: Res<State<GameState>>,
 ) {
-    // Handle F12 key (default toggle)
+    // Handle F12 key (default toggle) - still works as full toggle
     if keyboard_input.just_pressed(config.toggle_key) {
         console_manager.toggle();
 
@@ -111,16 +111,30 @@ fn handle_console_toggle(
         }
     }
 
-    // Handle T key for opening/closing console
+    // Handle T key for opening console only (not closing)
     if keyboard_input.just_pressed(KeyCode::KeyT) {
-        if console_manager.console.is_visible() {
-            // Console is open, close it
-            console_manager.console.toggle_visibility();
-            game_state.set(GameState::InGame);
-        } else if *current_state.get() == GameState::InGame {
+        if !console_manager.console.is_visible() && *current_state.get() == GameState::InGame {
             // Console is closed and we're in game, open it
             console_manager.console.toggle_visibility();
             game_state.set(GameState::ConsoleOpen);
+
+            // Set flag to ignore next T key input to prevent immediate character input
+            if let Some(bevy_ui_console) = console_manager
+                .console
+                .as_any_mut()
+                .downcast_mut::<crate::console::bevy_ui_console::BevyUiConsole>(
+            ) {
+                bevy_ui_console.ignore_next_t_key = true;
+            }
+        }
+    }
+
+    // Handle ESC key for closing console when it's open
+    if keyboard_input.just_pressed(KeyCode::Escape) {
+        if console_manager.console.is_visible() && *current_state.get() == GameState::ConsoleOpen {
+            // Console is open, close it
+            console_manager.console.toggle_visibility();
+            game_state.set(GameState::InGame);
         }
     }
 }

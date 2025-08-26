@@ -16,6 +16,7 @@ pub struct BevyUiConsole {
     command_history: Vec<String>,
     history_index: Option<usize>,
     pending_command: Option<String>,
+    pub ignore_next_t_key: bool, // Flag to ignore next T key input after opening console
 }
 
 impl Default for BevyUiConsole {
@@ -36,6 +37,7 @@ impl BevyUiConsole {
             command_history: Vec::new(),
             history_index: None,
             pending_command: None,
+            ignore_next_t_key: false,
         }
     }
 
@@ -327,6 +329,7 @@ fn setup_console_ui(mut commands: Commands) {
                             ..default()
                         },
                         TextColor(Color::srgb(1.0, 1.0, 1.0)),
+                        TextLayout::new_with_linebreak(bevy::text::LineBreak::WordBoundary),
                         ConsoleOutput,
                     ));
                 });
@@ -459,10 +462,18 @@ fn handle_console_input(
                     | KeyCode::End => {
                         bevy_ui_console.handle_key(key_code);
                     }
-                    // Handle character keys (but skip T key to avoid conflicts with console toggle)
+                    // Special handling for T key to prevent immediate input after opening console
                     KeyCode::KeyT => {
-                        // Skip T key - it's handled by the console toggle system
+                        // Check if we should ignore this T key press
+                        if bevy_ui_console.ignore_next_t_key {
+                            // Reset flag and ignore this T key
+                            bevy_ui_console.ignore_next_t_key = false;
+                        } else {
+                            // Normal T key processing
+                            bevy_ui_console.handle_input('t');
+                        }
                     }
+                    // Handle all other character keys when console is open
                     _ => {
                         // Convert KeyCode to character for printable keys
                         if let Some(character) = keycode_to_char(key_code) {

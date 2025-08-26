@@ -94,7 +94,7 @@ impl CommandParser {
             "  list - List all connected devices",
             "  test_error <message> - Test error indicator",
         ];
-        ConsoleResult::Success(help_text.join("\\n"))
+        ConsoleResult::Success(help_text.join("\n"))
     }
 
     fn handle_clear_command(&self, _args: &[&str]) -> ConsoleResult {
@@ -112,9 +112,9 @@ impl CommandParser {
             .enumerate()
             .map(|(i, cmd)| format!("  {}: {}", i + 1, cmd))
             .collect::<Vec<_>>()
-            .join("\\n");
+            .join("\n");
 
-        ConsoleResult::Success(format!("Command history:\\n{}", history))
+        ConsoleResult::Success(format!("Command history:\n{}", history))
     }
 
     // Placeholder implementations for other commands - these will delegate to the existing systems

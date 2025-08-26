@@ -31,6 +31,8 @@ impl Plugin for MainMenuPlugin {
             .add_systems(OnEnter(GameState::GameplayMenu), setup_gameplay_menu)
             .add_systems(OnExit(GameState::GameplayMenu), despawn_gameplay_menu)
             .add_systems(OnEnter(GameState::InGame), grab_cursor_on_game_start)
+            .add_systems(OnEnter(GameState::ConsoleOpen), release_cursor_for_console)
+            .add_systems(OnExit(GameState::ConsoleOpen), grab_cursor_after_console)
             .add_systems(
                 Update,
                 (
@@ -77,6 +79,33 @@ fn grab_cursor_on_game_start(
     if let Ok(mut controller) = camera_controller_query.single_mut() {
         controller.ignore_next_mouse_delta = true;
         info!("Set ignore_next_mouse_delta flag to prevent camera jump after cursor re-grab");
+    }
+}
+
+/// System to release cursor when console is opened
+fn release_cursor_for_console(mut cursor_options_query: Query<&mut bevy::window::CursorOptions>) {
+    if let Ok(mut cursor_options) = cursor_options_query.single_mut() {
+        info!("Releasing cursor for console - setting to None");
+        cursor_options.grab_mode = bevy::window::CursorGrabMode::None;
+        cursor_options.visible = true;
+    }
+}
+
+/// System to grab cursor when console is closed (returning to game)
+fn grab_cursor_after_console(
+    mut cursor_options_query: Query<&mut bevy::window::CursorOptions>,
+    mut camera_controller_query: Query<&mut crate::camera_controllers::CameraController>,
+) {
+    if let Ok(mut cursor_options) = cursor_options_query.single_mut() {
+        info!("Grabbing cursor after console - setting to Locked");
+        cursor_options.grab_mode = bevy::window::CursorGrabMode::Locked;
+        cursor_options.visible = false;
+    }
+
+    // Set flag to ignore the next mouse delta to prevent camera jump
+    if let Ok(mut controller) = camera_controller_query.single_mut() {
+        controller.ignore_next_mouse_delta = true;
+        info!("Set ignore_next_mouse_delta flag to prevent camera jump after console close");
     }
 }
 
