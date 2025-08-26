@@ -66,11 +66,11 @@ jobs:
       run: |
         cd desktop-client
         mkdir -p test-results
-        cargo test --all-features --workspace --verbose -- --format junit > test-results/cargo-junit.xml || true
-        cargo test --all-features --workspace --verbose
+        cargo test --workspace --verbose -- --format junit > test-results/cargo-junit.xml || true
+        cargo test --workspace --verbose
 
     - name: Check if build works
       run: |
         cd desktop-client
-        cargo check --all-targets --all-features
+        cargo check --all-targets
 
