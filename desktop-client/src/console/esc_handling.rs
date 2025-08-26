@@ -1,5 +1,5 @@
 #[cfg(feature = "console")]
-use crate::console::ConsoleOpen;
+use crate::console::ConsoleManager;
 #[cfg(feature = "console")]
 use bevy::prelude::*;
 #[cfg(feature = "console")]
@@ -11,15 +11,15 @@ use crate::ui::GameState;
 #[cfg(feature = "console")]
 pub fn handle_esc_key(
     keyboard_input: Res<ButtonInput<KeyCode>>,
-    mut console_open: Option<ResMut<ConsoleOpen>>,
+    mut console_manager: Option<ResMut<ConsoleManager>>,
     mut game_state: ResMut<NextState<GameState>>,
     mut windows: Query<&mut Window>,
 ) {
     // Only close console with ESC when it's currently open
     if keyboard_input.just_pressed(KeyCode::Escape) {
-        if let Some(mut console_open) = console_open {
-            if console_open.open {
-                console_open.open = false;
+        if let Some(mut console_manager) = console_manager {
+            if console_manager.console.is_visible() {
+                console_manager.console.toggle_visibility();
                 game_state.set(GameState::InGame);
 
                 // Re-enable cursor grab when leaving console

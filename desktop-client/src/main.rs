@@ -1414,11 +1414,10 @@ fn main() {
 
     // Add console-dependent systems only when console feature is enabled
     #[cfg(feature = "console")]
-    app.add_systems(Update, handle_console_t_key.after(ConsoleSet::Commands))
-        .add_systems(
-            Update,
-            crate::console::esc_handling::handle_esc_key.after(ConsoleSet::Commands),
-        );
+    app.add_systems(
+        Update,
+        crate::console::esc_handling::handle_esc_key.after(ConsoleSet::Commands),
+    );
 
     app.init_resource::<DiagnosticsVisible>()
         .add_systems(Startup, setup_diagnostics_ui)
@@ -1569,12 +1568,15 @@ fn rotate_logo_system(time: Res<Time>, mut query: Query<&mut Transform, With<Log
 // System to manage camera controller state based on console state
 #[cfg(feature = "console")]
 fn manage_camera_controller(
-    console_open: Res<ConsoleOpen>,
+    console_manager: Option<Res<ConsoleManager>>,
     mut camera_query: Query<&mut CameraController, With<Camera>>,
 ) {
     if let Ok(mut camera_controller) = camera_query.single_mut() {
         // Disable camera controller when console is open
-        camera_controller.enabled = !console_open.open;
+        let console_open = console_manager
+            .map(|manager| manager.console.is_visible())
+            .unwrap_or(false);
+        camera_controller.enabled = !console_open;
     }
 }
 
@@ -1828,35 +1830,20 @@ fn handle_mouse_capture(
     }
 }
 
-// System to handle 't' key to open console (only when closed)
-#[cfg(feature = "console")]
-fn handle_console_t_key(
-    mut console_open: ResMut<ConsoleOpen>,
-    keyboard_input: Res<ButtonInput<KeyCode>>,
-    mut game_state: ResMut<NextState<GameState>>,
-    current_state: Res<State<GameState>>,
-) {
-    // Only open console with 't' when it's currently closed and in game
-    if keyboard_input.just_pressed(KeyCode::KeyT)
-        && !console_open.open
-        && *current_state.get() == GameState::InGame
-    {
-        console_open.open = true;
-        game_state.set(GameState::ConsoleOpen);
-    }
-}
-
 // System to handle inventory slot selection with number keys and mouse wheel
 #[cfg(feature = "console")]
 fn handle_inventory_input(
     keyboard_input: Res<ButtonInput<KeyCode>>,
     mut inventory: ResMut<PlayerInventory>,
     accumulated_mouse_scroll: Res<bevy::input::mouse::AccumulatedMouseScroll>,
-    console_open: Res<ConsoleOpen>,
+    console_manager: Option<Res<ConsoleManager>>,
     game_state: Res<State<GameState>>,
 ) {
     // Don't handle input when console is open or in any menu state
-    if console_open.open || *game_state.get() != GameState::InGame {
+    let console_open = console_manager
+        .map(|manager| manager.console.is_visible())
+        .unwrap_or(false);
+    if console_open || *game_state.get() != GameState::InGame {
         return;
     }
 

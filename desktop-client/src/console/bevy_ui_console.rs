@@ -15,6 +15,7 @@ pub struct BevyUiConsole {
     cursor_position: usize,
     command_history: Vec<String>,
     history_index: Option<usize>,
+    pending_command: Option<String>,
 }
 
 impl Default for BevyUiConsole {
@@ -34,6 +35,7 @@ impl BevyUiConsole {
             cursor_position: 0,
             command_history: Vec::new(),
             history_index: None,
+            pending_command: None,
         }
     }
 
@@ -225,6 +227,11 @@ impl Console for BevyUiConsole {
     }
 
     fn update(&mut self, world: &mut World) {
+        // Process any pending commands
+        if let Some(command) = self.pending_command.take() {
+            self.execute_command(&command, world);
+        }
+
         // Update UI state resource
         if let Some(mut ui_state) = world.get_resource_mut::<ConsoleUiState>() {
             ui_state.visible = self.visible;
@@ -405,6 +412,7 @@ fn update_console_ui(
 /// System to handle console input
 fn handle_console_input(
     keyboard_input: Res<ButtonInput<KeyCode>>,
+    mut char_input_events: EventReader<bevy::input::keyboard::KeyboardInput>,
     mut console_manager: ResMut<crate::console::ConsoleManager>,
     ui_state: ResMut<ConsoleUiState>,
 ) {
@@ -420,21 +428,125 @@ fn handle_console_input(
             .downcast_mut::<BevyUiConsole>()
         {
             let command = bevy_ui_console.input_text.clone();
-            // TODO: Queue command for execution in update method that has world access
-            bevy_ui_console.add_output_line(format!("Command queued: {}", command));
+            if !command.trim().is_empty() {
+                // Queue command for execution in update method that has world access
+                bevy_ui_console.pending_command = Some(command);
+            }
             bevy_ui_console.input_text.clear();
             bevy_ui_console.cursor_position = 0;
         }
     }
 
-    // Handle special keys
+    // Handle character input for typing
+    for event in char_input_events.read() {
+        if let Some(bevy_ui_console) = console_manager
+            .console
+            .as_any_mut()
+            .downcast_mut::<BevyUiConsole>()
+        {
+            // Handle character input when key is pressed
+            if let bevy::input::ButtonState::Pressed = event.state {
+                let key_code = event.key_code;
+                match key_code {
+                    // Handle special keys
+                    KeyCode::Backspace
+                    | KeyCode::Delete
+                    | KeyCode::ArrowLeft
+                    | KeyCode::ArrowRight
+                    | KeyCode::ArrowUp
+                    | KeyCode::ArrowDown
+                    | KeyCode::Home
+                    | KeyCode::End => {
+                        bevy_ui_console.handle_key(key_code);
+                    }
+                    // Handle character keys (but skip T key to avoid conflicts with console toggle)
+                    KeyCode::KeyT => {
+                        // Skip T key - it's handled by the console toggle system
+                    }
+                    _ => {
+                        // Convert KeyCode to character for printable keys
+                        if let Some(character) = keycode_to_char(key_code) {
+                            bevy_ui_console.handle_input(character);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Handle special keys from ButtonInput for navigation
     for key in keyboard_input.get_just_pressed() {
         if let Some(bevy_ui_console) = console_manager
             .console
             .as_any_mut()
             .downcast_mut::<BevyUiConsole>()
         {
-            bevy_ui_console.handle_key(*key);
+            match *key {
+                KeyCode::ArrowLeft
+                | KeyCode::ArrowRight
+                | KeyCode::ArrowUp
+                | KeyCode::ArrowDown
+                | KeyCode::Home
+                | KeyCode::End => {
+                    bevy_ui_console.handle_key(*key);
+                }
+                _ => {}
+            }
         }
+    }
+}
+
+/// Convert KeyCode to character for printable keys
+fn keycode_to_char(key_code: KeyCode) -> Option<char> {
+    match key_code {
+        KeyCode::KeyA => Some('a'),
+        KeyCode::KeyB => Some('b'),
+        KeyCode::KeyC => Some('c'),
+        KeyCode::KeyD => Some('d'),
+        KeyCode::KeyE => Some('e'),
+        KeyCode::KeyF => Some('f'),
+        KeyCode::KeyG => Some('g'),
+        KeyCode::KeyH => Some('h'),
+        KeyCode::KeyI => Some('i'),
+        KeyCode::KeyJ => Some('j'),
+        KeyCode::KeyK => Some('k'),
+        KeyCode::KeyL => Some('l'),
+        KeyCode::KeyM => Some('m'),
+        KeyCode::KeyN => Some('n'),
+        KeyCode::KeyO => Some('o'),
+        KeyCode::KeyP => Some('p'),
+        KeyCode::KeyQ => Some('q'),
+        KeyCode::KeyR => Some('r'),
+        KeyCode::KeyS => Some('s'),
+        KeyCode::KeyT => Some('t'),
+        KeyCode::KeyU => Some('u'),
+        KeyCode::KeyV => Some('v'),
+        KeyCode::KeyW => Some('w'),
+        KeyCode::KeyX => Some('x'),
+        KeyCode::KeyY => Some('y'),
+        KeyCode::KeyZ => Some('z'),
+        KeyCode::Digit0 => Some('0'),
+        KeyCode::Digit1 => Some('1'),
+        KeyCode::Digit2 => Some('2'),
+        KeyCode::Digit3 => Some('3'),
+        KeyCode::Digit4 => Some('4'),
+        KeyCode::Digit5 => Some('5'),
+        KeyCode::Digit6 => Some('6'),
+        KeyCode::Digit7 => Some('7'),
+        KeyCode::Digit8 => Some('8'),
+        KeyCode::Digit9 => Some('9'),
+        KeyCode::Space => Some(' '),
+        KeyCode::Minus => Some('-'),
+        KeyCode::Equal => Some('='),
+        KeyCode::BracketLeft => Some('['),
+        KeyCode::BracketRight => Some(']'),
+        KeyCode::Backslash => Some('\\'),
+        KeyCode::Semicolon => Some(';'),
+        KeyCode::Quote => Some('\''),
+        KeyCode::Comma => Some(','),
+        KeyCode::Period => Some('.'),
+        KeyCode::Slash => Some('/'),
+        KeyCode::Backquote => Some('`'),
+        _ => None,
     }
 }

@@ -112,7 +112,7 @@ chrono = "0.4"
 
 # Workspace for xtask
 [features]
-default = ["physics","console"]
+default = ["console"]
 physics = ["dep:avian3d"]
 # Console implementations (choose one)
 console-bevy = ["dep:bevy_console"]  # Legacy desktop-only console

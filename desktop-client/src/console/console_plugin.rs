@@ -3,6 +3,7 @@ use bevy::prelude::*;
 use crate::console::bevy_ui_console::BevyUiConsole;
 use crate::console::console_trait::{Console, ConsoleConfig, ConsoleManager};
 use crate::console::simple_console::SimpleConsole;
+use crate::ui::GameState;
 
 // Import different console implementations based on features
 #[cfg(feature = "console-slint")]
@@ -95,16 +96,43 @@ fn handle_console_toggle(
     mut console_manager: ResMut<ConsoleManager>,
     config: Res<ConsoleConfig>,
     keyboard_input: Res<ButtonInput<KeyCode>>,
+    mut game_state: ResMut<NextState<GameState>>,
+    current_state: Res<State<GameState>>,
 ) {
+    // Handle F12 key (default toggle)
     if keyboard_input.just_pressed(config.toggle_key) {
         console_manager.toggle();
+
+        // Update game state based on console visibility
+        if console_manager.console.is_visible() {
+            game_state.set(GameState::ConsoleOpen);
+        } else {
+            game_state.set(GameState::InGame);
+        }
+    }
+
+    // Handle T key for opening/closing console
+    if keyboard_input.just_pressed(KeyCode::KeyT) {
+        if console_manager.console.is_visible() {
+            // Console is open, close it
+            console_manager.console.toggle_visibility();
+            game_state.set(GameState::InGame);
+        } else if *current_state.get() == GameState::InGame {
+            // Console is closed and we're in game, open it
+            console_manager.console.toggle_visibility();
+            game_state.set(GameState::ConsoleOpen);
+        }
     }
 }
 
 /// System to update the console each frame
-fn update_console(console_manager: ResMut<ConsoleManager>) {
-    // For now, just do nothing - the console manager will handle updates internally
-    // TODO: Implement proper console update logic that doesn't require &mut World
+fn update_console(world: &mut World) {
+    // We need direct world access to call console.update(&mut world)
+    // Get the console manager, call update, then put it back
+    if let Some(mut console_manager) = world.remove_resource::<ConsoleManager>() {
+        console_manager.console.update(world);
+        world.insert_resource(console_manager);
+    }
 }
 
 /// Event for sending messages to the console from other systems
