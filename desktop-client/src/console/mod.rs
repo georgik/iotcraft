@@ -3,9 +3,16 @@ pub mod command_parser;
 pub mod console_plugin;
 pub mod console_trait;
 
+// Shared console architecture (works on both desktop and WASM)
+pub mod shared;
+
 // Console implementations
 pub mod bevy_ui_console;
 pub mod simple_console;
+
+// Web-specific console (for WASM builds)
+#[cfg(target_arch = "wasm32")]
+pub mod web_console;
 
 // Console infrastructure (replacement for bevy_console)
 pub mod console_infrastructure;

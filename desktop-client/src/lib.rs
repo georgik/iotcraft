@@ -46,7 +46,7 @@ pub mod inventory;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod camera_controllers;
 
-#[cfg(not(target_arch = "wasm32"))]
+// Console module available for both desktop and web
 pub mod console;
 
 #[cfg(not(target_arch = "wasm32"))]

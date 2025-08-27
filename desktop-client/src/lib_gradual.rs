@@ -643,7 +643,9 @@ pub fn start() {
         .add_plugins(WebMenuPlugin)
         .add_plugins(MqttPlugin) // MQTT connection working!
         .add_plugins(crate::player_avatar::PlayerAvatarPlugin) // Add avatar animations
+        .add_plugins(crate::console::web_console::WebConsolePlugin) // Add web console
         .insert_resource(ClearColor(Color::srgb(0.53, 0.81, 0.92)))
+        .insert_resource(crate::console::BlinkState::default())
         .insert_resource(CameraController::new())
         .insert_resource(TouchInputState::default())
         // Multiplayer resources

@@ -2,6 +2,8 @@ use bevy::prelude::*;
 
 use crate::console::bevy_ui_console::BevyUiConsole;
 use crate::console::console_trait::{Console, ConsoleConfig, ConsoleManager};
+
+#[cfg(not(target_arch = "wasm32"))]
 use crate::ui::GameState;
 
 // Import different console implementations based on features
@@ -50,6 +52,7 @@ impl Plugin for ConsolePlugin {
 }
 
 /// System to handle console toggle key
+#[cfg(not(target_arch = "wasm32"))]
 fn handle_console_toggle(
     mut console_manager: ResMut<ConsoleManager>,
     config: Res<ConsoleConfig>,
@@ -93,6 +96,42 @@ fn handle_console_toggle(
             // Console is open, close it
             console_manager.console.toggle_visibility();
             game_state.set(GameState::InGame);
+        }
+    }
+}
+
+/// Simplified console toggle for WASM (no game state management)
+#[cfg(target_arch = "wasm32")]
+fn handle_console_toggle(
+    mut console_manager: ResMut<ConsoleManager>,
+    config: Res<ConsoleConfig>,
+    keyboard_input: Res<ButtonInput<KeyCode>>,
+) {
+    // Handle F12 key (default toggle)
+    if keyboard_input.just_pressed(config.toggle_key) {
+        console_manager.toggle();
+    }
+
+    // Handle T key for opening console only (not closing)
+    if keyboard_input.just_pressed(KeyCode::KeyT) {
+        if !console_manager.console.is_visible() {
+            console_manager.console.toggle_visibility();
+
+            // Set flag to ignore next T key input to prevent immediate character input
+            if let Some(bevy_ui_console) = console_manager
+                .console
+                .as_any_mut()
+                .downcast_mut::<crate::console::bevy_ui_console::BevyUiConsole>(
+            ) {
+                bevy_ui_console.ignore_next_t_key = true;
+            }
+        }
+    }
+
+    // Handle ESC key for closing console when it's open
+    if keyboard_input.just_pressed(KeyCode::Escape) {
+        if console_manager.console.is_visible() {
+            console_manager.console.toggle_visibility();
         }
     }
 }
