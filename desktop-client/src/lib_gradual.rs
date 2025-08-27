@@ -644,6 +644,9 @@ pub fn start() {
         .add_plugins(MqttPlugin) // MQTT connection working!
         .add_plugins(crate::player_avatar::PlayerAvatarPlugin) // Add avatar animations
         .add_plugins(crate::console::web_console::WebConsolePlugin) // Add web console
+        .add_plugins(crate::inventory::InventoryPlugin) // Add inventory system
+        .add_plugins(crate::environment::EnvironmentPlugin) // Add environment for voxel world
+        .add_plugins(crate::multiplayer_web::WebMultiplayerPlugin) // Add web multiplayer for block sync
         .insert_resource(ClearColor(Color::srgb(0.53, 0.81, 0.92)))
         .insert_resource(crate::console::BlinkState::default())
         .insert_resource(CameraController::new())
@@ -693,7 +696,7 @@ struct WebMqttDevice {
 }
 
 /// Simple camera controller for web
-#[derive(Resource, Default)]
+#[derive(Component, Resource, Default)]
 pub struct CameraController {
     pub enabled: bool,
     pub sensitivity: f32,

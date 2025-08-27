@@ -6,12 +6,8 @@ use crate::console::BlinkState;
 
 use crate::mqtt::TemperatureResource;
 
-// Conditional imports for desktop-only modules
-#[cfg(not(target_arch = "wasm32"))]
-use crate::camera_controllers::CameraController;
-#[cfg(not(target_arch = "wasm32"))]
+// Imports for environment and inventory (now available on both platforms)
 use crate::environment::{BlockType, VoxelBlock, VoxelWorld};
-#[cfg(not(target_arch = "wasm32"))]
 use crate::inventory::{ItemType, PlaceBlockEvent, PlayerInventory};
 
 /// Unified command parser that works with any console implementation
@@ -62,23 +58,20 @@ impl CommandParser {
             "blink" => self.handle_blink_command(args, world),
             "mqtt" => self.handle_mqtt_command(args, world),
             "test_error" => self.handle_test_error_command(args, world),
+            // Inventory and environment commands (now available on both platforms)
+            "place" => self.handle_place_command(args, world),
+            "remove" => self.handle_remove_command(args, world),
+            "wall" => self.handle_wall_command(args, world),
+            "give" => self.handle_give_command(args, world),
             // Desktop-only commands that require modules not available on WASM
             #[cfg(not(target_arch = "wasm32"))]
             "spawn" => self.handle_spawn_command(args, world),
             #[cfg(not(target_arch = "wasm32"))]
             "spawn_door" => self.handle_spawn_door_command(args, world),
             #[cfg(not(target_arch = "wasm32"))]
-            "place" => self.handle_place_command(args, world),
-            #[cfg(not(target_arch = "wasm32"))]
-            "remove" => self.handle_remove_command(args, world),
-            #[cfg(not(target_arch = "wasm32"))]
-            "wall" => self.handle_wall_command(args, world),
-            #[cfg(not(target_arch = "wasm32"))]
             "save" => self.handle_save_command(args, world),
             #[cfg(not(target_arch = "wasm32"))]
             "load" => self.handle_load_command(args, world),
-            #[cfg(not(target_arch = "wasm32"))]
-            "give" => self.handle_give_command(args, world),
             #[cfg(not(target_arch = "wasm32"))]
             "tp" | "teleport" => self.handle_teleport_command(args, world),
             #[cfg(not(target_arch = "wasm32"))]
@@ -87,10 +80,10 @@ impl CommandParser {
             "move" => self.handle_move_command(args, world),
             #[cfg(not(target_arch = "wasm32"))]
             "list" => self.handle_list_command(args, world),
-            // WASM-only simplified commands
+            // WASM-only simplified commands (for desktop-only functionality)
             #[cfg(target_arch = "wasm32")]
-            "spawn" | "spawn_door" | "place" | "remove" | "wall" | "save" | "load" | "give"
-            | "tp" | "teleport" | "look" | "move" | "list" => ConsoleResult::Success(format!(
+            "spawn" | "spawn_door" | "save" | "load" | "tp" | "teleport" | "look" | "move"
+            | "list" => ConsoleResult::Success(format!(
                 "{} command is not available in web version",
                 command
             )),
@@ -236,7 +229,6 @@ impl CommandParser {
         ))
     }
 
-    #[cfg(not(target_arch = "wasm32"))]
     fn handle_place_command(&self, args: &[&str], world: &mut World) -> ConsoleResult {
         if args.len() != 4 {
             return ConsoleResult::InvalidArgs("Usage: place <block_type> <x> <y> <z>".to_string());
@@ -299,7 +291,6 @@ impl CommandParser {
         }
     }
 
-    #[cfg(not(target_arch = "wasm32"))]
     fn handle_remove_command(&self, args: &[&str], world: &mut World) -> ConsoleResult {
         if args.len() != 3 {
             return ConsoleResult::InvalidArgs("Usage: remove <x> <y> <z>".to_string());
@@ -356,7 +347,6 @@ impl CommandParser {
         }
     }
 
-    #[cfg(not(target_arch = "wasm32"))]
     fn handle_wall_command(&self, args: &[&str], world: &mut World) -> ConsoleResult {
         if args.len() != 7 {
             return ConsoleResult::InvalidArgs(
@@ -484,7 +474,6 @@ impl CommandParser {
         ConsoleResult::Success(format!("Load command: {}", args[0]))
     }
 
-    #[cfg(not(target_arch = "wasm32"))]
     fn handle_give_command(&self, args: &[&str], world: &mut World) -> ConsoleResult {
         if args.len() != 2 {
             return ConsoleResult::InvalidArgs("Usage: give <item_type> <count>".to_string());

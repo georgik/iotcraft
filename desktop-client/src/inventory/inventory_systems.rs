@@ -199,8 +199,14 @@ pub fn place_block_system(
 /// System to handle multiplayer synchronization for UI block placement
 pub fn place_block_multiplayer_sync_system(
     mut place_block_events: EventReader<PlaceBlockEvent>,
-    mut block_change_events: EventWriter<crate::multiplayer::BlockChangeEvent>,
-    multiplayer_mode: Res<crate::multiplayer::MultiplayerMode>,
+    #[cfg(not(target_arch = "wasm32"))] mut block_change_events: EventWriter<
+        crate::multiplayer::BlockChangeEvent,
+    >,
+    #[cfg(target_arch = "wasm32")] mut block_change_events: EventWriter<
+        crate::multiplayer_web::BlockChangeEvent,
+    >,
+    #[cfg(not(target_arch = "wasm32"))] multiplayer_mode: Res<crate::multiplayer::MultiplayerMode>,
+    #[cfg(target_arch = "wasm32")] multiplayer_mode: Res<crate::multiplayer_web::MultiplayerMode>,
     player_profile: Res<crate::profile::PlayerProfile>,
     inventory: Res<PlayerInventory>,
 ) {
@@ -211,9 +217,31 @@ pub fn place_block_multiplayer_sync_system(
         );
 
         // Only send multiplayer events when in multiplayer mode
-        if let crate::multiplayer::MultiplayerMode::HostingWorld { world_id, .. }
-        | crate::multiplayer::MultiplayerMode::JoinedWorld { world_id, .. } = &*multiplayer_mode
-        {
+        #[cfg(not(target_arch = "wasm32"))]
+        let is_multiplayer_with_world = matches!(
+            &*multiplayer_mode,
+            crate::multiplayer::MultiplayerMode::HostingWorld { world_id, .. }
+                | crate::multiplayer::MultiplayerMode::JoinedWorld { world_id, .. }
+        );
+
+        #[cfg(target_arch = "wasm32")]
+        let is_multiplayer_with_world = matches!(
+            &*multiplayer_mode,
+            crate::multiplayer_web::MultiplayerMode::HostingWorld { world_id, .. }
+                | crate::multiplayer_web::MultiplayerMode::JoinedWorld { world_id, .. }
+        );
+
+        if is_multiplayer_with_world {
+            let world_id = match &*multiplayer_mode {
+                #[cfg(not(target_arch = "wasm32"))]
+                crate::multiplayer::MultiplayerMode::HostingWorld { world_id, .. }
+                | crate::multiplayer::MultiplayerMode::JoinedWorld { world_id, .. } => world_id,
+                #[cfg(target_arch = "wasm32")]
+                crate::multiplayer_web::MultiplayerMode::HostingWorld { world_id, .. }
+                | crate::multiplayer_web::MultiplayerMode::JoinedWorld { world_id, .. } => world_id,
+                _ => unreachable!("We already checked for multiplayer mode"),
+            };
+
             info!(
                 "✅ In multiplayer mode (world_id: {}), checking inventory for selected item",
                 world_id
@@ -228,11 +256,25 @@ pub fn place_block_multiplayer_sync_system(
                     block_type, player_profile.player_name, player_profile.player_id
                 );
 
+                #[cfg(not(target_arch = "wasm32"))]
                 block_change_events.write(crate::multiplayer::BlockChangeEvent {
                     world_id: world_id.clone(),
                     player_id: player_profile.player_id.clone(),
                     player_name: player_profile.player_name.clone(),
                     change_type: crate::multiplayer::BlockChangeType::Placed {
+                        x: event.position.x,
+                        y: event.position.y,
+                        z: event.position.z,
+                        block_type,
+                    },
+                });
+
+                #[cfg(target_arch = "wasm32")]
+                block_change_events.write(crate::multiplayer_web::BlockChangeEvent {
+                    world_id: world_id.clone(),
+                    player_id: player_profile.player_id.clone(),
+                    player_name: player_profile.player_name.clone(),
+                    change_type: crate::multiplayer_web::BlockChangeType::Placed {
                         x: event.position.x,
                         y: event.position.y,
                         z: event.position.z,

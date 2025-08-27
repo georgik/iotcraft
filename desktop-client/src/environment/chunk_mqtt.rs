@@ -3,7 +3,10 @@ use std::sync::Mutex;
 use std::sync::mpsc;
 
 use super::chunk_events::*;
+#[cfg(not(target_arch = "wasm32"))]
 use crate::multiplayer::MultiplayerMode;
+#[cfg(target_arch = "wasm32")]
+use crate::multiplayer_web::MultiplayerMode;
 
 /// Resource for MQTT chunk publishing
 #[derive(Resource)]

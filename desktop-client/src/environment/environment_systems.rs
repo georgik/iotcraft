@@ -2,10 +2,14 @@ use bevy::pbr::MeshMaterial3d;
 use bevy::prelude::*;
 
 use super::environment_types::*;
+#[cfg(not(target_arch = "wasm32"))]
 use crate::camera_controllers::CameraController;
 #[cfg(feature = "console")]
 use crate::console::BlinkCube;
+#[cfg(target_arch = "wasm32")]
+use crate::lib_gradual::CameraController;
 use crate::mqtt::TemperatureResource;
+#[cfg(not(target_arch = "wasm32"))]
 use crate::script::script_types::PendingCommands;
 
 pub struct EnvironmentPlugin;
@@ -22,6 +26,7 @@ impl Plugin for EnvironmentPlugin {
             .add_systems(
                 Update,
                 (
+                    #[cfg(not(target_arch = "wasm32"))]
                     setup_background_world
                         .run_if(|setup_complete: Res<BackgroundWorldSetupComplete>| {
                             !setup_complete.0
@@ -117,7 +122,15 @@ fn setup_environment(
         Transform::from_translation(Vec3::ONE).looking_at(Vec3::ZERO, Vec3::Y),
     ));
 
-    // camera
+    // camera (conditional for different platforms)
+    #[cfg(not(target_arch = "wasm32"))]
+    commands.spawn((
+        Camera3d::default(),
+        Transform::from_xyz(15.0, 5.0, 15.0).looking_at(Vec3::ZERO, Vec3::Y),
+        CameraController::default(),
+    ));
+
+    #[cfg(target_arch = "wasm32")]
     commands.spawn((
         Camera3d::default(),
         Transform::from_xyz(15.0, 5.0, 15.0).looking_at(Vec3::ZERO, Vec3::Y),
@@ -188,7 +201,8 @@ fn update_thermometer_scale(
     }
 }
 
-/// Setup background world by executing the background world script
+/// Setup background world by executing the background world script (desktop only)
+#[cfg(not(target_arch = "wasm32"))]
 fn setup_background_world(
     mut pending_commands: ResMut<PendingCommands>,
     mut setup_complete: ResMut<BackgroundWorldSetupComplete>,
