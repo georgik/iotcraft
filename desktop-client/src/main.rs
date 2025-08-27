@@ -1,5 +1,6 @@
+use bevy::math::IVec2;
 use bevy::prelude::*;
-use bevy::window::CursorGrabMode;
+use bevy::window::{CursorGrabMode, WindowPosition};
 
 // Console imports - only available with console feature
 #[cfg(feature = "console")]
@@ -60,6 +61,39 @@ use player_controller::PlayerControllerPlugin;
 use shared_materials::SharedMaterialsPlugin;
 use ui::{CrosshairPlugin, ErrorIndicatorPlugin, GameState, InventoryUiPlugin, MainMenuPlugin};
 use world::WorldPlugin;
+
+// Helper function to extract client number from player ID for window positioning
+fn extract_client_number(player_id: &str) -> Option<u32> {
+    // Try to extract number from formats like "player-1", "player-2", "client-1", etc.
+    if let Some(last_part) = player_id.split('-').last() {
+        if let Ok(num) = last_part.parse::<u32>() {
+            return Some(num);
+        }
+    }
+
+    // Try to parse the entire ID as a number (e.g., "1", "2")
+    if let Ok(num) = player_id.parse::<u32>() {
+        return Some(num);
+    }
+
+    // Extract any trailing number from the string
+    let trailing_digits: String = player_id
+        .chars()
+        .rev()
+        .take_while(|c| c.is_ascii_digit())
+        .collect::<String>()
+        .chars()
+        .rev()
+        .collect();
+
+    if !trailing_digits.is_empty() {
+        if let Ok(num) = trailing_digits.parse::<u32>() {
+            return Some(num);
+        }
+    }
+
+    None
+}
 
 // Console command handlers - only available with console feature
 #[cfg(feature = "console")]
@@ -1357,8 +1391,24 @@ fn main() {
         .init_resource::<ChunkedVoxelWorld>(); // Initialize chunk-based world alongside existing VoxelWorld
     // Script resources are now handled by the ScriptPlugin
 
-    // Add default plugins and initialize AssetServer
-    app.add_plugins(DefaultPlugins);
+    // Add default plugins with custom window configuration
+    let player_profile = app.world().resource::<profile::PlayerProfile>();
+    let window_title = format!("IoTCraft - {}", player_profile.player_id);
+
+    // Get client number from player_id (assuming format like "player-1", "player-2", etc.)
+    let client_offset = extract_client_number(&player_profile.player_id).unwrap_or(0);
+    let window_x = 50.0 + (client_offset as f32 * 300.0); // Offset by 300px per client
+    let window_y = 50.0 + (client_offset as f32 * 50.0); // Offset by 50px per client
+
+    app.add_plugins(DefaultPlugins.set(WindowPlugin {
+        primary_window: Some(Window {
+            title: window_title,
+            resolution: bevy::window::WindowResolution::new(1280, 720),
+            position: WindowPosition::At(IVec2::new(window_x as i32, window_y as i32)),
+            ..default()
+        }),
+        ..default()
+    }));
 
     // Initialize fonts resource immediately after AssetServer is available
     // We need to do this in a way that ensures AssetServer exists

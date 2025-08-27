@@ -82,6 +82,24 @@ enum Commands {
         #[arg(last = true)]
         client_args: Vec<String>,
     },
+    /// Run tests with proper infrastructure
+    Test {
+        /// Test type to run
+        #[command(subcommand)]
+        test_type: TestType,
+    },
+}
+
+#[derive(Subcommand)]
+enum TestType {
+    /// Run unit tests only (fast, no external dependencies)
+    Unit,
+    /// Run integration tests (requires MQTT server)
+    Integration,
+    /// Run MQTT-specific integration tests
+    Mqtt,
+    /// Run all available tests
+    All,
 }
 
 #[tokio::main]
@@ -123,6 +141,9 @@ async fn main() -> Result<()> {
                 client_args,
             )
             .await?;
+        }
+        Commands::Test { test_type } => {
+            run_tests(test_type).await?;
         }
     }
 
@@ -958,6 +979,161 @@ async fn handle_stderr_stream(
 
     log_handle.flush().await?;
     Ok(())
+}
+
+/// Run tests with proper infrastructure setup
+async fn run_tests(test_type: &TestType) -> Result<()> {
+    match test_type {
+        TestType::Unit => {
+            println!("🧪 Running unit tests...");
+            run_unit_tests().await
+        }
+        TestType::Integration => {
+            println!("🔧 Running integration tests...");
+            run_integration_tests().await
+        }
+        TestType::Mqtt => {
+            println!("📡 Running MQTT integration tests...");
+            run_mqtt_tests().await
+        }
+        TestType::All => {
+            println!("🚀 Running all tests...");
+
+            println!("\n📝 Step 1/3: Unit tests");
+            run_unit_tests().await?;
+
+            println!("\n📝 Step 2/3: Integration tests");
+            run_integration_tests().await?;
+
+            println!("\n📝 Step 3/3: MQTT tests");
+            run_mqtt_tests().await?;
+
+            println!("\n✅ All tests completed successfully!");
+            Ok(())
+        }
+    }
+}
+
+/// Run unit tests (no external dependencies)
+async fn run_unit_tests() -> Result<()> {
+    println!("   Running cargo test for unit tests...");
+
+    let status = Command::new("cargo")
+        .args(&["test", "--lib", "--bins"])
+        .status()
+        .context("Failed to execute cargo test")?;
+
+    if !status.success() {
+        return Err(anyhow::anyhow!("Unit tests failed"));
+    }
+
+    println!("   ✅ Unit tests passed");
+    Ok(())
+}
+
+/// Run integration tests (with MQTT server infrastructure)
+async fn run_integration_tests() -> Result<()> {
+    println!("   Starting MQTT server for integration tests...");
+
+    // Start MQTT server in background
+    let mqtt_port = 1884; // Use different port to avoid conflicts
+    let server_handle = tokio::spawn(async move {
+        // Use a dummy log file for the test server
+        let log_file = std::path::PathBuf::from("/tmp/test-mqtt-server.log");
+        run_mqtt_server(log_file, mqtt_port).await
+    });
+
+    // Wait for server to be ready
+    println!("   Waiting for MQTT server to start...");
+    tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+
+    // Check if server is ready
+    match wait_for_port("localhost", mqtt_port, 10).await {
+        Ok(_) => println!("   ✅ MQTT server ready on port {}", mqtt_port),
+        Err(e) => {
+            server_handle.abort();
+            return Err(anyhow::anyhow!("MQTT server failed to start: {}", e));
+        }
+    }
+
+    // Run integration tests
+    println!("   Running integration tests...");
+    let test_result = Command::new("cargo")
+        .args(&[
+            "test",
+            "--test",
+            "integration",
+            "--features",
+            "integration-tests",
+        ])
+        .env("MQTT_TEST_PORT", mqtt_port.to_string())
+        .status()
+        .context("Failed to execute integration tests");
+
+    // Clean up server
+    server_handle.abort();
+
+    match test_result {
+        Ok(status) if status.success() => {
+            println!("   ✅ Integration tests passed");
+            Ok(())
+        }
+        Ok(_) => Err(anyhow::anyhow!("Integration tests failed")),
+        Err(e) => Err(e),
+    }
+}
+
+/// Run MQTT-specific integration tests
+async fn run_mqtt_tests() -> Result<()> {
+    println!("   Starting MQTT server for MQTT tests...");
+
+    // Start MQTT server in background
+    let mqtt_port = 1885; // Use different port to avoid conflicts
+    let server_handle = tokio::spawn(async move {
+        // Use a dummy log file for the test server
+        let log_file = std::path::PathBuf::from("/tmp/test-mqtt-server-mqtt.log");
+        run_mqtt_server(log_file, mqtt_port).await
+    });
+
+    // Wait for server to be ready
+    println!("   Waiting for MQTT server to start...");
+    tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+
+    // Check if server is ready
+    match wait_for_port("localhost", mqtt_port, 10).await {
+        Ok(_) => println!("   ✅ MQTT server ready on port {}", mqtt_port),
+        Err(e) => {
+            server_handle.abort();
+            return Err(anyhow::anyhow!("MQTT server failed to start: {}", e));
+        }
+    }
+
+    // Run MQTT tests
+    println!("   Running MQTT-specific tests...");
+    let test_result = Command::new("cargo")
+        .args(&[
+            "test",
+            "--test",
+            "integration",
+            "--features",
+            "integration-tests",
+            "mqtt::",
+        ])
+        .env("MQTT_TEST_PORT", mqtt_port.to_string())
+        .status()
+        .context("Failed to execute MQTT tests");
+
+    // Clean up server
+    server_handle.abort();
+
+    match test_result {
+        Ok(status) if status.success() => {
+            println!("   ✅ MQTT tests passed");
+            Ok(())
+        }
+        Ok(_) => Err(anyhow::anyhow!("MQTT tests failed")),
+        Err(e) => Err(e),
+    }
 }
 
 /// Check if a TCP port is open and accepting connections

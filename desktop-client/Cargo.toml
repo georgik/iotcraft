@@ -30,6 +30,7 @@ fluent-bundle = "0.16.0"
 fluent-syntax = "0.12.0"
 unic-langid = "0.9.6"
 futures = "0.3"
+futures-util = "0.3"
 anyhow = "1.0"
 uuid = { version = "1.0", features = ["v4"] }
 bytes = "1.0"
@@ -115,6 +116,8 @@ default = ["console"]
 console-bevy = ["dep:bevy_console"]  # Legacy desktop-only console
 # Convenience feature aliases
 console = []                          # Default to Simple console (no extra deps)
+# Test-specific features
+integration-tests = []                # Feature to enable integration tests
 
 
 [workspace]
@@ -122,4 +125,17 @@ members = [".", "xtask"]
 
 # Custom commands (use via .cargo/config.toml for local aliases)
 # For now, use: cargo run --package xtask -- <command>
+
+# Test configuration
+[dev-dependencies]
+# Testing utilities
+tokio-test = "0.4"
+
+# Integration test configuration
+[[test]]
+name = "integration"
+path = "tests/integration/main.rs"
+required-features = ["integration-tests"]
+
+# Test-specific features - moved to main features section above
 

@@ -24,6 +24,70 @@ mod player_avatar;
 // Note: Multiplayer and full device functionality requires desktop-only dependencies
 // For now, MQTT device announcements are handled in the web MQTT plugin
 
+// Desktop-only modules for tests and library usage
+#[cfg(not(target_arch = "wasm32"))]
+pub mod multiplayer;
+
+#[cfg(not(target_arch = "wasm32"))]
+pub mod config;
+
+#[cfg(not(target_arch = "wasm32"))]
+pub mod profile;
+
+#[cfg(not(target_arch = "wasm32"))]
+pub mod environment;
+
+#[cfg(not(target_arch = "wasm32"))]
+pub mod world;
+
+#[cfg(not(target_arch = "wasm32"))]
+pub mod inventory;
+
+#[cfg(not(target_arch = "wasm32"))]
+pub mod camera_controllers;
+
+#[cfg(not(target_arch = "wasm32"))]
+pub mod console;
+
+#[cfg(not(target_arch = "wasm32"))]
+pub mod devices;
+
+#[cfg(not(target_arch = "wasm32"))]
+pub mod interaction;
+
+#[cfg(not(target_arch = "wasm32"))]
+pub mod fonts;
+
+#[cfg(not(target_arch = "wasm32"))]
+pub mod localization;
+
+#[cfg(not(target_arch = "wasm32"))]
+pub mod script;
+
+#[cfg(not(target_arch = "wasm32"))]
+pub mod ui;
+
+#[cfg(not(target_arch = "wasm32"))]
+pub mod shared_materials;
+
+#[cfg(not(target_arch = "wasm32"))]
+pub mod rendering;
+
+#[cfg(not(target_arch = "wasm32"))]
+pub mod mcp;
+
+#[cfg(not(target_arch = "wasm32"))]
+pub mod mqtt;
+
+#[cfg(not(target_arch = "wasm32"))]
+pub mod reply {}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub mod player_controller;
+
+#[cfg(not(target_arch = "wasm32"))]
+pub mod player_avatar;
+
 #[cfg(target_arch = "wasm32")]
 pub use lib_gradual::*;
 

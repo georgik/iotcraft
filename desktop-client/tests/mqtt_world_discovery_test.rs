@@ -1,6 +1,4 @@
-mod mqtt_test_utils;
-
-use mqtt_test_utils::MqttTestEnvironment;
+// MqttTestEnvironment is defined inline in this test file
 use rumqttc::{AsyncClient, MqttOptions, QoS};
 use serde_json::Value;
 use std::collections::HashMap;

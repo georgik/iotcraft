@@ -1,10 +1,11 @@
 use bevy::prelude::*;
+use bevy::tasks::AsyncComputeTaskPool;
 use log::{error, info, warn};
-use rumqttc::{Client, Event, Incoming, MqttOptions, QoS};
+use rumqttc::{AsyncClient, Event, Incoming, MqttOptions, QoS};
 use std::collections::HashMap;
 use std::sync::mpsc;
-use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use tokio::time::{sleep as async_sleep, timeout};
 
 use super::mqtt_utils::generate_unique_client_id;
 use super::shared_world::*;
@@ -101,9 +102,10 @@ fn initialize_world_discovery(
     let mqtt_host = mqtt_config.host.clone();
     let mqtt_port = mqtt_config.port;
 
-    // Spawn discovery thread
-    thread::spawn(move || {
-        info!("Starting world discovery thread...");
+    // Spawn async discovery task using Bevy's task pool
+    let task_pool = AsyncComputeTaskPool::get();
+    task_pool.spawn(async move {
+        info!("Starting world discovery async task...");
 
         // Main discovery loop with reconnection handling
         loop {
@@ -114,7 +116,7 @@ fn initialize_world_discovery(
             opts.set_clean_session(false);
             opts.set_max_packet_size(1048576, 1048576); // Set max packet size to 1MB to match server
 
-            let (client, mut conn) = Client::new(opts, 10);
+            let (client, mut eventloop) = AsyncClient::new(opts, 10);
             let mut connected = false;
             let mut subscribed = false;
             let mut world_cache: HashMap<String, SharedWorldInfo> = HashMap::new();
@@ -124,22 +126,22 @@ fn initialize_world_discovery(
             let mut last_messages: HashMap<String, LastMessage> = HashMap::new();
             let mut last_cache_log = std::time::Instant::now();
 
-            // Wait for connection and subscribe
-            for event in conn.iter() {
-                match event {
+            // Wait for connection and subscribe using async stream
+            loop {
+                match eventloop.poll().await {
                     Ok(Event::Incoming(Incoming::ConnAck(_))) => {
                         connected = true;
                         info!("World discovery connected, subscribing to topics...");
 
                         // Subscribe to topics
-                        if let Err(e) = client.subscribe("iotcraft/worlds/+/info", QoS::AtLeastOnce)
+                        if let Err(e) = client.subscribe("iotcraft/worlds/+/info", QoS::AtLeastOnce).await
                         {
                             error!("Failed to subscribe to world info: {}", e);
                             break;
                         }
                         info!("Subscribed to iotcraft/worlds/+/info");
 
-                        if let Err(e) = client.subscribe("iotcraft/worlds/+/data", QoS::AtLeastOnce)
+                        if let Err(e) = client.subscribe("iotcraft/worlds/+/data", QoS::AtLeastOnce).await
                         {
                             error!("Failed to subscribe to world data: {}", e);
                             break;
@@ -147,7 +149,7 @@ fn initialize_world_discovery(
                         info!("Subscribed to iotcraft/worlds/+/data");
 
                         if let Err(e) =
-                            client.subscribe("iotcraft/worlds/+/data/chunk", QoS::AtLeastOnce)
+                            client.subscribe("iotcraft/worlds/+/data/chunk", QoS::AtLeastOnce).await
                         {
                             error!("Failed to subscribe to world data chunks: {}", e);
                             break;
@@ -155,7 +157,7 @@ fn initialize_world_discovery(
                         info!("Subscribed to iotcraft/worlds/+/data/chunk");
 
                         if let Err(e) =
-                            client.subscribe("iotcraft/worlds/+/changes", QoS::AtLeastOnce)
+                            client.subscribe("iotcraft/worlds/+/changes", QoS::AtLeastOnce).await
                         {
                             error!("Failed to subscribe to world changes: {}", e);
                             break;
@@ -164,7 +166,7 @@ fn initialize_world_discovery(
 
                         // Subscribe to block change topics for real-time synchronization
                         if let Err(e) = client
-                            .subscribe("iotcraft/worlds/+/state/blocks/placed", QoS::AtLeastOnce)
+                            .subscribe("iotcraft/worlds/+/state/blocks/placed", QoS::AtLeastOnce).await
                         {
                             error!("Failed to subscribe to block placements: {}", e);
                             break;
@@ -172,7 +174,7 @@ fn initialize_world_discovery(
                         info!("Subscribed to iotcraft/worlds/+/state/blocks/placed");
 
                         if let Err(e) = client
-                            .subscribe("iotcraft/worlds/+/state/blocks/removed", QoS::AtLeastOnce)
+                            .subscribe("iotcraft/worlds/+/state/blocks/removed", QoS::AtLeastOnce).await
                         {
                             error!("Failed to subscribe to block removals: {}", e);
                             break;
@@ -213,13 +215,13 @@ fn initialize_world_discovery(
                             info!(
                                 "Subscription acknowledged, continuing to wait for retained messages..."
                             );
-                            // Continue in the blocking loop for a bit longer to collect retained messages
+                            // Continue polling for a bit longer to collect retained messages
                             let start_time = std::time::Instant::now();
                             let mut retained_messages_received = 0;
 
                             // Wait up to 2 seconds for retained messages after subscription acknowledgment
                             while start_time.elapsed() < Duration::from_secs(2) {
-                                match conn.try_recv() {
+                                match timeout(Duration::from_millis(100), eventloop.poll()).await {
                                     Ok(Ok(Event::Incoming(Incoming::Publish(p)))) => {
                                         info!(
                                             "Processing retained/initial message on topic: {} (retained: {})",
@@ -249,15 +251,9 @@ fn initialize_world_discovery(
                                         );
                                         break;
                                     }
-                                    Err(rumqttc::TryRecvError::Empty) => {
-                                        // No more messages, wait a bit
-                                        thread::sleep(Duration::from_millis(50));
-                                    }
-                                    Err(rumqttc::TryRecvError::Disconnected) => {
-                                        error!(
-                                            "Connection lost while waiting for retained messages"
-                                        );
-                                        break;
+                                    Err(_) => {
+                                        // Timeout - no more messages, continue waiting
+                                        async_sleep(Duration::from_millis(50)).await;
                                     }
                                 }
                             }
@@ -290,21 +286,20 @@ fn initialize_world_discovery(
 
             if !connected {
                 error!("Failed to establish world discovery connection");
-                thread::sleep(Duration::from_secs(5));
+                async_sleep(Duration::from_secs(5)).await;
                 continue;
             }
 
             // Handle discovery and connection events
             let mut loop_counter = 0;
             let mut last_debug_log = std::time::Instant::now();
-            let mut last_connection_check = std::time::Instant::now();
             let mut messages_received_count = 0;
 
             info!("🔄 Discovery service entering main processing loop...");
 
             loop {
-                // Handle connection events (non-blocking)
-                match conn.try_recv() {
+                // Handle connection events using async polling with timeout
+                match timeout(Duration::from_millis(10), eventloop.poll()).await {
                     Ok(Ok(Event::Incoming(Incoming::Publish(p)))) => {
                         messages_received_count += 1;
                         info!(
@@ -352,15 +347,13 @@ fn initialize_world_discovery(
                         error!("World discovery connection error: {:?}", e);
                         break;
                     }
-                    Err(rumqttc::TryRecvError::Empty) => {}
-                    Err(rumqttc::TryRecvError::Disconnected) => {
-                        error!("World discovery connection lost");
-                        break;
+                    Err(_) => {
+                        // Timeout - no immediate messages, continue with other tasks
                     }
                 }
 
                 loop_counter += 1;
-                if loop_counter % 100000 == 0 && last_debug_log.elapsed() > Duration::from_secs(60)
+                if loop_counter % 10000 == 0 && last_debug_log.elapsed() > Duration::from_secs(60)
                 {
                     info!(
                         "🔄 Main MQTT processing loop is active (iteration {})",
@@ -400,13 +393,14 @@ fn initialize_world_discovery(
                     last_cache_log = std::time::Instant::now();
                 }
 
-                thread::sleep(Duration::from_millis(10));
+                // Small async yield to avoid busy waiting
+                async_sleep(Duration::from_millis(1)).await;
             }
 
             error!("World discovery disconnected, reconnecting in 5 seconds...");
-            thread::sleep(Duration::from_secs(5));
+            async_sleep(Duration::from_secs(5)).await;
         }
-    });
+    }).detach();
 
     info!("World discovery initialized");
 }

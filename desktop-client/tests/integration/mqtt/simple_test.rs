@@ -1,13 +1,20 @@
+use anyhow::Result;
 use rumqttc::{Client, Event, Incoming, MqttOptions, QoS};
 use std::time::Duration;
 use tokio::time::timeout;
 
+use crate::mqtt_test_infrastructure::MqttTestServer;
+
 #[tokio::test]
-async fn test_simple_retained_messages() {
+async fn test_simple_retained_messages() -> Result<()> {
     println!("🧪 Testing simple retained message behavior");
 
+    // Start MQTT test server
+    let server = MqttTestServer::start().await?;
+    println!("🔧 Test server running on {}", server.broker_address());
+
     // Step 1: Connect and check for existing retained messages (simulating desktop client behavior)
-    let mut mqttoptions = MqttOptions::new("desktop-client-test", "localhost", 1883);
+    let mut mqttoptions = MqttOptions::new("desktop-client-test", &server.host, server.port);
     mqttoptions.set_keep_alive(Duration::from_secs(10));
     mqttoptions.set_clean_session(false); // Important: persistent session to receive retained
 
@@ -72,4 +79,6 @@ async fn test_simple_retained_messages() {
     } else {
         println!("✅ Found {} retained messages", received_count);
     }
+    
+    Ok(())
 }

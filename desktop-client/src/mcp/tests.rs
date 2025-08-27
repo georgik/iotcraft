@@ -1,6 +1,8 @@
 #[cfg(test)]
 mod mcp_tests {
     use super::super::{mcp_tools::*, mcp_types::*};
+    use crate::environment::VoxelWorld;
+    use crate::mqtt::TemperatureResource;
     use bevy::prelude::*;
     use serde_json::json;
 
@@ -8,8 +10,8 @@ mod mcp_tests {
     fn create_test_world() -> World {
         let mut world = World::new();
         // Add minimal resources needed for MCP tools
-        world.init_resource::<crate::VoxelWorld>();
-        world.init_resource::<crate::TemperatureResource>();
+        world.init_resource::<VoxelWorld>();
+        world.init_resource::<TemperatureResource>();
         world.init_resource::<Time>();
         world
     }

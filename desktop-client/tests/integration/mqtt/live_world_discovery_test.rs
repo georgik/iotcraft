@@ -1,3 +1,5 @@
+// Import from parent test directory
+#[path = "../../mqtt_test_utils.rs"]
 mod mqtt_test_utils;
 
 use mqtt_test_utils::MqttTestEnvironment;
