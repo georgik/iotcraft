@@ -59,7 +59,7 @@ impl WorldInfo {
 async fn create_mqtt_client(
     client_id: &str,
     port: u16,
-) -> Result<(AsyncClient, rumqttc::EventLoop), Box<dyn std::error::Error>> {
+) -> Result<(AsyncClient, rumqttc::EventLoop), Box<dyn std::error::Error + Send + Sync>> {
     let mut mqttoptions = MqttOptions::new(client_id, "localhost", port);
     mqttoptions.set_keep_alive(Duration::from_secs(10));
     mqttoptions.set_clean_session(false); // Use persistent session to receive retained messages
@@ -69,7 +69,7 @@ async fn create_mqtt_client(
 }
 
 /// Publisher task - simulates the desktop client publishing world info
-async fn publisher_task(port: u16) -> Result<(), Box<dyn std::error::Error>> {
+async fn publisher_task(port: u16) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     println!("🚀 Starting publisher task...");
 
     let (client, mut eventloop) = create_mqtt_client("test-publisher", port).await?;
@@ -156,7 +156,7 @@ async fn publisher_task(port: u16) -> Result<(), Box<dyn std::error::Error>> {
 /// Subscriber task - simulates the desktop client subscribing to world info
 async fn subscriber_task(
     port: u16,
-) -> Result<HashMap<String, WorldInfo>, Box<dyn std::error::Error>> {
+) -> Result<HashMap<String, WorldInfo>, Box<dyn std::error::Error + Send + Sync>> {
     println!("🔍 Starting subscriber task...");
 
     let (client, mut eventloop) = create_mqtt_client("test-subscriber", port).await?;
@@ -243,7 +243,7 @@ async fn subscriber_task(
 /// Direct reader task - reads the existing worlds from the broker (simulates what desktop client should do)
 async fn direct_reader_task(
     port: u16,
-) -> Result<HashMap<String, WorldInfo>, Box<dyn std::error::Error>> {
+) -> Result<HashMap<String, WorldInfo>, Box<dyn std::error::Error + Send + Sync>> {
     println!("👁️  Starting direct reader task (checking existing worlds)...");
 
     let (client, mut eventloop) = create_mqtt_client("test-reader", port).await?;
@@ -336,7 +336,7 @@ async fn direct_reader_task(
 }
 
 #[tokio::test]
-async fn test_mqtt_world_discovery() -> Result<(), Box<dyn std::error::Error>> {
+async fn test_mqtt_world_discovery() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     println!("🧪 Starting MQTT World Discovery Integration Test");
     println!("{}", "=".repeat(60));
 

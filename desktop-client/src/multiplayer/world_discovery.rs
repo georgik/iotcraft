@@ -297,11 +297,34 @@ fn initialize_world_discovery(
             // Handle discovery and connection events
             let mut loop_counter = 0;
             let mut last_debug_log = std::time::Instant::now();
+            let mut last_connection_check = std::time::Instant::now();
+            let mut messages_received_count = 0;
+
+            info!("🔄 Discovery service entering main processing loop...");
+
             loop {
                 // Handle connection events (non-blocking)
                 match conn.try_recv() {
                     Ok(Ok(Event::Incoming(Incoming::Publish(p)))) => {
-                        info!("📬 Main loop received MQTT message on topic: {}", p.topic);
+                        messages_received_count += 1;
+                        info!(
+                            "📬 Main loop received MQTT message #{} on topic: {} (retained: {}, payload_len: {})",
+                            messages_received_count,
+                            p.topic,
+                            p.retain,
+                            p.payload.len()
+                        );
+
+                        // Log payload content for world info messages
+                        if p.topic.contains("/info") {
+                            let payload_preview = if p.payload.len() > 100 {
+                                format!("{}...", String::from_utf8_lossy(&p.payload[..100]))
+                            } else {
+                                String::from_utf8_lossy(&p.payload).to_string()
+                            };
+                            info!("📄 World info payload preview: {}", payload_preview);
+                        }
+
                         handle_discovery_message(
                             &p,
                             &mut world_cache,
@@ -309,11 +332,19 @@ fn initialize_world_discovery(
                             &mut last_messages,
                             &response_tx,
                         );
+
+                        info!(
+                            "✅ Message processing complete. World cache now has {} worlds",
+                            world_cache.len()
+                        );
                     }
                     Ok(Ok(other_event)) => {
-                        // Log other events occasionally to verify connection is alive
-                        if last_debug_log.elapsed() > Duration::from_secs(30) {
-                            info!("📡 Main loop received other MQTT event: {:?}", other_event);
+                        // Log other events more frequently to track connection health
+                        if last_debug_log.elapsed() > Duration::from_secs(10) {
+                            info!(
+                                "📡 Main loop received other MQTT event: {:?} (total messages: {})",
+                                other_event, messages_received_count
+                            );
                             last_debug_log = std::time::Instant::now();
                         }
                     }
