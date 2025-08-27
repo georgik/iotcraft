@@ -1,3 +1,14 @@
+/// A simple WASM-compatible client ID generator
+fn generate_unique_client_id(prefix: &str) -> String {
+    let random_suffix = js_sys::Math::random() * 1_000_000_000.0;
+    format!(
+        "{}-{}-{}",
+        prefix,
+        js_sys::Date::now() as u64,
+        random_suffix as u64
+    )
+}
+
 use bevy::prelude::*;
 use js_sys::Uint8Array;
 use std::cell::RefCell;
@@ -10,7 +21,6 @@ use web_sys::{BinaryType, ErrorEvent, MessageEvent, WebSocket};
 
 use super::mqtt_types::*;
 use crate::config::MqttConfig;
-use crate::multiplayer::mqtt_utils::generate_unique_client_id;
 use crate::profile::PlayerProfile;
 
 // Import multiplayer types
