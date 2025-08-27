@@ -5,8 +5,11 @@ use html5ever::tendril::TendrilSink;
 use markup5ever_rcdom::{Handle, NodeData, RcDom};
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
+use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::fs;
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::process::Command as TokioCommand;
 
 #[derive(Parser)]
 #[command(name = "xtask")]
@@ -51,6 +54,21 @@ enum Commands {
         #[arg(default_value = "web")]
         path: String,
     },
+    /// Run multiple client instances for testing
+    MultiClient {
+        /// Number of client instances to run
+        #[arg(short, long, default_value = "2")]
+        count: usize,
+        /// MQTT server address override
+        #[arg(short, long)]
+        mqtt_server: Option<String>,
+        /// Base directory for logs
+        #[arg(short, long, default_value = "logs")]
+        log_dir: String,
+        /// Additional arguments to pass to each client
+        #[arg(last = true)]
+        client_args: Vec<String>,
+    },
 }
 
 #[tokio::main]
@@ -70,6 +88,14 @@ async fn main() -> Result<()> {
         }
         Commands::FormatHtml { check, path } => {
             format_html(*check, path).await?;
+        }
+        Commands::MultiClient {
+            count,
+            mqtt_server,
+            log_dir,
+            client_args,
+        } => {
+            multi_client(*count, mqtt_server.as_deref(), log_dir, client_args).await?;
         }
     }
 
@@ -729,5 +755,324 @@ fn serialize_node(handle: &Handle, output: &mut Vec<u8>, indent_level: usize) ->
         }
     }
 
+    Ok(())
+}
+
+/// Run multiple client instances for testing with logging
+async fn multi_client(
+    count: usize,
+    mqtt_server: Option<&str>,
+    log_dir: &str,
+    client_args: &[String],
+) -> Result<()> {
+    if count == 0 {
+        return Err(anyhow::anyhow!("Client count must be greater than 0"));
+    }
+
+    println!("🚀 Starting {} IoTCraft client instances...", count);
+    println!("   Log directory: {}", log_dir);
+    if let Some(server) = mqtt_server {
+        println!("   MQTT server: {}", server);
+    }
+    println!();
+
+    // Create log directory
+    let log_path = Path::new(log_dir);
+    fs::create_dir_all(log_path)
+        .await
+        .context("Failed to create log directory")?;
+
+    // Generate timestamp for this run
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+
+    let run_id = format!("{}", timestamp);
+    let run_log_dir = log_path.join(&run_id);
+    fs::create_dir_all(&run_log_dir)
+        .await
+        .context("Failed to create run log directory")?;
+
+    println!(
+        "📁 Session logs will be stored in: {}",
+        run_log_dir.display()
+    );
+    println!();
+
+    // Start clients
+    let mut handles = Vec::new();
+    let mut abort_handles = Vec::new();
+
+    for client_id in 0..count {
+        let player_id = format!("player-{}", client_id + 1);
+        let log_file = run_log_dir.join(format!("client-{}.log", client_id + 1));
+
+        // Build command arguments
+        let mut args = vec![
+            "run".to_string(),
+            "--".to_string(),
+            "--player-id".to_string(),
+            player_id.clone(),
+        ];
+
+        // Add MQTT server override if provided
+        if let Some(server) = mqtt_server {
+            args.push("--mqtt-server".to_string());
+            args.push(server.to_string());
+        }
+
+        // Add any additional client arguments
+        args.extend_from_slice(client_args);
+
+        println!(
+            "🟢 Starting client {} (Player ID: {})...",
+            client_id + 1,
+            player_id
+        );
+        println!("   Command: cargo {}", args.join(" "));
+        println!("   Log file: {}", log_file.display());
+
+        let log_file_clone = log_file.clone();
+        let args_clone = args.clone();
+        let player_id_clone = player_id.clone();
+
+        let handle = tokio::spawn(async move {
+            run_client_instance(client_id + 1, player_id_clone, args_clone, log_file_clone).await
+        });
+
+        abort_handles.push(handle.abort_handle());
+        handles.push(handle);
+
+        // Small delay between starting clients to avoid resource contention
+        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+    }
+
+    println!();
+    println!("✅ All {} clients started successfully!", count);
+    println!();
+    println!("💡 Monitoring client processes...");
+    println!("   Press Ctrl+C to stop all clients and exit");
+    println!("   Logs are being written to: {}", run_log_dir.display());
+    println!();
+
+    // Wait for Ctrl+C or any client to exit
+    tokio::select! {
+        _ = tokio::signal::ctrl_c() => {
+            println!();
+            println!("🛑 Received Ctrl+C, shutting down all clients...");
+
+            // Cancel all client tasks using abort handles
+            for abort_handle in abort_handles {
+                abort_handle.abort();
+            }
+
+            println!("✅ All clients terminated");
+        }
+        result = futures::future::try_join_all(handles) => {
+            match result {
+                Ok(results) => {
+                    println!("📊 All clients finished:");
+                    for (i, result) in results.into_iter().enumerate() {
+                        match result {
+                            Ok(_) => println!("   Client {} ✅ Exited normally", i + 1),
+                            Err(e) => println!("   Client {} ❌ Failed: {}", i + 1, e),
+                        }
+                    }
+                }
+                Err(e) => {
+                    println!("❌ Error running clients: {}", e);
+                }
+            }
+        }
+    }
+
+    println!();
+    println!("📋 Session Summary:");
+    println!("   Run ID: {}", run_id);
+    println!("   Clients: {}", count);
+    println!("   Logs location: {}", run_log_dir.display());
+    println!();
+    println!("🔍 To view logs:");
+    for client_id in 0..count {
+        let log_file = run_log_dir.join(format!("client-{}.log", client_id + 1));
+        println!("   tail -f {}", log_file.display());
+    }
+
+    Ok(())
+}
+
+/// Run a single client instance with logging
+async fn run_client_instance(
+    client_num: usize,
+    player_id: String,
+    args: Vec<String>,
+    log_file: PathBuf,
+) -> Result<()> {
+    // Create and open log file
+    let mut log_handle = fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(true)
+        .open(&log_file)
+        .await
+        .with_context(|| format!("Failed to create log file: {}", log_file.display()))?;
+
+    // Write header to log file
+    let header = format!(
+        "=== IoTCraft Client {} (Player: {}) ===\n\
+         Started at: {}\n\
+         Command: cargo {}\n\
+         ==========================================\n\n",
+        client_num,
+        player_id,
+        chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC"),
+        args.join(" ")
+    );
+
+    log_handle.write_all(header.as_bytes()).await?;
+    log_handle.flush().await?;
+
+    // Start the cargo process
+    let mut child = TokioCommand::new("cargo")
+        .args(&args)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .with_context(|| format!("Failed to start client {}", client_num))?;
+
+    // Get stdout and stderr
+    let stdout = child.stdout.take().unwrap();
+    let stderr = child.stderr.take().unwrap();
+
+    let stdout_reader = BufReader::new(stdout);
+    let stderr_reader = BufReader::new(stderr);
+
+    let log_file_clone = log_file.clone();
+    let client_num_clone = client_num;
+
+    // Spawn tasks to handle stdout and stderr
+    let stdout_task = tokio::spawn(async move {
+        handle_stdout_stream(
+            stdout_reader,
+            log_file_clone.clone(),
+            client_num_clone,
+            "STDOUT",
+        )
+        .await
+    });
+
+    let stderr_task = tokio::spawn(async move {
+        handle_stderr_stream(stderr_reader, log_file, client_num, "STDERR").await
+    });
+
+    // Wait for the process to complete
+    let exit_status = child
+        .wait()
+        .await
+        .with_context(|| format!("Failed to wait for client {}", client_num))?;
+
+    // Wait for output handling to complete
+    let _ = tokio::try_join!(stdout_task, stderr_task);
+
+    if exit_status.success() {
+        println!(
+            "✅ Client {} (Player: {}) exited successfully",
+            client_num, player_id
+        );
+    } else {
+        println!(
+            "❌ Client {} (Player: {}) exited with code: {:?}",
+            client_num,
+            player_id,
+            exit_status.code()
+        );
+        return Err(anyhow::anyhow!(
+            "Client {} exited with non-zero status: {:?}",
+            client_num,
+            exit_status
+        ));
+    }
+
+    Ok(())
+}
+
+/// Handle stdout stream from client process
+async fn handle_stdout_stream(
+    mut reader: BufReader<tokio::process::ChildStdout>,
+    log_file: PathBuf,
+    client_num: usize,
+    stream_type: &str,
+) -> Result<()> {
+    let mut log_handle = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log_file)
+        .await
+        .with_context(|| {
+            format!(
+                "Failed to open log file for appending: {}",
+                log_file.display()
+            )
+        })?;
+
+    let mut line = String::new();
+    while reader.read_line(&mut line).await? > 0 {
+        let timestamp = chrono::Utc::now().format("%H:%M:%S%.3f");
+
+        // Write to log file with timestamp and stream type
+        let log_line = format!(
+            "[{}] [{}] [Client-{}] {}",
+            timestamp, stream_type, client_num, line
+        );
+        log_handle.write_all(log_line.as_bytes()).await?;
+
+        // Also write to console with client prefix
+        print!("[Client-{}] {}", client_num, line);
+
+        line.clear();
+    }
+
+    log_handle.flush().await?;
+    Ok(())
+}
+
+/// Handle stderr stream from client process
+async fn handle_stderr_stream(
+    mut reader: BufReader<tokio::process::ChildStderr>,
+    log_file: PathBuf,
+    client_num: usize,
+    stream_type: &str,
+) -> Result<()> {
+    let mut log_handle = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log_file)
+        .await
+        .with_context(|| {
+            format!(
+                "Failed to open log file for appending: {}",
+                log_file.display()
+            )
+        })?;
+
+    let mut line = String::new();
+    while reader.read_line(&mut line).await? > 0 {
+        let timestamp = chrono::Utc::now().format("%H:%M:%S%.3f");
+
+        // Write to log file with timestamp and stream type
+        let log_line = format!(
+            "[{}] [{}] [Client-{}] {}",
+            timestamp, stream_type, client_num, line
+        );
+        log_handle.write_all(log_line.as_bytes()).await?;
+
+        // Also write to console with client prefix (stderr in red if supported)
+        eprint!("[Client-{}] {}", client_num, line);
+
+        line.clear();
+    }
+
+    log_handle.flush().await?;
     Ok(())
 }

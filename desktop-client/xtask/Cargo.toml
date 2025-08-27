@@ -14,3 +14,5 @@ html5ever = "0.27"
 markup5ever_rcdom = "0.3"
 warp = { version = "0.4.2", features = ["compression", "server"] }
 qr2term = "0.3"
+chrono = { version = "0.4", features = ["serde"] }
+futures = "0.3"
