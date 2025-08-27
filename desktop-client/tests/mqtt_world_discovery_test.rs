@@ -1,3 +1,6 @@
+mod mqtt_test_utils;
+
+use mqtt_test_utils::MqttTestEnvironment;
 use rumqttc::{AsyncClient, MqttOptions, QoS};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -52,11 +55,12 @@ impl WorldInfo {
     }
 }
 
-/// Create MQTT client with given client ID
+/// Create MQTT client with given client ID and port
 async fn create_mqtt_client(
     client_id: &str,
+    port: u16,
 ) -> Result<(AsyncClient, rumqttc::EventLoop), Box<dyn std::error::Error>> {
-    let mut mqttoptions = MqttOptions::new(client_id, "localhost", 1883);
+    let mut mqttoptions = MqttOptions::new(client_id, "localhost", port);
     mqttoptions.set_keep_alive(Duration::from_secs(10));
     mqttoptions.set_clean_session(false); // Use persistent session to receive retained messages
 
@@ -65,10 +69,10 @@ async fn create_mqtt_client(
 }
 
 /// Publisher task - simulates the desktop client publishing world info
-async fn publisher_task() -> Result<(), Box<dyn std::error::Error>> {
+async fn publisher_task(port: u16) -> Result<(), Box<dyn std::error::Error>> {
     println!("🚀 Starting publisher task...");
 
-    let (client, mut eventloop) = create_mqtt_client("test-publisher").await?;
+    let (client, mut eventloop) = create_mqtt_client("test-publisher", port).await?;
 
     // Test worlds to publish
     let worlds = vec![
@@ -150,10 +154,12 @@ async fn publisher_task() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 /// Subscriber task - simulates the desktop client subscribing to world info
-async fn subscriber_task() -> Result<HashMap<String, WorldInfo>, Box<dyn std::error::Error>> {
+async fn subscriber_task(
+    port: u16,
+) -> Result<HashMap<String, WorldInfo>, Box<dyn std::error::Error>> {
     println!("🔍 Starting subscriber task...");
 
-    let (client, mut eventloop) = create_mqtt_client("test-subscriber").await?;
+    let (client, mut eventloop) = create_mqtt_client("test-subscriber", port).await?;
 
     let (tx, mut rx) = mpsc::channel::<WorldInfo>(32);
 
@@ -235,10 +241,12 @@ async fn subscriber_task() -> Result<HashMap<String, WorldInfo>, Box<dyn std::er
 }
 
 /// Direct reader task - reads the existing worlds from the broker (simulates what desktop client should do)
-async fn direct_reader_task() -> Result<HashMap<String, WorldInfo>, Box<dyn std::error::Error>> {
+async fn direct_reader_task(
+    port: u16,
+) -> Result<HashMap<String, WorldInfo>, Box<dyn std::error::Error>> {
     println!("👁️  Starting direct reader task (checking existing worlds)...");
 
-    let (client, mut eventloop) = create_mqtt_client("test-reader").await?;
+    let (client, mut eventloop) = create_mqtt_client("test-reader", port).await?;
 
     let (tx, mut rx) = mpsc::channel::<WorldInfo>(32);
 
@@ -332,15 +340,28 @@ async fn test_mqtt_world_discovery() -> Result<(), Box<dyn std::error::Error>> {
     println!("🧪 Starting MQTT World Discovery Integration Test");
     println!("{}", "=".repeat(60));
 
-    // Step 1: Check existing worlds first (what should be the main case)
-    println!("\n📖 Step 1: Reading existing worlds from broker...");
-    let existing_worlds = direct_reader_task().await?;
+    // Step 0: Set up clean MQTT test environment
+    println!("\n🔧 Step 0: Setting up MQTT test environment...");
+    let mqtt_env = MqttTestEnvironment::setup().await?;
+    let port = mqtt_env.port;
+    println!("   ✅ MQTT server running on port {}", port);
+    println!(
+        "   📄 Logs available at: {}",
+        mqtt_env.server.log_file().display()
+    );
+
+    // Step 1: Check existing worlds first (what should be the main case with a clean environment)
+    println!("\n📖 Step 1: Reading existing worlds from clean broker...");
+    let existing_worlds = direct_reader_task(port).await?;
 
     println!("\n📊 EXISTING WORLDS SUMMARY:");
     if existing_worlds.is_empty() {
-        println!("❌ No existing worlds found!");
+        println!("✅ No existing worlds found (as expected in clean environment)");
     } else {
-        println!("✅ Found {} existing worlds:", existing_worlds.len());
+        println!(
+            "⚠️  Found {} existing worlds (unexpected in clean environment):",
+            existing_worlds.len()
+        );
         for (world_id, world_info) in &existing_worlds {
             println!(
                 "   - {}: {} by {} ({} players)",
@@ -350,65 +371,117 @@ async fn test_mqtt_world_discovery() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // Give some separation
-    sleep(Duration::from_secs(2)).await;
+    sleep(Duration::from_secs(1)).await;
 
     // Step 2: Test publishing new worlds
     println!("\n📡 Step 2: Publishing test worlds...");
-    publisher_task().await?;
+    publisher_task(port).await?;
 
     // Give some time for messages to propagate
     sleep(Duration::from_secs(1)).await;
 
     // Step 3: Test subscribing to see if new worlds are discovered
     println!("\n🔍 Step 3: Testing subscriber (simulating desktop client)...");
-    let discovered_worlds = subscriber_task().await?;
+    let discovered_worlds = subscriber_task(port).await?;
 
-    // Step 4: Analysis and results
+    // Step 4: Test retained messages by creating a new reader
+    println!("\n👁️  Step 4: Testing retained message delivery with new reader...");
+    let retained_worlds = direct_reader_task(port).await?;
+
+    // Step 5: Analysis and results
     println!("\n\n");
     println!("🧮 FINAL ANALYSIS:");
     println!("{}", "=".repeat(60));
 
-    println!("📈 Existing worlds from broker: {}", existing_worlds.len());
-    println!("📈 New discovered worlds: {}", discovered_worlds.len());
+    println!(
+        "📈 Initial worlds from clean broker: {}",
+        existing_worlds.len()
+    );
+    println!(
+        "📈 New discovered worlds (live subscription): {}",
+        discovered_worlds.len()
+    );
+    println!(
+        "📈 Retained worlds from new reader: {}",
+        retained_worlds.len()
+    );
 
     let total_unique_worlds: std::collections::HashSet<_> = existing_worlds
         .keys()
         .chain(discovered_worlds.keys())
+        .chain(retained_worlds.keys())
         .collect();
     println!("📈 Total unique worlds: {}", total_unique_worlds.len());
 
-    // Check if desktop client would have the problem
-    if existing_worlds.is_empty() && discovered_worlds.is_empty() {
-        println!("🚨 PROBLEM CONFIRMED: No worlds discovered at all!");
-        println!("   This suggests the MQTT discovery system is not working correctly.");
-    } else if existing_worlds.is_empty() {
-        println!("⚠️  POTENTIAL ISSUE: No existing worlds found, but new ones were discovered.");
-        println!(
-            "   This suggests the desktop client might not be receiving retained messages properly."
-        );
-        println!("   Check: clean_session settings, QoS levels, subscription timing");
+    // Detailed analysis
+    if retained_worlds.len() > 0 {
+        println!("\n✅ RETAINED MESSAGES WORKING:");
+        println!("   The MQTT broker is properly retaining world info messages.");
+        for (world_id, world_info) in &retained_worlds {
+            println!(
+                "   - {}: {} by {} ({}/{} players, public: {})",
+                world_id,
+                world_info.world_name,
+                world_info.host_name,
+                world_info.player_count,
+                world_info.max_players,
+                world_info.is_public
+            );
+        }
+
+        if discovered_worlds.len() > 0 {
+            println!("\n✅ LIVE SUBSCRIPTION WORKING:");
+            println!("   New subscribers receive messages during publication.");
+        }
+    } else if discovered_worlds.len() > 0 {
+        println!("\n⚠️  POTENTIAL RETAINED MESSAGE ISSUE:");
+        println!("   Live subscription works, but retained messages are not being delivered.");
+        println!("   This could indicate:");
+        println!("   - MQTT broker not configured to retain messages");
+        println!("   - Messages published without retain=true flag");
+        println!("   - Client connecting with clean_session=true");
     } else {
-        println!("✅ DISCOVERY WORKING: Found existing worlds from broker");
-        println!("   The MQTT discovery system appears to be functioning correctly.");
+        println!("\n🚨 MQTT DISCOVERY SYSTEM NOT WORKING:");
+        println!("   No worlds discovered through any mechanism.");
+        println!("   Check MQTT broker connection and message publishing.");
     }
 
-    // Recommendations
+    // Recommendations based on results
     println!("\n🔧 TROUBLESHOOTING RECOMMENDATIONS:");
-    println!("1. Check desktop client MQTT connection settings:");
-    println!("   - clean_session should be false to receive retained messages");
-    println!("   - QoS should be AtLeastOnce or ExactlyOnce");
-    println!("   - Client should subscribe immediately after connecting");
+    if retained_worlds.len() > 0 {
+        println!("✅ MQTT world discovery system is working correctly!");
+        println!("   If desktop client is not seeing worlds, check:");
+        println!("   1. Client MQTT connection settings match test settings");
+        println!("   2. World discovery subscription is active after client startup");
+        println!("   3. OnlineWorlds resource updates are processed correctly");
+    } else {
+        println!("1. Check desktop client MQTT connection settings:");
+        println!("   - clean_session should be false to receive retained messages");
+        println!("   - QoS should be AtLeastOnce or ExactlyOnce");
+        println!("   - Client should subscribe immediately after connecting");
 
-    println!("2. Check desktop client subscription topic:");
-    println!("   - Should be 'iotcraft/worlds/+/info'");
-    println!("   - Make sure the + wildcard is working");
+        println!("2. Check world publishing in desktop client:");
+        println!("   - World info messages must be published with retain=true");
+        println!("   - Topic format should be 'iotcraft/worlds/{{world_id}}/info'");
 
-    println!("3. Check desktop client message processing:");
-    println!("   - Verify JSON parsing is working correctly");
-    println!("   - Check if OnlineWorlds resource is being updated");
-    println!("   - Add logging to see if messages are received but not processed");
+        println!("3. Check desktop client subscription:");
+        println!("   - Should subscribe to 'iotcraft/worlds/+/info'");
+        println!("   - Verify wildcard (+) support in MQTT client library");
+
+        println!("4. Check message processing:");
+        println!("   - Verify JSON parsing matches expected format");
+        println!("   - Add logging to see if messages are received but not processed");
+    }
 
     println!("\n🏁 Test completed!");
+    println!(
+        "📄 MQTT server logs: {}",
+        mqtt_env.server.log_file().display()
+    );
+
+    // Clean up
+    mqtt_env.shutdown().await?;
+    println!("🧹 Test environment cleaned up");
 
     Ok(())
 }

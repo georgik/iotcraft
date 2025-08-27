@@ -69,7 +69,7 @@ getrandom_03 = { package = "getrandom", version = "0.3", features = ["wasm_js"] 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 rumqttc = "0.24.0"
 rumqttd = "0.19.0"
-tokio = { version = "1.47", features = ["rt-multi-thread", "macros", "fs", "net"] }
+tokio = { version = "1.47", features = ["rt-multi-thread", "macros", "fs", "net", "process"] }
 axum = "0.8"
 tower = "0.5"
 tower-http = { version = "0.6", features = ["cors"] }

@@ -1031,7 +1031,7 @@ async fn multi_client_env(
 
     // If no server override is provided and we're starting our own server, use localhost
     let effective_mqtt_server = if start_server && mqtt_server_override.is_none() {
-        Some(format!("localhost:{}", mqtt_port))
+        Some("localhost".to_string())
     } else {
         mqtt_server_override.map(|s| s.to_string())
     };
@@ -1261,9 +1261,21 @@ async fn multi_client_env(
 
 /// Run the MQTT server from ../mqtt-server
 async fn run_mqtt_server(log_file: PathBuf, port: u16) -> Result<()> {
+    // Resolve and validate the server working directory
+    let server_dir = std::fs::canonicalize("../mqtt-server").with_context(|| {
+        "Failed to resolve ../mqtt-server. Are you running xtask from desktop-client?"
+    })?;
+    let config_path = server_dir.join("rumqttd.toml");
+    let has_config = config_path.exists();
+
     println!("[DEBUG] Starting MQTT server with:");
     println!("[DEBUG]   Command: cargo run -- --port {}", port);
-    println!("[DEBUG]   Working directory: ../mqtt-server");
+    println!("[DEBUG]   Working directory: {}", server_dir.display());
+    println!(
+        "[DEBUG]   Config file: {} ({})",
+        config_path.display(),
+        if has_config { "found" } else { "MISSING" }
+    );
     println!("[DEBUG]   Log file: {}", log_file.display());
 
     // Create and open log file
@@ -1280,25 +1292,33 @@ async fn run_mqtt_server(log_file: PathBuf, port: u16) -> Result<()> {
         "=== MQTT Server ===\n\
          Started at: {}\n\
          Port: {}\n\
-         Working directory: ../mqtt-server\n\
+         Working directory: {}\n\
+         Config file: {} ({})\n\
          Command: cargo run -- --port {}\n\
          ===================\n\n",
         chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC"),
         port,
+        server_dir.display(),
+        config_path.display(),
+        if has_config { "found" } else { "MISSING" },
         port
     );
 
     log_handle.write_all(header.as_bytes()).await?;
     log_handle.flush().await?;
 
+    if !has_config {
+        println!("[WARN] rumqttd.toml not found at {}. The server may fail to start if it requires this config.", config_path.display());
+    }
+
     // Start the MQTT server process
     let mut child = TokioCommand::new("cargo")
         .args(&["run", "--", "--port", &port.to_string()])
-        .current_dir("../mqtt-server")
+        .current_dir(&server_dir)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .context("Failed to start MQTT server (make sure ../mqtt-server exists)")?;
+        .with_context(|| format!("Failed to start MQTT server in {}", server_dir.display()))?;
 
     println!(
         "[DEBUG] MQTT server process started with PID: {:?}",

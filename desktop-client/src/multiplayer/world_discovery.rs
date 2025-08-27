@@ -4,7 +4,7 @@ use rumqttc::{Client, Event, Incoming, MqttOptions, QoS};
 use std::collections::HashMap;
 use std::sync::mpsc;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use super::mqtt_utils::generate_unique_client_id;
 use super::shared_world::*;
@@ -12,11 +12,21 @@ use super::world_publisher::ChunkedWorldData; // Import from publisher
 use crate::config::MqttConfig;
 use crate::world::*;
 
+/// Data structure to hold information about the last received message on a topic
+#[derive(Debug, Clone)]
+pub struct LastMessage {
+    pub content: String,
+    pub timestamp: u64, // Unix timestamp in seconds
+}
+
 /// Resource for managing world discovery
 #[derive(Resource)]
 pub struct WorldDiscovery {
     pub discovery_tx: std::sync::Mutex<Option<mpsc::Sender<DiscoveryMessage>>>,
     pub world_rx: std::sync::Mutex<Option<mpsc::Receiver<DiscoveryResponse>>>,
+    pub subscribed_topics: std::sync::Mutex<Vec<String>>,
+    pub connection_status: std::sync::Mutex<String>,
+    pub last_messages: std::sync::Mutex<HashMap<String, LastMessage>>,
 }
 
 impl Default for WorldDiscovery {
@@ -24,6 +34,9 @@ impl Default for WorldDiscovery {
         Self {
             discovery_tx: std::sync::Mutex::new(None),
             world_rx: std::sync::Mutex::new(None),
+            subscribed_topics: std::sync::Mutex::new(Vec::new()),
+            connection_status: std::sync::Mutex::new("Disconnected".to_string()),
+            last_messages: std::sync::Mutex::new(HashMap::new()),
         }
     }
 }
@@ -50,6 +63,9 @@ pub enum DiscoveryResponse {
         player_id: String,
         player_name: String,
         change_type: super::shared_world::BlockChangeType,
+    },
+    LastMessagesUpdated {
+        last_messages: HashMap<String, LastMessage>,
     },
 }
 
@@ -104,6 +120,8 @@ fn initialize_world_discovery(
             let mut world_cache: HashMap<String, SharedWorldInfo> = HashMap::new();
             // Track chunks for reassembly
             let mut chunk_cache: HashMap<String, HashMap<u32, ChunkedWorldData>> = HashMap::new();
+            // Track last messages for each topic
+            let mut last_messages: HashMap<String, LastMessage> = HashMap::new();
             let mut last_cache_log = std::time::Instant::now();
 
             // Wait for connection and subscribe
@@ -177,6 +195,7 @@ fn initialize_world_discovery(
                                 &p,
                                 &mut world_cache,
                                 &mut chunk_cache,
+                                &mut last_messages,
                                 &response_tx,
                             );
 
@@ -210,6 +229,7 @@ fn initialize_world_discovery(
                                             &p,
                                             &mut world_cache,
                                             &mut chunk_cache,
+                                            &mut last_messages,
                                             &response_tx,
                                         );
 
@@ -286,6 +306,7 @@ fn initialize_world_discovery(
                             &p,
                             &mut world_cache,
                             &mut chunk_cache,
+                            &mut last_messages,
                             &response_tx,
                         );
                     }
@@ -363,9 +384,36 @@ fn handle_discovery_message(
     publish: &rumqttc::Publish,
     world_cache: &mut HashMap<String, SharedWorldInfo>,
     chunk_cache: &mut HashMap<String, HashMap<u32, ChunkedWorldData>>,
+    last_messages: &mut HashMap<String, LastMessage>,
     response_tx: &mpsc::Sender<DiscoveryResponse>,
 ) {
     info!("Received MQTT message on topic: {}", publish.topic);
+
+    // Track last message for this topic
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+
+    let payload_str = String::from_utf8_lossy(&publish.payload);
+    let truncated_content = if payload_str.len() > 40 {
+        format!("{}...", &payload_str[..40])
+    } else {
+        payload_str.to_string()
+    };
+
+    last_messages.insert(
+        publish.topic.clone(),
+        LastMessage {
+            content: truncated_content,
+            timestamp,
+        },
+    );
+
+    // Send last messages update
+    let _ = response_tx.send(DiscoveryResponse::LastMessagesUpdated {
+        last_messages: last_messages.clone(),
+    });
 
     let topic_parts: Vec<&str> = publish.topic.split('/').collect();
 
@@ -803,6 +851,13 @@ fn process_discovery_responses(
                         MultiplayerMode::SinglePlayer => {
                             info!("🚫 In SinglePlayer mode, ignoring block change");
                         }
+                    }
+                }
+                DiscoveryResponse::LastMessagesUpdated { last_messages } => {
+                    // Update last messages in the WorldDiscovery resource
+                    if let Ok(mut resource_last_messages) = world_discovery.last_messages.try_lock()
+                    {
+                        *resource_last_messages = last_messages;
                     }
                 }
             }

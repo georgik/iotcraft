@@ -1668,6 +1668,7 @@ fn update_diagnostics_content(
     time: Res<Time>,
     multiplayer_mode: Res<crate::multiplayer::MultiplayerMode>,
     multiplayer_status: Res<crate::multiplayer::MultiplayerConnectionStatus>,
+    world_discovery: Res<crate::multiplayer::WorldDiscovery>,
 ) {
     if !diagnostics_visible.visible {
         return;
@@ -1742,23 +1743,26 @@ fn update_diagnostics_content(
                 "🔄 Connecting to MQTT broker..."
             };
 
-            // Get multiplayer mode information
-            let multiplayer_mode_text = match &*multiplayer_mode {
-                crate::multiplayer::MultiplayerMode::SinglePlayer => "🚫 SinglePlayer",
+            // Get multiplayer mode information and world ID
+            let (multiplayer_mode_text, current_world_id) = match &*multiplayer_mode {
+                crate::multiplayer::MultiplayerMode::SinglePlayer => {
+                    ("🚫 SinglePlayer".to_string(), "None".to_string())
+                }
                 crate::multiplayer::MultiplayerMode::HostingWorld {
                     world_id,
                     is_published,
                 } => {
-                    if *is_published {
+                    let mode_text = if *is_published {
                         "🏠 Hosting (Public)"
                     } else {
                         "🏠 Hosting (Private)"
-                    }
+                    };
+                    (mode_text.to_string(), world_id.clone())
                 }
                 crate::multiplayer::MultiplayerMode::JoinedWorld {
                     world_id,
                     host_player,
-                } => "👥 Joined World",
+                } => ("👥 Joined World".to_string(), world_id.clone()),
             };
 
             let multiplayer_enabled = if multiplayer_status.connection_available {
@@ -1767,53 +1771,113 @@ fn update_diagnostics_content(
                 "❌ Disabled"
             };
 
+            // Get MQTT subscription information from WorldDiscovery resource
+            let subscribed_topics = vec![
+                "iotcraft/worlds/+/info".to_string(),
+                "iotcraft/worlds/+/data".to_string(),
+                "iotcraft/worlds/+/data/chunk".to_string(),
+                "iotcraft/worlds/+/changes".to_string(),
+                "iotcraft/worlds/+/state/blocks/placed".to_string(),
+                "iotcraft/worlds/+/state/blocks/removed".to_string(),
+            ];
+
+            // Get last messages from WorldDiscovery resource
+            let last_messages = if let Ok(messages) = world_discovery.last_messages.try_lock() {
+                messages.clone()
+            } else {
+                std::collections::HashMap::new()
+            };
+
+            let topics_text = subscribed_topics
+                .iter()
+                .map(|topic| {
+                    // Find matching topic in last_messages (handling wildcards)
+                    let pattern = topic.replace("+", "[^/]+");
+                    let matching_message = last_messages.iter().find(|(msg_topic, _)| {
+                        // Simple pattern matching for wildcard topics
+                        if topic.contains("+") {
+                            // Create a basic regex-like match
+                            let pattern_parts: Vec<&str> = topic.split("+").collect();
+                            if pattern_parts.len() == 2 {
+                                msg_topic.starts_with(pattern_parts[0])
+                                    && msg_topic.ends_with(pattern_parts[1])
+                            } else {
+                                false
+                            }
+                        } else {
+                            *msg_topic == topic
+                        }
+                    });
+
+                    if let Some((_, last_msg)) = matching_message {
+                        format!("  • {}: {}", topic, last_msg.content)
+                    } else {
+                        format!("  • {}: (no messages)", topic)
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+
             let uptime = time.elapsed_secs();
             let minutes = (uptime / 60.0) as u32;
             let seconds = (uptime % 60.0) as u32;
 
             text.0 = format!(
-                "IoTCraft Debug Information (Press F3 to toggle)\n\
-                ------------------------------------------------------------------------------------------
-                \n\
-                - PLAYER INFORMATION\n\
-                Position: X={:.2}  Y={:.2}  Z={:.2}\n\
-                Rotation: Yaw={:.1}°  Pitch={:.1}°\n\
-                Selected Slot: {} ({})\n\
-                \n\
-                - MULTIPLAYER INFORMATION\n\
-                MQTT Broker: {}\n\
-                Multiplayer Status: {}\n\
-                Multiplayer Mode: {}\n\
-                Connected Players: {} (1 local + {} remote)\n\
-                {}\n\
-                \n\
-                - WORLD INFORMATION\n\
-                Total Blocks: {}\n\
-                IoT Devices: {}\n\
-                Session Time: {}m {}s\n\
-                \n\
-                - SCRIPT COMMANDS\n\
-                Teleport: tp {:.2} {:.2} {:.2}\n\
-                Look Direction: look {:.1} {:.1}\n\
-                \n\
-                - CONTROLS\n\
-                F3: Toggle this debug screen\n\
-                T: Open console\n\
-                1-9: Select inventory slot\n\
-                Mouse Wheel: Scroll inventory slots",
-                translation.x, translation.y, translation.z,
-                yaw_degrees, pitch_degrees,
-                selected_slot, selected_item,
+                "IoTCraft Debug Information (Press F3 to toggle)                        MQTT SUBSCRIPTIONS\n\
+                -------------------------------------------------  |  --------------------------------------\n\
+                                                               |\n\
+                - PLAYER INFORMATION                           |  Current World Filter: {}\n\
+                Position: X={:.2}  Y={:.2}  Z={:.2}               |\n\
+                Rotation: Yaw={:.1}°  Pitch={:.1}°                    |  Subscribed Topics:\n\
+                Selected Slot: {} ({})                        |  {}\n\
+                                                               |\n\
+                - MULTIPLAYER INFORMATION                      |\n\
+                MQTT Broker: {}                               |\n\
+                Multiplayer Status: {}                        |\n\
+                Multiplayer Mode: {}                          |\n\
+                Current World ID: {}                          |\n\
+                Connected Players: {} (1 local + {} remote)   |\n\
+                {}                                             |\n\
+                                                               |\n\
+                - WORLD INFORMATION                            |\n\
+                Total Blocks: {}                              |\n\
+                IoT Devices: {}                               |\n\
+                Session Time: {}m {}s                         |\n\
+                                                               |\n\
+                - SCRIPT COMMANDS                              |\n\
+                Teleport: tp {:.2} {:.2} {:.2}                    |\n\
+                Look Direction: look {:.1} {:.1}                  |\n\
+                                                               |\n\
+                - CONTROLS                                     |\n\
+                F3: Toggle this debug screen                  |\n\
+                T: Open console                               |\n\
+                1-9: Select inventory slot                    |\n\
+                Mouse Wheel: Scroll inventory slots           |",
+                current_world_id, // Used for the filter line
+                translation.x,
+                translation.y,
+                translation.z,
+                yaw_degrees,
+                pitch_degrees,
+                selected_slot,
+                selected_item,
+                topics_text,
                 mqtt_connection_status,
                 multiplayer_enabled,
                 multiplayer_mode_text,
-                remote_player_count + 1, remote_player_count,
+                current_world_id,
+                remote_player_count + 1,
+                remote_player_count,
                 players_text,
                 block_count,
                 device_count,
-                minutes, seconds,
-                translation.x, translation.y, translation.z,
-                yaw_degrees, pitch_degrees
+                minutes,
+                seconds,
+                translation.x,
+                translation.y,
+                translation.z,
+                yaw_degrees,
+                pitch_degrees
             );
         }
     }
