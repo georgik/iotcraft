@@ -4,9 +4,10 @@ use html5ever::parse_document;
 use html5ever::tendril::TendrilSink;
 use markup5ever_rcdom::{Handle, NodeData, RcDom};
 use std::io::Write;
+use std::net::TcpStream;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::fs;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command as TokioCommand;
@@ -65,6 +66,18 @@ enum Commands {
         /// Base directory for logs
         #[arg(short, long, default_value = "logs")]
         log_dir: String,
+        /// Start MQTT server from ../mqtt-server
+        #[arg(long)]
+        with_mqtt_server: bool,
+        /// Add MQTT observer using mosquitto_sub
+        #[arg(long)]
+        with_observer: bool,
+        /// MQTT server port (default: 1883)
+        #[arg(long, default_value = "1883")]
+        mqtt_port: u16,
+        /// Complete test environment (server + observer + clients)
+        #[arg(long)]
+        full_env: bool,
         /// Additional arguments to pass to each client
         #[arg(last = true)]
         client_args: Vec<String>,
@@ -93,9 +106,23 @@ async fn main() -> Result<()> {
             count,
             mqtt_server,
             log_dir,
+            with_mqtt_server,
+            with_observer,
+            mqtt_port,
+            full_env,
             client_args,
         } => {
-            multi_client(*count, mqtt_server.as_deref(), log_dir, client_args).await?;
+            multi_client_env(
+                *count,
+                mqtt_server.as_deref(),
+                log_dir,
+                *with_mqtt_server,
+                *with_observer,
+                *mqtt_port,
+                *full_env,
+                client_args,
+            )
+            .await?;
         }
     }
 
@@ -758,150 +785,6 @@ fn serialize_node(handle: &Handle, output: &mut Vec<u8>, indent_level: usize) ->
     Ok(())
 }
 
-/// Run multiple client instances for testing with logging
-async fn multi_client(
-    count: usize,
-    mqtt_server: Option<&str>,
-    log_dir: &str,
-    client_args: &[String],
-) -> Result<()> {
-    if count == 0 {
-        return Err(anyhow::anyhow!("Client count must be greater than 0"));
-    }
-
-    println!("🚀 Starting {} IoTCraft client instances...", count);
-    println!("   Log directory: {}", log_dir);
-    if let Some(server) = mqtt_server {
-        println!("   MQTT server: {}", server);
-    }
-    println!();
-
-    // Create log directory
-    let log_path = Path::new(log_dir);
-    fs::create_dir_all(log_path)
-        .await
-        .context("Failed to create log directory")?;
-
-    // Generate timestamp for this run
-    let timestamp = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_secs();
-
-    let run_id = format!("{}", timestamp);
-    let run_log_dir = log_path.join(&run_id);
-    fs::create_dir_all(&run_log_dir)
-        .await
-        .context("Failed to create run log directory")?;
-
-    println!(
-        "📁 Session logs will be stored in: {}",
-        run_log_dir.display()
-    );
-    println!();
-
-    // Start clients
-    let mut handles = Vec::new();
-    let mut abort_handles = Vec::new();
-
-    for client_id in 0..count {
-        let player_id = format!("player-{}", client_id + 1);
-        let log_file = run_log_dir.join(format!("client-{}.log", client_id + 1));
-
-        // Build command arguments
-        let mut args = vec![
-            "run".to_string(),
-            "--".to_string(),
-            "--player-id".to_string(),
-            player_id.clone(),
-        ];
-
-        // Add MQTT server override if provided
-        if let Some(server) = mqtt_server {
-            args.push("--mqtt-server".to_string());
-            args.push(server.to_string());
-        }
-
-        // Add any additional client arguments
-        args.extend_from_slice(client_args);
-
-        println!(
-            "🟢 Starting client {} (Player ID: {})...",
-            client_id + 1,
-            player_id
-        );
-        println!("   Command: cargo {}", args.join(" "));
-        println!("   Log file: {}", log_file.display());
-
-        let log_file_clone = log_file.clone();
-        let args_clone = args.clone();
-        let player_id_clone = player_id.clone();
-
-        let handle = tokio::spawn(async move {
-            run_client_instance(client_id + 1, player_id_clone, args_clone, log_file_clone).await
-        });
-
-        abort_handles.push(handle.abort_handle());
-        handles.push(handle);
-
-        // Small delay between starting clients to avoid resource contention
-        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-    }
-
-    println!();
-    println!("✅ All {} clients started successfully!", count);
-    println!();
-    println!("💡 Monitoring client processes...");
-    println!("   Press Ctrl+C to stop all clients and exit");
-    println!("   Logs are being written to: {}", run_log_dir.display());
-    println!();
-
-    // Wait for Ctrl+C or any client to exit
-    tokio::select! {
-        _ = tokio::signal::ctrl_c() => {
-            println!();
-            println!("🛑 Received Ctrl+C, shutting down all clients...");
-
-            // Cancel all client tasks using abort handles
-            for abort_handle in abort_handles {
-                abort_handle.abort();
-            }
-
-            println!("✅ All clients terminated");
-        }
-        result = futures::future::try_join_all(handles) => {
-            match result {
-                Ok(results) => {
-                    println!("📊 All clients finished:");
-                    for (i, result) in results.into_iter().enumerate() {
-                        match result {
-                            Ok(_) => println!("   Client {} ✅ Exited normally", i + 1),
-                            Err(e) => println!("   Client {} ❌ Failed: {}", i + 1, e),
-                        }
-                    }
-                }
-                Err(e) => {
-                    println!("❌ Error running clients: {}", e);
-                }
-            }
-        }
-    }
-
-    println!();
-    println!("📋 Session Summary:");
-    println!("   Run ID: {}", run_id);
-    println!("   Clients: {}", count);
-    println!("   Logs location: {}", run_log_dir.display());
-    println!();
-    println!("🔍 To view logs:");
-    for client_id in 0..count {
-        let log_file = run_log_dir.join(format!("client-{}.log", client_id + 1));
-        println!("   tail -f {}", log_file.display());
-    }
-
-    Ok(())
-}
-
 /// Run a single client instance with logging
 async fn run_client_instance(
     client_num: usize,
@@ -1069,6 +952,571 @@ async fn handle_stderr_stream(
 
         // Also write to console with client prefix (stderr in red if supported)
         eprint!("[Client-{}] {}", client_num, line);
+
+        line.clear();
+    }
+
+    log_handle.flush().await?;
+    Ok(())
+}
+
+/// Check if a TCP port is open and accepting connections
+fn is_port_open(host: &str, port: u16) -> bool {
+    use std::net::ToSocketAddrs;
+
+    let addr_str = format!("{}:{}", host, port);
+
+    // Use ToSocketAddrs to resolve hostname (including localhost) to actual IP addresses
+    match addr_str.to_socket_addrs() {
+        Ok(mut addrs) => {
+            // Try to connect to the first resolved address
+            if let Some(socket_addr) = addrs.next() {
+                match TcpStream::connect_timeout(&socket_addr, Duration::from_millis(500)) {
+                    Ok(_) => {
+                        // Successfully connected, close and return true
+                        true
+                    }
+                    Err(_) => false,
+                }
+            } else {
+                eprintln!("[DEBUG] No addresses resolved for: {}", addr_str);
+                false
+            }
+        }
+        Err(e) => {
+            eprintln!("[DEBUG] Failed to resolve address {}: {}", addr_str, e);
+            false
+        }
+    }
+}
+
+/// Wait for a port to become available with timeout
+async fn wait_for_port(host: &str, port: u16, timeout_secs: u64) -> Result<()> {
+    let start = std::time::Instant::now();
+    let timeout = Duration::from_secs(timeout_secs);
+
+    while start.elapsed() < timeout {
+        if is_port_open(host, port) {
+            return Ok(());
+        }
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+
+    Err(anyhow::anyhow!(
+        "Port {}:{} did not become available within {} seconds",
+        host,
+        port,
+        timeout_secs
+    ))
+}
+
+/// Enhanced multi-client runner with full environment support
+async fn multi_client_env(
+    count: usize,
+    mqtt_server_override: Option<&str>,
+    log_dir: &str,
+    with_mqtt_server: bool,
+    with_observer: bool,
+    mqtt_port: u16,
+    full_env: bool,
+    client_args: &[String],
+) -> Result<()> {
+    // full_env is a shorthand for with_mqtt_server + with_observer
+    let start_server = full_env || with_mqtt_server;
+    let start_observer = full_env || with_observer;
+
+    if count == 0 {
+        return Err(anyhow::anyhow!("Client count must be greater than 0"));
+    }
+
+    // If no server override is provided and we're starting our own server, use localhost
+    let effective_mqtt_server = if start_server && mqtt_server_override.is_none() {
+        Some(format!("localhost:{}", mqtt_port))
+    } else {
+        mqtt_server_override.map(|s| s.to_string())
+    };
+
+    println!("🚀 Starting IoTCraft test environment...");
+    println!("   Client instances: {}", count);
+    println!("   Log directory: {}", log_dir);
+    if start_server {
+        println!("   ✅ MQTT server: localhost:{}", mqtt_port);
+    }
+    if start_observer {
+        println!("   ✅ MQTT observer: mosquitto_sub");
+    }
+    if let Some(ref server) = effective_mqtt_server {
+        println!("   📡 MQTT server: {}", server);
+    }
+    println!();
+
+    // Create timestamped log directory
+    let log_path = Path::new(log_dir);
+    fs::create_dir_all(log_path)
+        .await
+        .context("Failed to create log directory")?;
+
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+
+    let run_id = format!("{}", timestamp);
+    let run_log_dir = log_path.join(&run_id);
+    fs::create_dir_all(&run_log_dir)
+        .await
+        .context("Failed to create run log directory")?;
+
+    println!(
+        "📁 Session logs will be stored in: {}",
+        run_log_dir.display()
+    );
+    println!();
+
+    let mut handles = Vec::new();
+    let mut abort_handles = Vec::new();
+    let mut component_names = Vec::new();
+
+    // Start MQTT server if requested
+    if start_server {
+        println!("🟢 Starting MQTT server...");
+        let server_log_file = run_log_dir.join("mqtt-server.log");
+        let server_handle = tokio::spawn(run_mqtt_server(server_log_file, mqtt_port));
+        abort_handles.push(server_handle.abort_handle());
+        handles.push(server_handle);
+        component_names.push("MQTT Server".to_string());
+
+        // Wait for server port to become available
+        println!("   Waiting for MQTT server to open port {}...", mqtt_port);
+        match wait_for_port("localhost", mqtt_port, 30).await {
+            Ok(_) => println!(
+                "   ✅ MQTT server is ready and listening on port {}",
+                mqtt_port
+            ),
+            Err(e) => {
+                println!("   ⚠️  Warning: {}", e);
+                println!("   ⚠️  Proceeding anyway - server might still be starting up");
+            }
+        }
+    }
+
+    // Start MQTT observer if requested
+    if start_observer {
+        println!("🟢 Starting MQTT observer...");
+        let observer_log_file = run_log_dir.join("mqtt-observer.log");
+        let mqtt_host = if start_server {
+            "localhost".to_string()
+        } else if let Some(ref server) = effective_mqtt_server {
+            server.split(':').next().unwrap_or("localhost").to_string()
+        } else {
+            "localhost".to_string()
+        };
+
+        let observer_handle =
+            tokio::spawn(run_mqtt_observer(observer_log_file, mqtt_host, mqtt_port));
+        abort_handles.push(observer_handle.abort_handle());
+        handles.push(observer_handle);
+        component_names.push("MQTT Observer".to_string());
+
+        // Small delay to let observer connect
+        tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
+    }
+
+    // Start clients
+    for client_id in 0..count {
+        let player_id = format!("player-{}", client_id + 1);
+        let log_file = run_log_dir.join(format!("client-{}.log", client_id + 1));
+
+        // Build command arguments
+        let mut args = vec![
+            "run".to_string(),
+            "--".to_string(),
+            "--player-id".to_string(),
+            player_id.clone(),
+        ];
+
+        // Add MQTT server override if provided
+        if let Some(ref server) = effective_mqtt_server {
+            args.push("--mqtt-server".to_string());
+            args.push(server.clone());
+        }
+
+        // Add any additional client arguments
+        args.extend_from_slice(client_args);
+
+        println!(
+            "🟢 Starting client {} (Player ID: {})...",
+            client_id + 1,
+            player_id
+        );
+        println!("[DEBUG] Client {} command details:", client_id + 1);
+        println!("[DEBUG]   Command: cargo {}", args.join(" "));
+        println!(
+            "[DEBUG]   Working directory: {} (current)",
+            std::env::current_dir()
+                .unwrap_or_else(|_| std::path::PathBuf::from("unknown"))
+                .display()
+        );
+        println!("[DEBUG]   Log file: {}", log_file.display());
+        println!("[DEBUG]   Player ID: {}", player_id);
+
+        let log_file_clone = log_file.clone();
+        let args_clone = args.clone();
+        let player_id_clone = player_id.clone();
+
+        let handle = tokio::spawn(async move {
+            run_client_instance(client_id + 1, player_id_clone, args_clone, log_file_clone).await
+        });
+
+        abort_handles.push(handle.abort_handle());
+        handles.push(handle);
+        component_names.push(format!("Client {}", client_id + 1));
+
+        // Small delay between starting clients to avoid resource contention
+        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+    }
+
+    println!();
+    println!("✅ All components started successfully!");
+    if start_server {
+        println!("   🌐 MQTT Server: running on port {}", mqtt_port);
+    }
+    if start_observer {
+        println!("   👁️  MQTT Observer: monitoring all topics");
+    }
+    println!("   🎮 Clients: {} instances running", count);
+    println!();
+    println!("💡 Monitoring all processes...");
+    println!("   Press Ctrl+C to stop all components and exit");
+    println!("   Logs are being written to: {}", run_log_dir.display());
+    println!();
+
+    // Wait for Ctrl+C or any component to exit
+    tokio::select! {
+        _ = tokio::signal::ctrl_c() => {
+            println!();
+            println!("🛑 Received Ctrl+C, shutting down all components...");
+
+            // Cancel all tasks using abort handles
+            for abort_handle in abort_handles {
+                abort_handle.abort();
+            }
+
+            println!("✅ All components terminated");
+        }
+        result = futures::future::try_join_all(handles) => {
+            match result {
+                Ok(results) => {
+                    println!("📊 All components finished:");
+                    for (i, result) in results.into_iter().enumerate() {
+                        let fallback_name = format!("Component {}", i + 1);
+                        let component_name = component_names.get(i)
+                            .map(|s| s.as_str())
+                            .unwrap_or(&fallback_name);
+                        match result {
+                            Ok(_) => println!("   {} ✅ Exited normally", component_name),
+                            Err(e) => println!("   {} ❌ Failed: {}", component_name, e),
+                        }
+                    }
+                }
+                Err(e) => {
+                    println!("❌ Error running components: {}", e);
+                }
+            }
+        }
+    }
+
+    println!();
+    println!("📋 Session Summary:");
+    println!("   Run ID: {}", run_id);
+    if start_server {
+        println!("   MQTT Server: started on port {}", mqtt_port);
+    }
+    if start_observer {
+        println!("   MQTT Observer: monitoring enabled");
+    }
+    println!("   Clients: {}", count);
+    println!("   Logs location: {}", run_log_dir.display());
+    println!();
+    println!("🔍 To view logs:");
+    if start_server {
+        let server_log = run_log_dir.join("mqtt-server.log");
+        println!("   tail -f {} # MQTT Server", server_log.display());
+    }
+    if start_observer {
+        let observer_log = run_log_dir.join("mqtt-observer.log");
+        println!("   tail -f {} # MQTT Observer", observer_log.display());
+    }
+    for client_id in 0..count {
+        let log_file = run_log_dir.join(format!("client-{}.log", client_id + 1));
+        println!(
+            "   tail -f {} # Client {}",
+            log_file.display(),
+            client_id + 1
+        );
+    }
+
+    Ok(())
+}
+
+/// Run the MQTT server from ../mqtt-server
+async fn run_mqtt_server(log_file: PathBuf, port: u16) -> Result<()> {
+    println!("[DEBUG] Starting MQTT server with:");
+    println!("[DEBUG]   Command: cargo run -- --port {}", port);
+    println!("[DEBUG]   Working directory: ../mqtt-server");
+    println!("[DEBUG]   Log file: {}", log_file.display());
+
+    // Create and open log file
+    let mut log_handle = fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(true)
+        .open(&log_file)
+        .await
+        .with_context(|| format!("Failed to create log file: {}", log_file.display()))?;
+
+    // Write header to log file
+    let header = format!(
+        "=== MQTT Server ===\n\
+         Started at: {}\n\
+         Port: {}\n\
+         Working directory: ../mqtt-server\n\
+         Command: cargo run -- --port {}\n\
+         ===================\n\n",
+        chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC"),
+        port,
+        port
+    );
+
+    log_handle.write_all(header.as_bytes()).await?;
+    log_handle.flush().await?;
+
+    // Start the MQTT server process
+    let mut child = TokioCommand::new("cargo")
+        .args(&["run", "--", "--port", &port.to_string()])
+        .current_dir("../mqtt-server")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .context("Failed to start MQTT server (make sure ../mqtt-server exists)")?;
+
+    println!(
+        "[DEBUG] MQTT server process started with PID: {:?}",
+        child.id()
+    );
+
+    // Get stdout and stderr
+    let stdout = child.stdout.take().unwrap();
+    let stderr = child.stderr.take().unwrap();
+
+    let stdout_reader = BufReader::new(stdout);
+    let stderr_reader = BufReader::new(stderr);
+
+    let log_file_clone = log_file.clone();
+
+    // Spawn tasks to handle stdout and stderr
+    let stdout_task = tokio::spawn(async move {
+        handle_process_stdout_stream(stdout_reader, log_file_clone, "MQTT-Server", "STDOUT").await
+    });
+
+    let stderr_task = tokio::spawn(async move {
+        handle_process_stderr_stream(stderr_reader, log_file, "MQTT-Server", "STDERR").await
+    });
+
+    // Wait for the process to complete
+    let exit_status = child
+        .wait()
+        .await
+        .context("Failed to wait for MQTT server")?;
+
+    // Wait for output handling to complete
+    let _ = tokio::try_join!(stdout_task, stderr_task);
+
+    if exit_status.success() {
+        println!("✅ MQTT Server exited successfully");
+    } else {
+        println!("❌ MQTT Server exited with code: {:?}", exit_status.code());
+        return Err(anyhow::anyhow!(
+            "MQTT Server exited with non-zero status: {:?}",
+            exit_status
+        ));
+    }
+
+    Ok(())
+}
+
+/// Run the MQTT observer using mosquitto_sub
+async fn run_mqtt_observer(log_file: PathBuf, mqtt_host: String, mqtt_port: u16) -> Result<()> {
+    println!("[DEBUG] Starting MQTT observer with:");
+    println!(
+        "[DEBUG]   Command: mosquitto_sub -h {} -p {} -t # -i sub",
+        mqtt_host, mqtt_port
+    );
+    println!("[DEBUG]   Log file: {}", log_file.display());
+
+    // Create and open log file
+    let mut log_handle = fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(true)
+        .open(&log_file)
+        .await
+        .with_context(|| format!("Failed to create log file: {}", log_file.display()))?;
+
+    // Write header to log file
+    let header = format!(
+        "=== MQTT Observer ===\n\
+         Started at: {}\n\
+         Host: {}:{}\n\
+         Command: mosquitto_sub -h {} -p {} -t # -i sub\n\
+         =====================\n\n",
+        chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC"),
+        mqtt_host,
+        mqtt_port,
+        mqtt_host,
+        mqtt_port
+    );
+
+    log_handle.write_all(header.as_bytes()).await?;
+    log_handle.flush().await?;
+
+    // Start the mosquitto_sub process
+    let mut child = TokioCommand::new("mosquitto_sub")
+        .args(&[
+            "-h",
+            &mqtt_host,
+            "-p",
+            &mqtt_port.to_string(),
+            "-t",
+            "#", // Subscribe to all topics
+            "-i",
+            "sub", // Client ID to avoid server rejection
+        ])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .context("Failed to start mosquitto_sub (make sure mosquitto-clients is installed)")?;
+
+    println!(
+        "[DEBUG] MQTT observer process started with PID: {:?}",
+        child.id()
+    );
+
+    // Get stdout and stderr
+    let stdout = child.stdout.take().unwrap();
+    let stderr = child.stderr.take().unwrap();
+
+    let stdout_reader = BufReader::new(stdout);
+    let stderr_reader = BufReader::new(stderr);
+
+    let log_file_clone = log_file.clone();
+
+    // Spawn tasks to handle stdout and stderr
+    let stdout_task = tokio::spawn(async move {
+        handle_process_stdout_stream(stdout_reader, log_file_clone, "MQTT-Observer", "STDOUT").await
+    });
+
+    let stderr_task = tokio::spawn(async move {
+        handle_process_stderr_stream(stderr_reader, log_file, "MQTT-Observer", "STDERR").await
+    });
+
+    // Wait for the process to complete
+    let exit_status = child
+        .wait()
+        .await
+        .context("Failed to wait for MQTT observer")?;
+
+    // Wait for output handling to complete
+    let _ = tokio::try_join!(stdout_task, stderr_task);
+
+    if exit_status.success() {
+        println!("✅ MQTT Observer exited successfully");
+    } else {
+        println!(
+            "❌ MQTT Observer exited with code: {:?}",
+            exit_status.code()
+        );
+        return Err(anyhow::anyhow!(
+            "MQTT Observer exited with non-zero status: {:?}",
+            exit_status
+        ));
+    }
+
+    Ok(())
+}
+
+/// Handle stdout stream for generic processes (server/observer)
+async fn handle_process_stdout_stream(
+    mut reader: BufReader<tokio::process::ChildStdout>,
+    log_file: PathBuf,
+    process_name: &str,
+    stream_type: &str,
+) -> Result<()> {
+    let mut log_handle = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log_file)
+        .await
+        .with_context(|| {
+            format!(
+                "Failed to open log file for appending: {}",
+                log_file.display()
+            )
+        })?;
+
+    let mut line = String::new();
+    while reader.read_line(&mut line).await? > 0 {
+        let timestamp = chrono::Utc::now().format("%H:%M:%S%.3f");
+
+        // Write to log file with timestamp and stream type
+        let log_line = format!(
+            "[{}] [{}] [{}] {}",
+            timestamp, stream_type, process_name, line
+        );
+        log_handle.write_all(log_line.as_bytes()).await?;
+
+        // Also write to console with process prefix
+        print!("[{}] {}", process_name, line);
+
+        line.clear();
+    }
+
+    log_handle.flush().await?;
+    Ok(())
+}
+
+/// Handle stderr stream for generic processes (server/observer)
+async fn handle_process_stderr_stream(
+    mut reader: BufReader<tokio::process::ChildStderr>,
+    log_file: PathBuf,
+    process_name: &str,
+    stream_type: &str,
+) -> Result<()> {
+    let mut log_handle = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log_file)
+        .await
+        .with_context(|| {
+            format!(
+                "Failed to open log file for appending: {}",
+                log_file.display()
+            )
+        })?;
+
+    let mut line = String::new();
+    while reader.read_line(&mut line).await? > 0 {
+        let timestamp = chrono::Utc::now().format("%H:%M:%S%.3f");
+
+        // Write to log file with timestamp and stream type
+        let log_line = format!(
+            "[{}] [{}] [{}] {}",
+            timestamp, stream_type, process_name, line
+        );
+        log_handle.write_all(log_line.as_bytes()).await?;
+
+        // Also write to console with process prefix (stderr in red if supported)
+        eprint!("[{}] {}", process_name, line);
 
         line.clear();
     }
