@@ -72,6 +72,8 @@ cargo run -- --lang=de-DE  # German
 cargo run -- --lang=cs-CZ  # Czech
 ```
 
+**For detailed testing, multi-client setup, and web development:** See [desktop-client/README.md](desktop-client/README.md)
+
 ### MQTT Server
 
 ```bash
@@ -163,6 +165,7 @@ To test with an ESP32-C6 device:
 
 ## Documentation
 
+- **[Desktop Client README](desktop-client/README.md)** - Testing, multi-client setup, and web development
 - **[Quick Reference Guide](docs/quick-reference.md)** - Essential commands and workflows
 - **[Console Commands Reference](docs/console-commands.md)** - Complete guide to all console commands
 - **[Voxel System Documentation](docs/voxel-system.md)** - Detailed voxel world building guide
