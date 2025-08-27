@@ -1,10 +1,12 @@
-// MqttTestEnvironment is defined inline in this test file
+// MQTT World Discovery Integration Test using proper test infrastructure
 use rumqttc::{AsyncClient, MqttOptions, QoS};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio::time::{sleep, timeout};
+
+use crate::MqttTestServer;
 
 /// Test data structure to represent a world info message
 #[derive(Debug, Clone)]
@@ -340,13 +342,10 @@ async fn test_mqtt_world_discovery() -> Result<(), Box<dyn std::error::Error + S
 
     // Step 0: Set up clean MQTT test environment
     println!("\n🔧 Step 0: Setting up MQTT test environment...");
-    let mqtt_env = MqttTestEnvironment::setup().await?;
-    let port = mqtt_env.port;
+    let server = MqttTestServer::start().await?;
+    let port = server.port;
     println!("   ✅ MQTT server running on port {}", port);
-    println!(
-        "   📄 Logs available at: {}",
-        mqtt_env.server.log_file().display()
-    );
+    println!("   📄 Server available at {}", server.broker_address());
 
     // Step 1: Check existing worlds first (what should be the main case with a clean environment)
     println!("\n📖 Step 1: Reading existing worlds from clean broker...");
@@ -472,14 +471,10 @@ async fn test_mqtt_world_discovery() -> Result<(), Box<dyn std::error::Error + S
     }
 
     println!("\n🏁 Test completed!");
-    println!(
-        "📄 MQTT server logs: {}",
-        mqtt_env.server.log_file().display()
-    );
+    println!("📄 MQTT server running at {}", server.broker_address());
 
-    // Clean up
-    mqtt_env.shutdown().await?;
-    println!("🧹 Test environment cleaned up");
+    // Note: MqttTestServer cleanup is handled automatically when it goes out of scope
+    println!("🧹 Test environment will be cleaned up automatically");
 
     Ok(())
 }
