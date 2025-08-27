@@ -122,18 +122,6 @@ pub struct WorldChangeEvent {
 #[derive(Event, BufferedEvent)]
 pub struct RefreshOnlineWorldsEvent;
 
-/// New events for world state synchronization
-#[derive(Event, BufferedEvent)]
-pub struct PublishWorldStateEvent {
-    pub world_id: String,
-    pub force_full_snapshot: bool,
-}
-
-#[derive(Event, BufferedEvent)]
-pub struct RequestWorldStateEvent {
-    pub world_id: String,
-}
-
 #[derive(Event, BufferedEvent)]
 pub struct WorldStateReceivedEvent {
     pub world_id: String,
@@ -163,13 +151,6 @@ pub enum BlockChangeType {
     },
 }
 
-#[derive(Event, BufferedEvent)]
-pub struct InventoryChangeEvent {
-    pub world_id: String,
-    pub player_id: String,
-    pub inventory: crate::inventory::PlayerInventory,
-}
-
 /// Plugin for shared world functionality
 pub struct SharedWorldPlugin;
 
@@ -183,12 +164,8 @@ impl Plugin for SharedWorldPlugin {
             .add_event::<LeaveSharedWorldEvent>()
             .add_event::<WorldChangeEvent>()
             .add_event::<RefreshOnlineWorldsEvent>()
-            // New world state synchronization events
-            .add_event::<PublishWorldStateEvent>()
-            .add_event::<RequestWorldStateEvent>()
             .add_event::<WorldStateReceivedEvent>()
             .add_event::<BlockChangeEvent>()
-            .add_event::<InventoryChangeEvent>()
             .add_systems(
                 Update,
                 (

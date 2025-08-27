@@ -1,6 +1,11 @@
 use crate::console::console_trait::ConsoleResult;
 use bevy::prelude::*;
 
+// Import required types
+#[cfg(feature = "console")]
+use crate::console::BlinkState;
+use crate::mqtt::TemperatureResource;
+
 /// Unified command parser that works with any console implementation
 #[derive(Default)]
 pub struct CommandParser {
@@ -14,6 +19,11 @@ impl CommandParser {
             command_history: Vec::new(),
             max_history: 50,
         }
+    }
+
+    #[cfg(test)]
+    pub fn get_history(&self) -> &Vec<String> {
+        &self.command_history
     }
 
     /// Parse and execute a command string
@@ -66,10 +76,6 @@ impl CommandParser {
         }
     }
 
-    pub fn get_history(&self) -> &[String] {
-        &self.command_history
-    }
-
     // Command handlers
     fn handle_help_command(&self, _args: &[&str]) -> ConsoleResult {
         let help_text = vec![
@@ -117,24 +123,68 @@ impl CommandParser {
     }
 
     // Placeholder implementations for other commands - these will delegate to the existing systems
-    fn handle_blink_command(&self, args: &[&str], _world: &mut World) -> ConsoleResult {
+    fn handle_blink_command(&self, args: &[&str], world: &mut World) -> ConsoleResult {
         if args.is_empty() {
             return ConsoleResult::InvalidArgs("Usage: blink [start|stop]".to_string());
         }
 
         match args[0] {
-            "start" | "stop" => ConsoleResult::Success(format!("Blink command: {}", args[0])),
+            "start" => {
+                #[cfg(feature = "console")]
+                if let Some(mut blink_state) = world.get_resource_mut::<BlinkState>() {
+                    blink_state.blinking = true;
+                    ConsoleResult::Success("Blink started".to_string())
+                } else {
+                    ConsoleResult::Error("Blink state not found".to_string())
+                }
+                #[cfg(not(feature = "console"))]
+                ConsoleResult::Error("Blink functionality not available".to_string())
+            }
+            "stop" => {
+                #[cfg(feature = "console")]
+                if let Some(mut blink_state) = world.get_resource_mut::<BlinkState>() {
+                    blink_state.blinking = false;
+                    ConsoleResult::Success("Blink stopped".to_string())
+                } else {
+                    ConsoleResult::Error("Blink state not found".to_string())
+                }
+                #[cfg(not(feature = "console"))]
+                ConsoleResult::Error("Blink functionality not available".to_string())
+            }
             _ => ConsoleResult::InvalidArgs("Usage: blink [start|stop]".to_string()),
         }
     }
 
-    fn handle_mqtt_command(&self, args: &[&str], _world: &mut World) -> ConsoleResult {
+    fn handle_mqtt_command(&self, args: &[&str], world: &mut World) -> ConsoleResult {
         if args.is_empty() {
             return ConsoleResult::InvalidArgs("Usage: mqtt [status|temp]".to_string());
         }
 
         match args[0] {
-            "status" | "temp" => ConsoleResult::Success(format!("MQTT command: {}", args[0])),
+            "status" => {
+                if let Some(temperature) = world.get_resource::<TemperatureResource>() {
+                    let status = if temperature.value.is_some() {
+                        "✅ Connected to MQTT broker"
+                    } else {
+                        "🔄 Connecting to MQTT broker..."
+                    };
+                    ConsoleResult::Success(status.to_string())
+                } else {
+                    ConsoleResult::Error("Temperature resource not found".to_string())
+                }
+            }
+            "temp" => {
+                if let Some(temperature) = world.get_resource::<TemperatureResource>() {
+                    let temp_msg = if let Some(val) = temperature.value {
+                        format!("Current temperature: {:.1}°C", val)
+                    } else {
+                        "No temperature data available".to_string()
+                    };
+                    ConsoleResult::Success(temp_msg)
+                } else {
+                    ConsoleResult::Error("Temperature resource not found".to_string())
+                }
+            }
             _ => ConsoleResult::InvalidArgs("Usage: mqtt [status|temp]".to_string()),
         }
     }
@@ -204,6 +254,9 @@ impl CommandParser {
         if let Some(mut voxel_world) = world.get_resource_mut::<crate::environment::VoxelWorld>() {
             voxel_world.set_block(position, block_type);
 
+            // Release the mutable borrow before getting events
+            drop(voxel_world);
+
             // Send place block event to spawn visual representation
             if let Some(mut place_events) = world
                 .get_resource_mut::<bevy::ecs::event::Events<crate::inventory::PlaceBlockEvent>>()
@@ -220,33 +273,178 @@ impl CommandParser {
         }
     }
 
-    fn handle_remove_command(&self, args: &[&str], _world: &mut World) -> ConsoleResult {
+    fn handle_remove_command(&self, args: &[&str], world: &mut World) -> ConsoleResult {
         if args.len() != 3 {
             return ConsoleResult::InvalidArgs("Usage: remove <x> <y> <z>".to_string());
         }
-        ConsoleResult::Success(format!(
-            "Remove command: {} {} {}",
-            args[0], args[1], args[2]
-        ))
+
+        // Parse coordinates
+        let x = match args[0].parse::<i32>() {
+            Ok(x) => x,
+            Err(_) => {
+                return ConsoleResult::InvalidArgs("X coordinate must be a number".to_string());
+            }
+        };
+        let y = match args[1].parse::<i32>() {
+            Ok(y) => y,
+            Err(_) => {
+                return ConsoleResult::InvalidArgs("Y coordinate must be a number".to_string());
+            }
+        };
+        let z = match args[2].parse::<i32>() {
+            Ok(z) => z,
+            Err(_) => {
+                return ConsoleResult::InvalidArgs("Z coordinate must be a number".to_string());
+            }
+        };
+
+        let position = bevy::math::IVec3::new(x, y, z);
+
+        // Remove the block from voxel world
+        if let Some(mut voxel_world) = world.get_resource_mut::<crate::environment::VoxelWorld>() {
+            if voxel_world.remove_block(&position).is_some() {
+                // Find and despawn the block entity
+                let mut entities_to_despawn = Vec::new();
+                let mut query = world.query::<(Entity, &crate::environment::VoxelBlock)>();
+
+                for (entity, block) in query.iter(world) {
+                    if block.position == position {
+                        entities_to_despawn.push(entity);
+                    }
+                }
+
+                // Despawn entities (do this after the query to avoid borrow conflicts)
+                for entity in entities_to_despawn {
+                    if let Ok(entity_commands) = world.get_entity_mut(entity) {
+                        entity_commands.despawn();
+                    }
+                }
+
+                ConsoleResult::Success(format!("Removed block at ({}, {}, {})", x, y, z))
+            } else {
+                ConsoleResult::Success(format!("No block found at ({}, {}, {})", x, y, z))
+            }
+        } else {
+            ConsoleResult::Error("Voxel world not found".to_string())
+        }
     }
 
-    fn handle_wall_command(&self, args: &[&str], _world: &mut World) -> ConsoleResult {
+    fn handle_wall_command(&self, args: &[&str], world: &mut World) -> ConsoleResult {
         if args.len() != 7 {
             return ConsoleResult::InvalidArgs(
                 "Usage: wall <block_type> <x1> <y1> <z1> <x2> <y2> <z2>".to_string(),
             );
         }
-        ConsoleResult::Success(format!(
-            "Wall command: {} {} {} {} {} {} {}",
-            args[0], args[1], args[2], args[3], args[4], args[5], args[6]
-        ))
+
+        // Parse coordinates
+        let x1 = match args[1].parse::<i32>() {
+            Ok(x) => x,
+            Err(_) => {
+                return ConsoleResult::InvalidArgs("X1 coordinate must be a number".to_string());
+            }
+        };
+        let y1 = match args[2].parse::<i32>() {
+            Ok(y) => y,
+            Err(_) => {
+                return ConsoleResult::InvalidArgs("Y1 coordinate must be a number".to_string());
+            }
+        };
+        let z1 = match args[3].parse::<i32>() {
+            Ok(z) => z,
+            Err(_) => {
+                return ConsoleResult::InvalidArgs("Z1 coordinate must be a number".to_string());
+            }
+        };
+        let x2 = match args[4].parse::<i32>() {
+            Ok(x) => x,
+            Err(_) => {
+                return ConsoleResult::InvalidArgs("X2 coordinate must be a number".to_string());
+            }
+        };
+        let y2 = match args[5].parse::<i32>() {
+            Ok(y) => y,
+            Err(_) => {
+                return ConsoleResult::InvalidArgs("Y2 coordinate must be a number".to_string());
+            }
+        };
+        let z2 = match args[6].parse::<i32>() {
+            Ok(z) => z,
+            Err(_) => {
+                return ConsoleResult::InvalidArgs("Z2 coordinate must be a number".to_string());
+            }
+        };
+
+        // Parse block type
+        let block_type_enum = match args[0] {
+            "grass" => crate::environment::BlockType::Grass,
+            "dirt" => crate::environment::BlockType::Dirt,
+            "stone" => crate::environment::BlockType::Stone,
+            "quartz_block" => crate::environment::BlockType::QuartzBlock,
+            "glass_pane" => crate::environment::BlockType::GlassPane,
+            "cyan_terracotta" => crate::environment::BlockType::CyanTerracotta,
+            "water" => crate::environment::BlockType::Water,
+            _ => return ConsoleResult::InvalidArgs(format!("Invalid block type: {}", args[0])),
+        };
+
+        // Place blocks in the wall area
+        if let Some(mut voxel_world) = world.get_resource_mut::<crate::environment::VoxelWorld>() {
+            let mut blocks_added = 0;
+
+            for x in x1..=x2 {
+                for y in y1..=y2 {
+                    for z in z1..=z2 {
+                        voxel_world.set_block(bevy::math::IVec3::new(x, y, z), block_type_enum);
+                        blocks_added += 1;
+                    }
+                }
+            }
+
+            // Release the mutable borrow of voxel_world before trying to get events
+            drop(voxel_world);
+
+            // Trigger place block events for visual representation
+            if let Some(mut place_events) = world
+                .get_resource_mut::<bevy::ecs::event::Events<crate::inventory::PlaceBlockEvent>>()
+            {
+                for x in x1..=x2 {
+                    for y in y1..=y2 {
+                        for z in z1..=z2 {
+                            place_events.write(crate::inventory::PlaceBlockEvent {
+                                position: bevy::math::IVec3::new(x, y, z),
+                            });
+                        }
+                    }
+                }
+            }
+
+            ConsoleResult::Success(format!(
+                "Created a wall of {} from ({}, {}, {}) to ({}, {}, {}) - {} blocks placed",
+                args[0], x1, y1, z1, x2, y2, z2, blocks_added
+            ))
+        } else {
+            ConsoleResult::Error("Voxel world not found".to_string())
+        }
     }
 
-    fn handle_save_command(&self, args: &[&str], _world: &mut World) -> ConsoleResult {
+    fn handle_save_command(&self, args: &[&str], world: &mut World) -> ConsoleResult {
         if args.len() != 1 {
             return ConsoleResult::InvalidArgs("Usage: save <filename>".to_string());
         }
-        ConsoleResult::Success(format!("Save command: {}", args[0]))
+
+        let filename = args[0];
+
+        if let Some(voxel_world) = world.get_resource::<crate::environment::VoxelWorld>() {
+            match voxel_world.save_to_file(filename) {
+                Ok(_) => ConsoleResult::Success(format!(
+                    "Map saved to '{}' with {} blocks",
+                    filename,
+                    voxel_world.blocks.len()
+                )),
+                Err(e) => ConsoleResult::Error(format!("Failed to save map: {}", e)),
+            }
+        } else {
+            ConsoleResult::Error("Voxel world not found".to_string())
+        }
     }
 
     fn handle_load_command(&self, args: &[&str], _world: &mut World) -> ConsoleResult {
@@ -398,6 +596,17 @@ mod tests {
         world.insert_resource(VoxelWorld::default());
         world.insert_resource(PlayerInventory::new());
         world.insert_resource(Events::<PlaceBlockEvent>::default());
+
+        // Insert console-specific resources for testing
+        #[cfg(feature = "console")]
+        world.insert_resource(BlinkState {
+            blinking: false,
+            light_state: false,
+            last_sent: false,
+        });
+
+        // Insert TemperatureResource for MQTT commands
+        world.insert_resource(TemperatureResource { value: Some(22.5) });
 
         // Add a camera entity for teleport testing
         world.spawn((

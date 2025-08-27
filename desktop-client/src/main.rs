@@ -4,7 +4,7 @@ use bevy::window::{CursorGrabMode, WindowPosition};
 
 // Console imports - only available with console feature
 #[cfg(feature = "console")]
-use crate::console::ConsolePlugin;
+use crate::console::{BlinkCube, BlinkState, ConsoleManager, ConsolePlugin, ConsoleSet};
 
 #[cfg(not(target_arch = "wasm32"))]
 use clap::Parser;
@@ -40,13 +40,8 @@ mod world;
 // Re-export types for easier access
 use camera_controllers::{CameraController, CameraControllerPlugin};
 use config::MqttConfig;
-#[cfg(feature = "console")]
-use console::console_types::{ListCommand, LookCommand, TeleportCommand};
-#[cfg(feature = "console")]
-use console::*;
 use devices::*;
 use environment::*;
-use environment::{ChunkEventsPlugin, ChunkMqttPlugin, ChunkedVoxelWorld};
 use fonts::{FontPlugin, Fonts};
 use interaction::InteractionPlugin as MyInteractionPlugin;
 use inventory::{InventoryPlugin, PlayerInventory};
@@ -95,32 +90,6 @@ fn extract_client_number(player_id: &str) -> Option<u32> {
     None
 }
 
-// Console command handlers - only available with console feature
-#[cfg(feature = "console")]
-fn handle_blink_command(
-    mut log: ConsoleCommand<BlinkCommand>,
-    mut blink_state: ResMut<BlinkState>,
-) {
-    if let Some(Ok(BlinkCommand { action })) = log.take() {
-        info!("Console command: blink {}", action);
-        match action.as_str() {
-            "start" => {
-                blink_state.blinking = true;
-                reply!(log, "Blink started");
-                info!("Blink started via console");
-            }
-            "stop" => {
-                blink_state.blinking = false;
-                reply!(log, "Blink stopped");
-                info!("Blink stopped via console");
-            }
-            _ => {
-                reply!(log, "Usage: blink [start|stop]");
-            }
-        }
-    }
-}
-
 // CLI arguments
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -142,403 +111,16 @@ struct Args {
     mcp: bool,
 }
 
-#[cfg(feature = "console")]
-fn handle_place_block_command(
-    mut log: ConsoleCommand<PlaceBlockCommand>,
-    mut voxel_world: ResMut<VoxelWorld>,
-    mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-    asset_server: Res<AssetServer>,
-    mut block_change_events: EventWriter<multiplayer::BlockChangeEvent>,
-    multiplayer_mode: Res<multiplayer::MultiplayerMode>,
-    player_profile: Res<profile::PlayerProfile>,
-) {
-    if let Some(Ok(PlaceBlockCommand {
-        block_type,
-        x,
-        y,
-        z,
-    })) = log.take()
-    {
-        let block_type = match block_type.as_str() {
-            "grass" => BlockType::Grass,
-            "dirt" => BlockType::Dirt,
-            "stone" => BlockType::Stone,
-            "quartz_block" => BlockType::QuartzBlock,
-            "glass_pane" => BlockType::GlassPane,
-            "cyan_terracotta" => BlockType::CyanTerracotta,
-            "water" => BlockType::Water,
-            _ => {
-                reply!(log, "Invalid block type: {}", block_type);
-                return;
-            }
-        };
-
-        voxel_world.set_block(IVec3::new(x, y, z), block_type);
-
-        // Spawn the block
-        let cube_mesh = meshes.add(Cuboid::new(CUBE_SIZE, CUBE_SIZE, CUBE_SIZE));
-        let material = match block_type {
-            BlockType::Water => materials.add(StandardMaterial {
-                base_color: Color::srgba(0.0, 0.35, 0.9, 0.6),
-                alpha_mode: AlphaMode::Blend,
-                ..default()
-            }),
-            _ => {
-                let texture_path = match block_type {
-                    BlockType::Grass => "textures/grass.webp",
-                    BlockType::Dirt => "textures/dirt.webp",
-                    BlockType::Stone => "textures/stone.webp",
-                    BlockType::QuartzBlock => "textures/quartz_block.webp",
-                    BlockType::GlassPane => "textures/glass_pane.webp",
-                    BlockType::CyanTerracotta => "textures/cyan_terracotta.webp",
-                    _ => unreachable!(),
-                };
-                let texture: Handle<Image> = asset_server.load(texture_path);
-                materials.add(StandardMaterial {
-                    base_color_texture: Some(texture),
-                    ..default()
-                })
-            }
-        };
-
-        commands.spawn((
-            Mesh3d(cube_mesh),
-            MeshMaterial3d(material),
-            Transform::from_translation(Vec3::new(x as f32, y as f32, z as f32)),
-            VoxelBlock {
-                position: IVec3::new(x, y, z),
-            },
-            // Physics colliders are managed by PhysicsManagerPlugin based on distance and mode
-        ));
-
-        // Generate block change event for multiplayer synchronization
-        if let multiplayer::MultiplayerMode::HostingWorld { world_id, .. }
-        | multiplayer::MultiplayerMode::JoinedWorld { world_id, .. } = &*multiplayer_mode
-        {
-            block_change_events.write(multiplayer::BlockChangeEvent {
-                world_id: world_id.clone(),
-                player_id: player_profile.player_id.clone(),
-                player_name: player_profile.player_name.clone(),
-                change_type: multiplayer::BlockChangeType::Placed {
-                    x,
-                    y,
-                    z,
-                    block_type,
-                },
-            });
-        }
-
-        reply!(log, "Placed block at ({}, {}, {})", x, y, z);
-    }
-}
-
-#[cfg(feature = "console")]
-fn handle_wall_command(
-    mut log: ConsoleCommand<WallCommand>,
-    mut voxel_world: ResMut<VoxelWorld>,
-    mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-    asset_server: Res<AssetServer>,
-) {
-    if let Some(Ok(WallCommand {
-        block_type,
-        x1,
-        y1,
-        z1,
-        x2,
-        y2,
-        z2,
-    })) = log.take()
-    {
-        let block_type_enum = match block_type.as_str() {
-            "grass" => BlockType::Grass,
-            "dirt" => BlockType::Dirt,
-            "stone" => BlockType::Stone,
-            "quartz_block" => BlockType::QuartzBlock,
-            "glass_pane" => BlockType::GlassPane,
-            "cyan_terracotta" => BlockType::CyanTerracotta,
-            "water" => BlockType::Water,
-            _ => {
-                reply!(log, "Invalid block type: {}", block_type);
-                return;
-            }
-        };
-
-        let material = match block_type_enum {
-            BlockType::Water => materials.add(StandardMaterial {
-                base_color: Color::srgba(0.0, 0.35, 0.9, 0.6),
-                alpha_mode: AlphaMode::Blend,
-                ..default()
-            }),
-            _ => {
-                let texture_path = match block_type_enum {
-                    BlockType::Grass => "textures/grass.webp",
-                    BlockType::Dirt => "textures/dirt.webp",
-                    BlockType::Stone => "textures/stone.webp",
-                    BlockType::QuartzBlock => "textures/quartz_block.webp",
-                    BlockType::GlassPane => "textures/glass_pane.webp",
-                    BlockType::CyanTerracotta => "textures/cyan_terracotta.webp",
-                    _ => unreachable!(),
-                };
-                let texture: Handle<Image> = asset_server.load(texture_path);
-                materials.add(StandardMaterial {
-                    base_color_texture: Some(texture),
-                    ..default()
-                })
-            }
-        };
-
-        let cube_mesh = meshes.add(Cuboid::new(CUBE_SIZE, CUBE_SIZE, CUBE_SIZE));
-
-        for x in x1..=x2 {
-            for y in y1..=y2 {
-                for z in z1..=z2 {
-                    voxel_world.set_block(IVec3::new(x, y, z), block_type_enum);
-
-                    commands.spawn((
-                        Mesh3d(cube_mesh.clone()),
-                        MeshMaterial3d(material.clone()),
-                        Transform::from_translation(Vec3::new(x as f32, y as f32, z as f32)),
-                        VoxelBlock {
-                            position: IVec3::new(x, y, z),
-                        },
-                    ));
-                }
-            }
-        }
-
-        reply!(
-            log,
-            "Created a wall of {} from ({}, {}, {}) to ({}, {}, {})",
-            block_type,
-            x1,
-            y1,
-            z1,
-            x2,
-            y2,
-            z2
-        );
-    }
-}
-
-#[cfg(feature = "console")]
-fn handle_remove_block_command(
-    mut log: ConsoleCommand<RemoveBlockCommand>,
-    mut voxel_world: ResMut<VoxelWorld>,
-    mut commands: Commands,
-    query: Query<(Entity, &VoxelBlock)>,
-    mut block_change_events: EventWriter<multiplayer::BlockChangeEvent>,
-    multiplayer_mode: Res<multiplayer::MultiplayerMode>,
-    player_profile: Res<profile::PlayerProfile>,
-) {
-    if let Some(Ok(RemoveBlockCommand { x, y, z })) = log.take() {
-        let position = IVec3::new(x, y, z);
-        if voxel_world.remove_block(&position).is_some() {
-            // Remove the block entity
-            for (entity, block) in query.iter() {
-                if block.position == position {
-                    commands.entity(entity).despawn();
-                }
-            }
-
-            // Generate block change event for multiplayer synchronization
-            if let multiplayer::MultiplayerMode::HostingWorld { world_id, .. }
-            | multiplayer::MultiplayerMode::JoinedWorld { world_id, .. } = &*multiplayer_mode
-            {
-                block_change_events.write(multiplayer::BlockChangeEvent {
-                    world_id: world_id.clone(),
-                    player_id: player_profile.player_id.clone(),
-                    player_name: player_profile.player_name.clone(),
-                    change_type: multiplayer::BlockChangeType::Removed { x, y, z },
-                });
-            }
-
-            reply!(log, "Removed block at ({}, {}, {})", x, y, z);
-        } else {
-            reply!(log, "No block found at ({}, {}, {})", x, y, z);
-        }
-    }
-}
-
-#[cfg(feature = "console")]
-fn handle_save_map_command(mut log: ConsoleCommand<SaveMapCommand>, voxel_world: Res<VoxelWorld>) {
-    if let Some(Ok(SaveMapCommand { filename })) = log.take() {
-        match voxel_world.save_to_file(&filename) {
-            Ok(_) => {
-                reply!(
-                    log,
-                    "Map saved to '{}' with {} blocks",
-                    filename,
-                    voxel_world.blocks.len()
-                );
-                info!(
-                    "Map saved to '{}' with {} blocks",
-                    filename,
-                    voxel_world.blocks.len()
-                );
-            }
-            Err(e) => {
-                reply!(log, "Failed to save map: {}", e);
-                error!("Failed to save map to '{}': {}", filename, e);
-            }
-        }
-    }
-}
-
-#[cfg(feature = "console")]
-fn handle_teleport_command(
-    mut log: ConsoleCommand<TeleportCommand>,
-    mut camera_query: Query<(&mut Transform, &mut CameraController), With<Camera>>,
-) {
-    if let Some(Ok(TeleportCommand { x, y, z })) = log.take() {
-        if let Ok((mut transform, _camera_controller)) = camera_query.single_mut() {
-            // Set the camera position
-            transform.translation = Vec3::new(x, y, z);
-
-            reply!(log, "Teleported to ({:.1}, {:.1}, {:.1})", x, y, z);
-            info!("Camera teleported to ({:.1}, {:.1}, {:.1})", x, y, z);
-        } else {
-            reply!(log, "Error: Could not find camera to teleport");
-        }
-    }
-}
-
-#[cfg(feature = "console")]
-fn handle_look_command(
-    mut log: ConsoleCommand<LookCommand>,
-    mut camera_query: Query<(&mut Transform, &mut CameraController), With<Camera>>,
-) {
-    if let Some(Ok(LookCommand { yaw, pitch })) = log.take() {
-        if let Ok((mut transform, mut camera_controller)) = camera_query.single_mut() {
-            // Convert degrees to radians for internal use
-            let yaw_rad = yaw.to_radians();
-            let pitch_rad = pitch.to_radians();
-
-            // Update the camera controller's internal yaw and pitch
-            camera_controller.yaw = yaw_rad;
-            camera_controller.pitch =
-                pitch_rad.clamp(-std::f32::consts::PI / 2.0, std::f32::consts::PI / 2.0);
-
-            // Apply the rotation to the transform using the same logic as the camera controller
-            transform.rotation = Quat::from_euler(
-                bevy::math::EulerRot::ZYX,
-                0.0,
-                camera_controller.yaw,
-                camera_controller.pitch,
-            );
-
-            reply!(
-                log,
-                "Set look angles to yaw: {:.1}°, pitch: {:.1}°",
-                yaw,
-                pitch
-            );
-            info!(
-                "Camera look angles set to yaw: {:.1}°, pitch: {:.1}°",
-                yaw, pitch
-            );
-        } else {
-            reply!(log, "Error: Could not find camera to set look direction");
-        }
-    }
-}
-
-#[cfg(feature = "console")]
-fn handle_load_map_command(
-    mut log: ConsoleCommand<LoadMapCommand>,
-    mut voxel_world: ResMut<VoxelWorld>,
-    mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-    asset_server: Res<AssetServer>,
-    existing_blocks_query: Query<Entity, With<VoxelBlock>>,
-) {
-    if let Some(Ok(LoadMapCommand { filename })) = log.take() {
-        // First, despawn all existing voxel blocks
-        for entity in existing_blocks_query.iter() {
-            commands.entity(entity).despawn();
-        }
-
-        // Load the map from file
-        match voxel_world.load_from_file(&filename) {
-            Ok(_) => {
-                // Spawn all blocks from the loaded map
-                let cube_mesh = meshes.add(Cuboid::new(CUBE_SIZE, CUBE_SIZE, CUBE_SIZE));
-
-                for (position, block_type) in voxel_world.blocks.iter() {
-                    let material = match block_type {
-                        BlockType::Water => materials.add(StandardMaterial {
-                            base_color: Color::srgba(0.0, 0.35, 0.9, 0.6),
-                            alpha_mode: AlphaMode::Blend,
-                            ..default()
-                        }),
-                        _ => {
-                            let texture_path = match block_type {
-                                BlockType::Grass => "textures/grass.webp",
-                                BlockType::Dirt => "textures/dirt.webp",
-                                BlockType::Stone => "textures/stone.webp",
-                                BlockType::QuartzBlock => "textures/quartz_block.webp",
-                                BlockType::GlassPane => "textures/glass_pane.webp",
-                                BlockType::CyanTerracotta => "textures/cyan_terracotta.webp",
-                                _ => unreachable!(),
-                            };
-                            let texture: Handle<Image> = asset_server.load(texture_path);
-                            materials.add(StandardMaterial {
-                                base_color_texture: Some(texture),
-                                ..default()
-                            })
-                        }
-                    };
-
-                    let mut entity_commands = commands.spawn((
-                        Mesh3d(cube_mesh.clone()),
-                        MeshMaterial3d(material),
-                        Transform::from_translation(Vec3::new(
-                            position.x as f32,
-                            position.y as f32,
-                            position.z as f32,
-                        )),
-                        VoxelBlock {
-                            position: *position,
-                        },
-                        // Physics colliders are managed by PhysicsManagerPlugin based on distance and mode
-                    ));
-                }
-
-                reply!(
-                    log,
-                    "Map loaded from '{}' with {} blocks",
-                    filename,
-                    voxel_world.blocks.len()
-                );
-                info!(
-                    "Map loaded from '{}' with {} blocks",
-                    filename,
-                    voxel_world.blocks.len()
-                );
-            }
-            Err(e) => {
-                reply!(log, "Failed to load map: {}", e);
-                error!("Failed to load map from '{}': {}", filename, e);
-            }
-        }
-    }
-}
-
 // Helper function to write to console if available
 #[cfg(feature = "console")]
-fn write_to_console(writer: &mut Option<EventWriter<PrintConsoleLine>>, message: String) {
-    if let Some(console) = writer {
-        console.write(PrintConsoleLine::new(message));
-    }
+fn write_to_console(_writer: &mut Option<()>, message: String) {
+    // Log the message instead since PrintConsoleLine was removed
+    info!("Console: {}", message);
 }
 
 fn execute_pending_commands(
     mut pending_commands: ResMut<crate::script::script_types::PendingCommands>,
-    #[cfg(feature = "console")] mut print_console_line: Option<EventWriter<PrintConsoleLine>>,
+    #[cfg(feature = "console")] mut print_console_line: Option<()>,
     mut command_executed_events: EventWriter<CommandExecutedEvent>,
     #[cfg(feature = "console")] mut blink_state: ResMut<BlinkState>,
     temperature: Res<TemperatureResource>,
@@ -1387,8 +969,7 @@ fn main() {
         .insert_resource(mqtt_config)
         .insert_resource(profile::load_or_create_profile_with_override(
             args.player_id,
-        ))
-        .init_resource::<ChunkedVoxelWorld>(); // Initialize chunk-based world alongside existing VoxelWorld
+        ));
     // Script resources are now handled by the ScriptPlugin
 
     // Add default plugins with custom window configuration
@@ -1433,8 +1014,6 @@ fn main() {
     app.add_plugins(DevicePlugin)
         .add_plugins(DevicePositioningPlugin)
         .add_plugins(EnvironmentPlugin)
-        .add_plugins(ChunkEventsPlugin) // Add chunk event system
-        .add_plugins(ChunkMqttPlugin) // Add chunk MQTT synchronization
         .add_plugins(MyInteractionPlugin)
         .add_plugins(MqttPlugin)
         .add_plugins(InventoryPlugin)
@@ -1486,7 +1065,7 @@ fn main() {
     #[cfg(feature = "console")]
     app.add_systems(
         Update,
-        crate::console::esc_handling::handle_esc_key.after(ConsoleSet::Commands),
+        crate::console::esc_handling::handle_esc_key.after(ConsoleSet::COMMANDS),
     );
 
     app.init_resource::<DiagnosticsVisible>()
@@ -1496,78 +1075,6 @@ fn main() {
         .add_systems(Update, handle_diagnostics_toggle)
         .add_systems(Update, update_diagnostics_content)
         .run();
-}
-
-#[cfg(feature = "console")]
-fn handle_mqtt_command(
-    mut log: ConsoleCommand<MqttCommand>,
-    temperature: Res<TemperatureResource>,
-) {
-    if let Some(Ok(MqttCommand { action })) = log.take() {
-        info!("Console command: mqtt {}", action);
-        match action.as_str() {
-            "status" => {
-                let status = if temperature.value.is_some() {
-                    "Connected to MQTT broker"
-                } else {
-                    "Connecting to MQTT broker..."
-                };
-                reply!(log, "{}", status);
-                info!("MQTT status requested via console");
-            }
-            "temp" => {
-                let temp_msg = if let Some(val) = temperature.value {
-                    format!("Current temperature: {:.1}°C", val)
-                } else {
-                    "No temperature data available".to_string()
-                };
-                reply!(log, "{}", temp_msg);
-            }
-            _ => {
-                reply!(log, "Usage: mqtt [status|temp]");
-            }
-        }
-    }
-}
-
-#[cfg(feature = "console")]
-fn handle_spawn_command(mut log: ConsoleCommand<SpawnCommand>, mqtt_config: Res<MqttConfig>) {
-    if let Some(Ok(SpawnCommand { device_id, x, y, z })) = log.take() {
-        info!("Console command: spawn {} {} {} {}", device_id, x, y, z);
-
-        // Use the same MQTT announcement system as spawn_door for consistency
-        let payload = json!({
-            "device_id": device_id,
-            "device_type": "lamp",
-            "state": "online",
-            "location": { "x": x, "y": y, "z": z }
-        })
-        .to_string();
-
-        // Create a temporary client for simulation
-        let mut mqtt_options =
-            MqttOptions::new("spawn-client", &mqtt_config.host, mqtt_config.port);
-        mqtt_options.set_keep_alive(Duration::from_secs(5));
-        let (client, mut connection) = Client::new(mqtt_options, 10);
-
-        client
-            .publish(
-                "devices/announce",
-                QoS::AtMostOnce,
-                false,
-                payload.as_bytes(),
-            )
-            .unwrap();
-
-        // Drive the event loop to ensure the message is sent
-        for notification in connection.iter() {
-            if let Ok(Event::Outgoing(Outgoing::Publish(_))) = notification {
-                break;
-            }
-        }
-
-        reply!(log, "Spawn command sent for device {}", device_id);
-    }
 }
 
 #[cfg(feature = "console")]
@@ -1811,7 +1318,7 @@ fn update_diagnostics_content(
                 }
                 crate::multiplayer::MultiplayerMode::JoinedWorld {
                     world_id,
-                    host_player,
+                    host_player: _,
                 } => ("👥 Joined World".to_string(), world_id.clone()),
             };
 
@@ -1842,7 +1349,7 @@ fn update_diagnostics_content(
                 .iter()
                 .map(|topic| {
                     // Find matching topic in last_messages (handling wildcards)
-                    let pattern = topic.replace("+", "[^/]+");
+                    let _pattern = topic.replace("+", "[^/]+");
                     let matching_message = last_messages.iter().find(|(msg_topic, _)| {
                         // Simple pattern matching for wildcard topics
                         if topic.contains("+") {
@@ -1978,7 +1485,7 @@ fn handle_mouse_capture(
     // Only handle mouse recapture in InGame state (after it was released)
     if *game_state.get() == GameState::InGame && mouse_button_input.just_pressed(MouseButton::Left)
     {
-        for mut window in &mut windows {
+        for window in &mut windows {
             if !window.focused {
                 continue;
             }

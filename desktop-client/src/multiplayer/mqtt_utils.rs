@@ -16,7 +16,7 @@ pub fn generate_unique_client_id(prefix: &str) -> String {
         .as_millis();
 
     let pid = process::id();
-    let random = rand::random::<u16>();
+    let random = rand::random::<u64>();
 
     format!("{}-{}-{}-{}", prefix, timestamp, pid, random)
 }

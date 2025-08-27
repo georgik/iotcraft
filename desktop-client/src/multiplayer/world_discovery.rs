@@ -1,11 +1,9 @@
-use async_channel::{Receiver, Sender}; // Keep for the unused async functions
 use bevy::prelude::*;
 use log::{error, info, warn};
-use rumqttc::{AsyncClient, Client, Event, Incoming, MqttOptions, QoS};
+use rumqttc::{Client, Event, Incoming, MqttOptions, QoS};
 use std::collections::HashMap;
 use std::sync::mpsc;
-use std::time::Instant;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
 use super::mqtt_utils::generate_unique_client_id;
 use super::shared_world::*;
@@ -17,7 +15,6 @@ use crate::world::*;
 #[derive(Debug, Clone)]
 pub struct LastMessage {
     pub content: String,
-    pub timestamp: u64, // Unix timestamp in seconds
 }
 
 /// Resource for managing world discovery
@@ -25,8 +22,6 @@ pub struct LastMessage {
 pub struct WorldDiscovery {
     pub discovery_tx: std::sync::Mutex<Option<mpsc::Sender<DiscoveryMessage>>>,
     pub world_rx: std::sync::Mutex<Option<mpsc::Receiver<DiscoveryResponse>>>,
-    pub subscribed_topics: std::sync::Mutex<Vec<String>>,
-    pub connection_status: std::sync::Mutex<String>,
     pub last_messages: std::sync::Mutex<HashMap<String, LastMessage>>,
 }
 
@@ -35,8 +30,6 @@ impl Default for WorldDiscovery {
         Self {
             discovery_tx: std::sync::Mutex::new(None),
             world_rx: std::sync::Mutex::new(None),
-            subscribed_topics: std::sync::Mutex::new(Vec::new()),
-            connection_status: std::sync::Mutex::new("Disconnected".to_string()),
             last_messages: std::sync::Mutex::new(HashMap::new()),
         }
     }
@@ -121,7 +114,7 @@ fn initialize_world_discovery(
         opts.set_clean_session(false); // Important: Use persistent session to receive retained messages
         opts.set_max_packet_size(2097152, 2097152); // Increase to 2MB for large world data
 
-        let (client, mut conn) = Client::new(opts, 100); // Increase channel capacity for large messages
+        let (_client, mut conn) = Client::new(opts, 100); // Increase channel capacity for large messages
 
         let mut initial_connection_success = false;
         let mut connection_attempts = 0;
@@ -232,7 +225,6 @@ fn initialize_world_discovery(
                     }
                     Err(e) => {
                         error!("🚫 World discovery connection error: {:?}", e);
-                        reconnect = true;
                         break;
                     }
                 }
@@ -271,143 +263,6 @@ fn initialize_world_discovery(
     info!("✅ World discovery initialized");
 }
 
-/// Run a single world discovery session with proper async MQTT handling
-async fn run_world_discovery_session(
-    mqtt_host: &str,
-    mqtt_port: u16,
-    discovery_rx: Receiver<DiscoveryMessage>,
-    response_tx: Sender<DiscoveryResponse>,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let client_id = generate_unique_client_id("iotcraft-world-discovery");
-    info!("World discovery connecting with client ID: {}", client_id);
-
-    let mut opts = MqttOptions::new(&client_id, mqtt_host, mqtt_port);
-    opts.set_keep_alive(Duration::from_secs(30));
-    opts.set_clean_session(false); // Important: Use persistent session to receive retained messages
-    opts.set_max_packet_size(2097152, 2097152); // Increase to 2MB for large world data
-
-    // Increase channel capacity to handle large messages and multiple retained messages
-    let (client, mut eventloop) = AsyncClient::new(opts, 100);
-
-    // World discovery state
-    let mut world_cache: HashMap<String, SharedWorldInfo> = HashMap::new();
-    let mut chunk_cache: HashMap<String, HashMap<u32, ChunkedWorldData>> = HashMap::new();
-    let mut last_messages: HashMap<String, LastMessage> = HashMap::new();
-    let mut connected = false;
-    let mut subscribed = false;
-
-    info!("Starting async world discovery event loop...");
-
-    // For periodic updates without tokio timers, track last update instants
-    let mut last_periodic_update = Instant::now();
-
-    loop {
-        // Await next MQTT event; this yield will drive the async task without tokio runtime
-        match eventloop.poll().await {
-            Ok(Event::Incoming(Incoming::ConnAck(_))) => {
-                info!("🔗 World discovery connected to MQTT broker");
-                connected = true;
-
-                // Subscribe to all world discovery topics
-                let topics = [
-                    "iotcraft/worlds/+/info",
-                    "iotcraft/worlds/+/data",
-                    "iotcraft/worlds/+/data/chunk",
-                    "iotcraft/worlds/+/changes",
-                    "iotcraft/worlds/+/state/blocks/placed",
-                    "iotcraft/worlds/+/state/blocks/removed",
-                ];
-
-                for topic in &topics {
-                    if let Err(e) = client.subscribe(*topic, QoS::AtLeastOnce).await {
-                        error!("Failed to subscribe to {}: {}", topic, e);
-                        return Err(e.into());
-                    }
-                    info!("📬 Subscribed to: {}", topic);
-                }
-            }
-            Ok(Event::Incoming(Incoming::SubAck(_))) => {
-                if !subscribed {
-                    info!("✅ World discovery subscriptions acknowledged");
-                    subscribed = true;
-
-                    // Immediately send initial world list update if any
-                    if !world_cache.is_empty() {
-                        let _ = response_tx.try_send(DiscoveryResponse::WorldListUpdated {
-                            worlds: world_cache.clone(),
-                        });
-                        info!(
-                            "📤 Sent initial world list with {} worlds",
-                            world_cache.len()
-                        );
-                    }
-                }
-            }
-            Ok(Event::Incoming(Incoming::Publish(publish))) => {
-                if connected {
-                    info!(
-                        "📨 Received world discovery message on '{}' [retain: {}, payload_size: {} bytes]",
-                        publish.topic,
-                        publish.retain,
-                        publish.payload.len()
-                    );
-
-                    // Handle the discovery message
-                    handle_discovery_message(
-                        &publish,
-                        &mut world_cache,
-                        &mut chunk_cache,
-                        &mut last_messages,
-                        &response_tx,
-                    );
-
-                    // Send world list update for info messages
-                    if publish.topic.contains("/info") {
-                        let _ = response_tx.try_send(DiscoveryResponse::WorldListUpdated {
-                            worlds: world_cache.clone(),
-                        });
-                    }
-                }
-            }
-            Ok(_) => {
-                // Other MQTT events - ignore
-            }
-            Err(e) => {
-                error!("🚫 MQTT connection error: {:?}", e);
-                return Err(e.into());
-            }
-        }
-
-        // After each event, opportunistically process any pending discovery requests
-        loop {
-            match discovery_rx.try_recv() {
-                Ok(DiscoveryMessage::RefreshWorlds) => {
-                    info!(
-                        "🔄 RefreshWorlds request - sending {} cached worlds",
-                        world_cache.len()
-                    );
-                    let _ = response_tx.try_send(DiscoveryResponse::WorldListUpdated {
-                        worlds: world_cache.clone(),
-                    });
-                }
-                Err(async_channel::TryRecvError::Empty) => break,
-                Err(async_channel::TryRecvError::Closed) => {
-                    warn!("Discovery request channel disconnected");
-                    return Ok(());
-                }
-            }
-        }
-
-        // Periodically send last-messages snapshot without timers
-        if last_periodic_update.elapsed() > Duration::from_millis(250) {
-            let _ = response_tx.try_send(DiscoveryResponse::LastMessagesUpdated {
-                last_messages: last_messages.clone(),
-            });
-            last_periodic_update = Instant::now();
-        }
-    }
-}
-
 // Synchronous version of handle_discovery_message for the synchronous thread
 fn handle_sync_discovery_message(
     publish: &rumqttc::Publish,
@@ -419,11 +274,6 @@ fn handle_sync_discovery_message(
     info!("Received MQTT message on topic: {}", publish.topic);
 
     // Track last message for this topic
-    let timestamp = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
-
     let payload_str = String::from_utf8_lossy(&publish.payload);
     let truncated_content = if payload_str.len() > 40 {
         format!("{}...", &payload_str[..40])
@@ -435,7 +285,6 @@ fn handle_sync_discovery_message(
         publish.topic.clone(),
         LastMessage {
             content: truncated_content,
-            timestamp,
         },
     );
 
@@ -628,227 +477,6 @@ fn handle_sync_discovery_message(
     }
 }
 
-// Async version (keep for reference, but not used in synchronous thread)
-fn handle_discovery_message(
-    publish: &rumqttc::Publish,
-    world_cache: &mut HashMap<String, SharedWorldInfo>,
-    chunk_cache: &mut HashMap<String, HashMap<u32, ChunkedWorldData>>,
-    last_messages: &mut HashMap<String, LastMessage>,
-    response_tx: &Sender<DiscoveryResponse>,
-) {
-    info!("Received MQTT message on topic: {}", publish.topic);
-
-    // Track last message for this topic
-    let timestamp = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
-
-    let payload_str = String::from_utf8_lossy(&publish.payload);
-    let truncated_content = if payload_str.len() > 40 {
-        format!("{}...", &payload_str[..40])
-    } else {
-        payload_str.to_string()
-    };
-
-    last_messages.insert(
-        publish.topic.clone(),
-        LastMessage {
-            content: truncated_content,
-            timestamp,
-        },
-    );
-
-    // Send last messages update
-    let _ = response_tx.try_send(DiscoveryResponse::LastMessagesUpdated {
-        last_messages: last_messages.clone(),
-    });
-
-    let topic_parts: Vec<&str> = publish.topic.split('/').collect();
-
-    if topic_parts.len() < 4 {
-        warn!("Invalid topic structure: {}", publish.topic);
-        return;
-    }
-
-    let world_id = topic_parts[2];
-    let message_type = topic_parts[3];
-
-    info!(
-        "Processing message for world_id: {}, type: {}",
-        world_id, message_type
-    );
-
-    match message_type {
-        "info" => {
-            if publish.payload.is_empty() {
-                // Empty message means world was unpublished
-                world_cache.remove(world_id);
-                info!("World {} was unpublished", world_id);
-            } else {
-                // Parse world info
-                match String::from_utf8(publish.payload.to_vec()) {
-                    Ok(payload_str) => {
-                        match serde_json::from_str::<SharedWorldInfo>(&payload_str) {
-                            Ok(world_info) => {
-                                info!(
-                                    "Discovered world: {} (ID: {}) by {} - adding to cache",
-                                    world_info.world_name,
-                                    world_info.world_id,
-                                    world_info.host_name
-                                );
-                                world_cache.insert(world_id.to_string(), world_info.clone());
-                                info!("World cache now contains {} worlds", world_cache.len());
-                            }
-                            Err(e) => {
-                                error!(
-                                    "Failed to parse world info payload '{}': {}",
-                                    payload_str, e
-                                );
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        error!("Failed to decode world info payload: {}", e);
-                    }
-                }
-            }
-
-            // Notify about updated world list
-            let _ = response_tx.try_send(DiscoveryResponse::WorldListUpdated {
-                worlds: world_cache.clone(),
-            });
-        }
-        "data" => {
-            if topic_parts.len() >= 5 && topic_parts[4] == "chunk" {
-                // Handle chunked data
-                handle_chunk_message(publish, world_id, chunk_cache, response_tx);
-            } else if !publish.payload.is_empty() {
-                // Handle regular (non-chunked) data - try both binary and JSON
-                match try_parse_world_data(&publish.payload) {
-                    Ok(world_data) => {
-                        info!("Received world data for: {}", world_id);
-                        let _ = response_tx.try_send(DiscoveryResponse::WorldDataReceived {
-                            world_id: world_id.to_string(),
-                            world_data,
-                        });
-                    }
-                    Err(e) => {
-                        error!("Failed to parse world data: {}", e);
-                    }
-                }
-            }
-        }
-        "changes" => match String::from_utf8(publish.payload.to_vec()) {
-            Ok(payload_str) => match serde_json::from_str::<WorldChange>(&payload_str) {
-                Ok(change) => {
-                    let _ = response_tx.try_send(DiscoveryResponse::WorldChangeReceived { change });
-                }
-                Err(e) => {
-                    error!("Failed to parse world change: {}", e);
-                }
-            },
-            Err(e) => {
-                error!("Failed to decode world change payload: {}", e);
-            }
-        },
-        "state" => {
-            // Handle block change messages
-            if topic_parts.len() >= 6 && topic_parts[4] == "blocks" {
-                let block_action = topic_parts[5]; // "placed" or "removed"
-
-                match String::from_utf8(publish.payload.to_vec()) {
-                    Ok(payload_str) => {
-                        match serde_json::from_str::<serde_json::Value>(&payload_str) {
-                            Ok(v) => {
-                                // Parse the block change message
-                                let player_id = v["player_id"].as_str().unwrap_or("").to_string();
-                                let player_name =
-                                    v["player_name"].as_str().unwrap_or("").to_string();
-
-                                if let Some(change_obj) = v["change"].as_object() {
-                                    let change_type = if block_action == "placed" {
-                                        if let Some(placed) = change_obj.get("Placed") {
-                                            super::shared_world::BlockChangeType::Placed {
-                                            x: placed["x"].as_i64().unwrap_or(0) as i32,
-                                            y: placed["y"].as_i64().unwrap_or(0) as i32,
-                                            z: placed["z"].as_i64().unwrap_or(0) as i32,
-                                            block_type: match placed["block_type"].as_str().unwrap_or("Stone") {
-                                                "Grass" => crate::environment::BlockType::Grass,
-                                                "Dirt" => crate::environment::BlockType::Dirt,
-                                                "Stone" => crate::environment::BlockType::Stone,
-                                                "QuartzBlock" => crate::environment::BlockType::QuartzBlock,
-                                                "GlassPane" => crate::environment::BlockType::GlassPane,
-                                                "CyanTerracotta" => crate::environment::BlockType::CyanTerracotta,
-                                                "Water" => crate::environment::BlockType::Water,
-                                                _ => crate::environment::BlockType::Stone,
-                                            },
-                                        }
-                                        } else {
-                                            error!("Invalid placed block change format");
-                                            return;
-                                        }
-                                    } else if block_action == "removed" {
-                                        if let Some(removed) = change_obj.get("Removed") {
-                                            super::shared_world::BlockChangeType::Removed {
-                                                x: removed["x"].as_i64().unwrap_or(0) as i32,
-                                                y: removed["y"].as_i64().unwrap_or(0) as i32,
-                                                z: removed["z"].as_i64().unwrap_or(0) as i32,
-                                            }
-                                        } else {
-                                            error!("Invalid removed block change format");
-                                            return;
-                                        }
-                                    } else {
-                                        error!("Unknown block action: {}", block_action);
-                                        return;
-                                    };
-
-                                    info!(
-                                        "🔄 Parsed block change for world {}: {:?} by {} - sending to response channel",
-                                        world_id, change_type, player_name
-                                    );
-
-                                    let send_result = response_tx.try_send(
-                                        DiscoveryResponse::BlockChangeReceived {
-                                            world_id: world_id.to_string(),
-                                            player_id,
-                                            player_name,
-                                            change_type,
-                                        },
-                                    );
-
-                                    if send_result.is_ok() {
-                                        info!(
-                                            "✅ Block change message sent to response channel successfully"
-                                        );
-                                    } else {
-                                        error!(
-                                            "❌ Failed to send block change to response channel: {:?}",
-                                            send_result
-                                        );
-                                    }
-                                } else {
-                                    error!("Block change message missing 'change' object");
-                                }
-                            }
-                            Err(e) => {
-                                error!("Failed to parse block change JSON: {}", e);
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        error!("Failed to decode block change payload: {}", e);
-                    }
-                }
-            }
-        }
-        _ => {
-            // Unknown message type
-        }
-    }
-}
-
 /// Try to parse world data from both binary and JSON formats
 fn try_parse_world_data(payload: &[u8]) -> Result<WorldSaveData, String> {
     // First try direct JSON deserialization (for non-chunked data)
@@ -898,62 +526,6 @@ fn handle_sync_chunk_message(
                     Ok(world_data) => {
                         info!("Successfully reassembled world data for: {}", world_id);
                         let _ = response_tx.send(DiscoveryResponse::WorldDataReceived {
-                            world_id: world_id.to_string(),
-                            world_data,
-                        });
-
-                        // Clean up the chunk cache for this chunk_id
-                        chunk_cache.remove(&chunk.chunk_id);
-                    }
-                    Err(e) => {
-                        error!("Failed to reassemble chunks for {}: {}", chunk.chunk_id, e);
-                        // Clean up failed assembly
-                        chunk_cache.remove(&chunk.chunk_id);
-                    }
-                }
-            }
-        }
-        Err(e) => {
-            error!("Failed to parse chunk message: {}", e);
-        }
-    }
-}
-
-/// Handle incoming chunk message and reassemble if complete (async version)
-fn handle_chunk_message(
-    publish: &rumqttc::Publish,
-    world_id: &str,
-    chunk_cache: &mut HashMap<String, HashMap<u32, ChunkedWorldData>>,
-    response_tx: &Sender<DiscoveryResponse>,
-) {
-    // Parse the chunk from binary payload
-    match serde_json::from_slice::<ChunkedWorldData>(&publish.payload) {
-        Ok(chunk) => {
-            info!(
-                "Received chunk {}/{} for world {} (chunk_id: {})",
-                chunk.chunk_index + 1,
-                chunk.total_chunks,
-                world_id,
-                chunk.chunk_id
-            );
-
-            // Store the chunk
-            let chunk_map = chunk_cache
-                .entry(chunk.chunk_id.clone())
-                .or_insert_with(HashMap::new);
-            chunk_map.insert(chunk.chunk_index, chunk.clone());
-
-            // Check if we have all chunks
-            if chunk_map.len() == chunk.total_chunks as usize {
-                info!(
-                    "All chunks received for {}, reassembling...",
-                    chunk.chunk_id
-                );
-
-                match reassemble_chunks(chunk_map) {
-                    Ok(world_data) => {
-                        info!("Successfully reassembled world data for: {}", world_id);
-                        let _ = response_tx.try_send(DiscoveryResponse::WorldDataReceived {
                             world_id: world_id.to_string(),
                             world_data,
                         });

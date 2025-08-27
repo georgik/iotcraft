@@ -26,7 +26,7 @@ impl Plugin for NativeMqttPlugin {
 pub fn spawn_native_mqtt_subscriber(
     mut commands: Commands,
     mqtt_config: Res<MqttConfig>,
-    profile: Res<PlayerProfile>,
+    _profile: Res<PlayerProfile>,
 ) {
     let (tx, rx) = mpsc::channel::<f32>();
     let mqtt_host = mqtt_config.host.clone();

@@ -19,7 +19,6 @@ pub mod esc_handling;
 use bevy::prelude::*;
 
 // Re-export new console architecture
-pub use command_parser::*;
 pub use console_infrastructure::*;
 pub use console_plugin::*;
 pub use console_trait::*;
@@ -49,6 +48,3 @@ impl BlinkState {
 #[cfg(feature = "console")]
 #[derive(Component)]
 pub struct BlinkCube;
-
-#[cfg(feature = "console")]
-pub use console_types::*;

@@ -2,7 +2,6 @@ use bevy::prelude::*;
 
 use crate::console::bevy_ui_console::BevyUiConsole;
 use crate::console::console_trait::{Console, ConsoleConfig, ConsoleManager};
-use crate::console::simple_console::SimpleConsole;
 use crate::ui::GameState;
 
 // Import different console implementations based on features
@@ -16,8 +15,7 @@ pub struct ConsolePlugin;
 impl Plugin for ConsolePlugin {
     fn build(&self, app: &mut App) {
         // Initialize the console config and state
-        app.init_resource::<ConsoleConfig>()
-            .init_resource::<crate::console::ConsoleOpen>();
+        app.init_resource::<ConsoleConfig>();
 
         // Choose console implementation based on available features
         let console_impl: Box<dyn Console> = {
@@ -48,38 +46,6 @@ impl Plugin for ConsolePlugin {
             .add_systems(Update, handle_console_messages);
 
         info!("Console plugin initialized");
-    }
-}
-
-/// Null console implementation for when no console features are enabled
-struct NullConsole;
-
-impl NullConsole {
-    fn new() -> Self {
-        Self
-    }
-}
-
-impl Console for NullConsole {
-    fn initialize(&mut self, _app: &mut App) {}
-    fn process_input(&mut self, _input: &str) -> crate::console::console_trait::ConsoleResult {
-        crate::console::console_trait::ConsoleResult::Error("Console not available".to_string())
-    }
-    fn add_output(&mut self, _message: &str) {}
-    fn clear_output(&mut self) {}
-    fn toggle_visibility(&mut self) {}
-    fn is_visible(&self) -> bool {
-        false
-    }
-    fn update(&mut self, _world: &mut World) {}
-    fn get_render_data(&self) -> Option<crate::console::console_trait::ConsoleRenderData> {
-        None
-    }
-    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
-        self
-    }
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
     }
 }
 
@@ -155,9 +121,4 @@ pub fn handle_console_messages(
     for event in message_events.read() {
         console_manager.add_message(&event.message);
     }
-}
-
-/// Convenience function to send a message to the console
-pub fn send_console_message(message: String, event_writer: &mut EventWriter<ConsoleMessageEvent>) {
-    event_writer.write(ConsoleMessageEvent { message });
 }

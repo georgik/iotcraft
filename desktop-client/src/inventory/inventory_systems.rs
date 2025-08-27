@@ -1,11 +1,7 @@
-#[cfg(feature = "console")]
-use crate::console::GiveCommand;
 use crate::environment::{BlockType, VoxelWorld};
 use crate::inventory::{
     BreakBlockEvent, GiveItemEvent, ItemType, PlaceBlockEvent, PlayerInventory,
 };
-#[cfg(feature = "console")]
-use crate::{console::ConsoleCommand, reply};
 use bevy::prelude::*;
 
 /// System to handle give item events
@@ -41,7 +37,7 @@ mod tests {
         world.init_resource::<Events<GiveItemEvent>>();
 
         let mut event_writer = world.resource_mut::<Events<GiveItemEvent>>();
-        event_writer.send(GiveItemEvent {
+        event_writer.write(GiveItemEvent {
             item_type: ItemType::Block(BlockType::Stone),
             count: 32,
         });
@@ -49,7 +45,7 @@ mod tests {
 
         let mut system = IntoSystem::into_system(give_item_system);
         system.initialize(&mut world);
-        system.run((), &mut world);
+        let _ = system.run((), &mut world);
 
         let inventory = world.resource::<PlayerInventory>();
         // Should have added items to inventory (first slot)
@@ -75,7 +71,7 @@ mod tests {
         world.init_resource::<Events<PlaceBlockEvent>>();
 
         let mut event_writer = world.resource_mut::<Events<PlaceBlockEvent>>();
-        event_writer.send(PlaceBlockEvent {
+        event_writer.write(PlaceBlockEvent {
             position: IVec3::new(1, 2, 3),
         });
         drop(event_writer);
@@ -100,7 +96,7 @@ mod tests {
 
         let mut system = IntoSystem::into_system(test_system);
         system.initialize(&mut world);
-        system.run((), &mut world);
+        let _ = system.run((), &mut world);
 
         let voxel_world = world.resource::<VoxelWorld>();
         let inventory = world.resource::<PlayerInventory>();
@@ -123,14 +119,14 @@ mod tests {
         world.init_resource::<Events<BreakBlockEvent>>();
 
         let mut event_writer = world.resource_mut::<Events<BreakBlockEvent>>();
-        event_writer.send(BreakBlockEvent {
+        event_writer.write(BreakBlockEvent {
             position: IVec3::new(5, 5, 5),
         });
         drop(event_writer);
 
         let mut system = IntoSystem::into_system(break_block_system);
         system.initialize(&mut world);
-        system.run((), &mut world);
+        let _ = system.run((), &mut world);
 
         let voxel_world = world.resource::<VoxelWorld>();
         // Block should be removed
@@ -270,44 +266,5 @@ pub fn break_block_system(
 ) {
     for event in events.read() {
         voxel_world.remove_block(&event.position);
-    }
-}
-
-/// Console command handler for giving items to player
-#[cfg(feature = "console")]
-pub fn handle_give_command(
-    mut log: ConsoleCommand<GiveCommand>,
-    mut inventory: ResMut<PlayerInventory>,
-) {
-    if let Some(Ok(GiveCommand { item_type, count })) = log.take() {
-        let block_type = match item_type.as_str() {
-            "grass" => BlockType::Grass,
-            "dirt" => BlockType::Dirt,
-            "stone" => BlockType::Stone,
-            "quartz_block" => BlockType::QuartzBlock,
-            "glass_pane" => BlockType::GlassPane,
-            "cyan_terracotta" => BlockType::CyanTerracotta,
-            "water" => BlockType::Water,
-            _ => {
-                reply!(log, "Invalid item type: {}", item_type);
-                return;
-            }
-        };
-
-        let item_type = ItemType::Block(block_type);
-        let remainder = inventory.add_items(item_type, count);
-
-        if remainder == 0 {
-            reply!(log, "Gave {} {} to player", count, item_type.display_name());
-        } else {
-            let given = count - remainder;
-            reply!(
-                log,
-                "Gave {} {} to player ({} couldn't fit in inventory)",
-                given,
-                item_type.display_name(),
-                remainder
-            );
-        }
     }
 }

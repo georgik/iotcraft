@@ -2,7 +2,7 @@ use bevy::prelude::*;
 use std::collections::VecDeque;
 
 use crate::console::command_parser::CommandParser;
-use crate::console::console_trait::{Console, ConsoleRenderData, ConsoleResult};
+use crate::console::console_trait::{Console, ConsoleResult};
 
 /// Simple console implementation using basic logging
 /// Works reliably on both desktop and WASM
@@ -11,7 +11,6 @@ pub struct SimpleConsole {
     output_lines: VecDeque<String>,
     max_output_lines: usize,
     visible: bool,
-    input_text: String,
     command_history: Vec<String>,
     history_index: Option<usize>,
 }
@@ -29,7 +28,6 @@ impl SimpleConsole {
             output_lines: VecDeque::new(),
             max_output_lines: 50,
             visible: false,
-            input_text: String::new(),
             command_history: Vec::new(),
             history_index: None,
         }
@@ -110,17 +108,8 @@ impl Console for SimpleConsole {
         );
     }
 
-    fn process_input(&mut self, input: &str) -> ConsoleResult {
-        // This will be handled in the update method with full world access
-        ConsoleResult::Success("Command queued".to_string())
-    }
-
     fn add_output(&mut self, message: &str) {
         self.add_output_line(message.to_string());
-    }
-
-    fn clear_output(&mut self) {
-        self.output_lines.clear();
     }
 
     fn toggle_visibility(&mut self) {
@@ -151,20 +140,7 @@ impl Console for SimpleConsole {
         }
     }
 
-    fn get_render_data(&self) -> Option<ConsoleRenderData> {
-        Some(ConsoleRenderData {
-            visible: self.visible,
-            output_lines: self.output_lines.iter().cloned().collect(),
-            input_text: self.input_text.clone(),
-            cursor_position: 0,
-        })
-    }
-
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
-        self
-    }
-
-    fn as_any(&self) -> &dyn std::any::Any {
         self
     }
 }
@@ -195,11 +171,4 @@ fn handle_simple_console_input(
     }
 
     // Add more shortcuts as needed
-}
-
-/// Convenience function for external systems to execute console commands
-pub fn execute_console_command(command: &str, world: &mut World) {
-    if let Some(mut console_state) = world.get_resource_mut::<SimpleConsoleState>() {
-        console_state.pending_command = Some(command.to_string());
-    }
 }

@@ -2,7 +2,7 @@ use bevy::prelude::*;
 use std::collections::VecDeque;
 
 use crate::console::command_parser::CommandParser;
-use crate::console::console_trait::{Console, ConsoleRenderData, ConsoleResult};
+use crate::console::console_trait::{Console, ConsoleResult};
 
 /// Simple console implementation using Bevy's built-in UI system
 /// Works on both desktop and WASM
@@ -197,8 +197,6 @@ impl Console for BevyUiConsole {
             output_text: "IoTCraft Console initialized. Type 'help' for available commands.\n"
                 .to_string(),
             input_text: String::new(),
-            cursor_visible: true,
-            cursor_timer: Timer::from_seconds(0.5, TimerMode::Repeating),
         });
 
         self.add_output_line(
@@ -206,17 +204,8 @@ impl Console for BevyUiConsole {
         );
     }
 
-    fn process_input(&mut self, input: &str) -> ConsoleResult {
-        // This will be handled in the update method with full world access
-        ConsoleResult::Success("Command queued".to_string())
-    }
-
     fn add_output(&mut self, message: &str) {
         self.add_output_line(message.to_string());
-    }
-
-    fn clear_output(&mut self) {
-        self.output_lines.clear();
     }
 
     fn toggle_visibility(&mut self) {
@@ -251,20 +240,7 @@ impl Console for BevyUiConsole {
         }
     }
 
-    fn get_render_data(&self) -> Option<ConsoleRenderData> {
-        Some(ConsoleRenderData {
-            visible: self.visible,
-            output_lines: self.output_lines.iter().cloned().collect(),
-            input_text: self.input_text.clone(),
-            cursor_position: self.cursor_position,
-        })
-    }
-
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
-        self
-    }
-
-    fn as_any(&self) -> &dyn std::any::Any {
         self
     }
 }
@@ -275,8 +251,6 @@ pub struct ConsoleUiState {
     pub visible: bool,
     pub output_text: String,
     pub input_text: String,
-    pub cursor_visible: bool,
-    pub cursor_timer: Timer,
 }
 
 /// Console UI components
@@ -417,7 +391,7 @@ fn handle_console_input(
     keyboard_input: Res<ButtonInput<KeyCode>>,
     mut char_input_events: EventReader<bevy::input::keyboard::KeyboardInput>,
     mut console_manager: ResMut<crate::console::ConsoleManager>,
-    ui_state: ResMut<ConsoleUiState>,
+    _ui_state: ResMut<ConsoleUiState>,
 ) {
     if !console_manager.console.is_visible() {
         return;

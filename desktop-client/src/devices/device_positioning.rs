@@ -1,7 +1,5 @@
 use super::device_types::*;
 use crate::config::MqttConfig;
-#[cfg(feature = "console")]
-use crate::console::ConsoleOpen;
 use crate::fonts::Fonts;
 use bevy::prelude::*;
 use log::{error, info};

@@ -1,79 +1,20 @@
 use bevy::prelude::*;
 
-use super::BlockType;
 use super::chunk_types::*;
 
 /// Events for chunk-based MQTT synchronization
 #[derive(Event, BufferedEvent)]
 pub struct ChunkChangeEvent {
-    pub chunk_coordinate: ChunkCoordinate,
+    // pub chunk_coordinate: ChunkCoordinate,
     pub change_type: ChunkChangeType,
-    pub world_id: String,
-    pub player_id: String,
-    pub player_name: String,
+    // pub player_id: String,
 }
 
 /// Types of chunk changes
 #[derive(Debug, Clone)]
 pub enum ChunkChangeType {
-    /// A block was placed in the chunk
-    BlockPlaced {
-        position: IVec3,
-        block_type: BlockType,
-    },
-    /// A block was removed from the chunk  
-    BlockRemoved { position: IVec3 },
-    /// An entire chunk was loaded/created
-    ChunkLoaded { chunk_data: ChunkData },
-    /// A chunk was unloaded (but data may be retained)
-    ChunkUnloaded,
-    /// Request to load a chunk from MQTT
-    ChunkLoadRequested,
-}
-
-/// Event for publishing world metadata
-#[derive(Event, BufferedEvent)]
-pub struct PublishWorldMetadataEvent {
-    pub world_id: String,
-    pub metadata: ChunkedWorldMetadata,
-}
-
-/// Event for requesting chunk data from MQTT
-#[derive(Event, BufferedEvent)]
-pub struct RequestChunkDataEvent {
-    pub world_id: String,
-    pub chunk_coordinate: ChunkCoordinate,
-    pub requester_player_id: String,
-}
-
-/// Event for receiving chunk data from MQTT
-#[derive(Event, BufferedEvent)]
-pub struct ChunkDataReceivedEvent {
-    pub world_id: String,
-    pub chunk_data: ChunkData,
-    pub sender_player_id: String,
-}
-
-/// Event for chunk metadata updates
-#[derive(Event, BufferedEvent)]
-pub struct ChunkMetadataUpdateEvent {
-    pub world_id: String,
-    pub metadata: ChunkMetadata,
-}
-
-/// Event to signal that chunks should be loaded around a player
-#[derive(Event, BufferedEvent)]
-pub struct LoadChunksAroundPlayerEvent {
-    pub player_id: String,
-    pub position: Vec3,
-    pub load_radius: i32, // Radius in chunks
-}
-
-/// Event to signal that chunks should be unloaded
-#[derive(Event, BufferedEvent)]
-pub struct UnloadChunksEvent {
-    pub chunk_coordinates: Vec<ChunkCoordinate>,
-    pub world_id: String,
+    /// Placeholder for future chunk change types
+    _Unused,
 }
 
 /// Component to mark entities that should trigger chunk loading
@@ -101,24 +42,6 @@ pub struct ChunkLoadingState {
 }
 
 impl ChunkLoadingState {
-    pub fn new() -> Self {
-        Self {
-            loading_chunks: std::collections::HashSet::new(),
-            requested_chunks: std::collections::HashMap::new(),
-            chunk_request_timeout: std::time::Duration::from_secs(10),
-        }
-    }
-
-    pub fn is_loading(&self, chunk: &ChunkCoordinate) -> bool {
-        self.loading_chunks.contains(chunk)
-    }
-
-    pub fn start_loading(&mut self, chunk: ChunkCoordinate) {
-        self.loading_chunks.insert(chunk.clone());
-        self.requested_chunks
-            .insert(chunk, std::time::Instant::now());
-    }
-
     pub fn finish_loading(&mut self, chunk: &ChunkCoordinate) {
         self.loading_chunks.remove(chunk);
         self.requested_chunks.remove(chunk);
@@ -151,12 +74,6 @@ impl Plugin for ChunkEventsPlugin {
             .init_resource::<ChunkLoadingState>()
             // Events
             .add_event::<ChunkChangeEvent>()
-            .add_event::<PublishWorldMetadataEvent>()
-            .add_event::<RequestChunkDataEvent>()
-            .add_event::<ChunkDataReceivedEvent>()
-            .add_event::<ChunkMetadataUpdateEvent>()
-            .add_event::<LoadChunksAroundPlayerEvent>()
-            .add_event::<UnloadChunksEvent>()
             // Systems
             .add_systems(Update, (chunk_loader_system, cleanup_chunk_requests_system));
     }
@@ -165,7 +82,6 @@ impl Plugin for ChunkEventsPlugin {
 /// System to handle chunk loading around entities with ChunkLoader component
 fn chunk_loader_system(
     mut chunk_loaders: Query<(&Transform, &mut ChunkLoader)>,
-    mut load_events: EventWriter<LoadChunksAroundPlayerEvent>,
     mut chunked_world: ResMut<crate::environment::ChunkedVoxelWorld>,
 ) {
     for (transform, mut loader) in chunk_loaders.iter_mut() {
@@ -199,12 +115,7 @@ fn chunk_loader_system(
                 }
             }
 
-            // Send event for MQTT synchronization
-            load_events.write(LoadChunksAroundPlayerEvent {
-                player_id: "local_player".to_string(), // TODO: Get actual player ID
-                position: transform.translation,
-                load_radius: loader.load_radius,
-            });
+            // Chunk loading completed (no event needed as no system consumes it)
         }
     }
 }
@@ -217,20 +128,6 @@ fn cleanup_chunk_requests_system(mut loading_state: ResMut<ChunkLoadingState>) {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_chunk_loading_state() {
-        let mut state = ChunkLoadingState::new();
-        let chunk = ChunkCoordinate::new(0, 0, 0);
-
-        assert!(!state.is_loading(&chunk));
-
-        state.start_loading(chunk.clone());
-        assert!(state.is_loading(&chunk));
-
-        state.finish_loading(&chunk);
-        assert!(!state.is_loading(&chunk));
-    }
 
     #[test]
     fn test_chunk_loader_default() {

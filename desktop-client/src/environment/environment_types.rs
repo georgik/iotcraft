@@ -93,21 +93,6 @@ impl VoxelWorld {
         std::fs::write(filename, json)?;
         Ok(())
     }
-
-    /// Load the voxel world from a JSON file
-    pub fn load_from_file(&mut self, filename: &str) -> Result<(), Box<dyn std::error::Error>> {
-        let content = std::fs::read_to_string(filename)?;
-        let map_data: VoxelMapData = serde_json::from_str(&content)?;
-
-        self.blocks.clear();
-        for block_data in map_data.blocks {
-            self.blocks.insert(
-                IVec3::new(block_data.x, block_data.y, block_data.z),
-                block_data.block_type,
-            );
-        }
-        Ok(())
-    }
 }
 
 /// Serializable representation of a voxel block

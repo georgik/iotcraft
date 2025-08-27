@@ -1,5 +1,3 @@
-#[cfg(feature = "console")]
-use crate::console::ConsoleOpen;
 use bevy::pbr::MeshMaterial3d;
 use bevy::prelude::*;
 use log::{error, info};
