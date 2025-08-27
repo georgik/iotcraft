@@ -31,7 +31,14 @@ pub use console_plugin::*;
 pub use console_trait::*;
 
 // BlinkState resource for console blink functionality
-#[cfg(feature = "console")]
+// Use web_console version for WASM, desktop version for non-WASM
+#[cfg(all(target_arch = "wasm32", not(feature = "console")))]
+pub use web_console::{BlinkCube, BlinkState};
+
+#[cfg(all(target_arch = "wasm32", feature = "console"))]
+pub use web_console::{BlinkCube, BlinkState};
+
+#[cfg(all(not(target_arch = "wasm32"), feature = "console"))]
 #[derive(Resource, Default)]
 pub struct BlinkState {
     pub blinking: bool,
@@ -39,7 +46,7 @@ pub struct BlinkState {
     pub last_sent: bool,
 }
 
-#[cfg(feature = "console")]
+#[cfg(all(not(target_arch = "wasm32"), feature = "console"))]
 impl BlinkState {
     pub fn update_state(&mut self, time: &bevy::prelude::Time) {
         if self.blinking {
@@ -52,6 +59,6 @@ impl BlinkState {
 }
 
 // BlinkCube component marker for devices that support blinking
-#[cfg(feature = "console")]
+#[cfg(all(not(target_arch = "wasm32"), feature = "console"))]
 #[derive(Component)]
 pub struct BlinkCube;
