@@ -4,9 +4,9 @@
 //! with proper MQTT server setup and teardown.
 
 use anyhow::{Context, Result};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::Stdio;
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 use std::time::Duration;
 use tempfile::TempDir;
 use tokio::fs;

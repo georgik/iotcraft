@@ -22,6 +22,7 @@ impl CommandParser {
     }
 
     #[cfg(test)]
+    #[cfg(test)]
     pub fn get_history(&self) -> &Vec<String> {
         &self.command_history
     }

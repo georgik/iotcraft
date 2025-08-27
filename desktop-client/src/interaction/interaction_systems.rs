@@ -73,7 +73,7 @@ mod tests {
 
         // Send interaction event
         let mut event_writer = world.resource_mut::<Events<InteractionEvent>>();
-        event_writer.send(InteractionEvent {
+        event_writer.write(InteractionEvent {
             entity: device_entity,
             interaction_type: InteractionType::ToggleLamp,
         });
@@ -81,7 +81,7 @@ mod tests {
 
         let mut system = IntoSystem::into_system(handle_interaction_events);
         system.initialize(&mut world);
-        system.run((), &mut world);
+        let _ = system.run((), &mut world);
 
         // Check that lamp toggle event was generated - simplified test
         // In a real application, you'd need to set up proper event readers
@@ -113,7 +113,7 @@ mod tests {
 
         // Send door toggle event
         let mut event_writer = world.resource_mut::<Events<DoorToggleEvent>>();
-        event_writer.send(DoorToggleEvent {
+        event_writer.write(DoorToggleEvent {
             device_id: "test_door".to_string(),
             new_state: true,
         });
@@ -121,7 +121,7 @@ mod tests {
 
         let mut system = IntoSystem::into_system(handle_door_toggle_events);
         system.initialize(&mut world);
-        system.run((), &mut world);
+        let _ = system.run((), &mut world);
 
         // Check that door state was updated
         let door_state = world.entity(device_entity).get::<DoorState>().unwrap();
@@ -156,7 +156,7 @@ mod tests {
 
         let mut system = IntoSystem::into_system(update_door_visuals);
         system.initialize(&mut world);
-        system.run((), &mut world);
+        let _ = system.run((), &mut world);
 
         // Check that transform was updated for open door
         let transform = world.entity(device_entity).get::<Transform>().unwrap();
