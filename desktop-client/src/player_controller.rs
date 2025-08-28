@@ -1,3 +1,4 @@
+// Import GameState - use desktop UI system for both desktop and web
 use crate::ui::GameState;
 use bevy::prelude::*;
 
@@ -342,6 +343,7 @@ fn force_walking_mode_on_world_start(
     mut commands: Commands,
     camera_query: Query<(Entity, Option<&PlayerMovement>), With<Camera>>,
     game_state: Res<State<GameState>>,
+    time: Res<Time>, // Use Bevy's Time instead of SystemTime
 ) {
     // When the game is in InGame state, ensure we're in walking mode and have the component
     if *game_state.get() == GameState::InGame {
@@ -369,10 +371,7 @@ fn force_walking_mode_on_world_start(
 
                 if camera_entities.is_empty() {
                     static mut LAST_NO_CAMERA_DEBUG: f64 = 0.0;
-                    let current_time = std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .unwrap()
-                        .as_secs_f64();
+                    let current_time = time.elapsed_secs_f64();
                     if current_time - LAST_NO_CAMERA_DEBUG > 5.0 {
                         LAST_NO_CAMERA_DEBUG = current_time;
                         info!("No camera entities found in InGame state");
@@ -392,10 +391,7 @@ fn force_walking_mode_on_world_start(
                     } else {
                         // Debug: Component already exists
                         static mut LAST_EXISTS_DEBUG: f64 = 0.0;
-                        let current_time = std::time::SystemTime::now()
-                            .duration_since(std::time::UNIX_EPOCH)
-                            .unwrap()
-                            .as_secs_f64();
+                        let current_time = time.elapsed_secs_f64();
                         if current_time - LAST_EXISTS_DEBUG > 5.0 {
                             LAST_EXISTS_DEBUG = current_time;
                             info!(
@@ -414,7 +410,7 @@ fn force_walking_mode_on_world_start(
 
 /// Physics-free walking movement for menu state - only applies gravity, no input processing
 /// Uses the same voxel-based collision system as the main gameplay to ensure consistency
-fn handle_physics_free_walking_movement_menu_only(
+pub fn handle_physics_free_walking_movement_menu_only(
     time: &Res<Time>,
     mut transform: Mut<Transform>,
     movement: &mut PlayerMovement,
@@ -558,7 +554,7 @@ fn handle_physics_free_walking_movement_menu_only(
 }
 
 /// Physics-free walking movement that simulates gravity and collision via Transform manipulation
-fn handle_physics_free_walking_movement(
+pub fn handle_physics_free_walking_movement(
     time: &Res<Time>,
     keyboard_input: &Res<ButtonInput<KeyCode>>,
     mut transform: Mut<Transform>,

@@ -526,7 +526,7 @@ fn handle_delete_world_events(
     mut delete_events: EventReader<DeleteWorldEvent>,
     mut discovered_worlds: ResMut<DiscoveredWorlds>,
     _commands: Commands,
-    mut game_state: ResMut<NextState<crate::ui::main_menu::GameState>>,
+    mut game_state: ResMut<NextState<crate::ui::GameState>>,
 ) {
     for event in delete_events.read() {
         info!("Deleting world: {}", event.world_name);
@@ -553,7 +553,7 @@ fn handle_delete_world_events(
 
                     // Refresh the world selection menu by going back to main menu and returning
                     // This ensures the UI updates immediately
-                    game_state.set(crate::ui::main_menu::GameState::MainMenu);
+                    game_state.set(crate::ui::GameState::MainMenu);
                 }
                 Err(e) => {
                     error!("Failed to delete world directory {:?}: {}", world_path, e);

@@ -4,8 +4,8 @@ use bevy::prelude::*;
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
 
-// Web menu system
-use crate::web_menu::{WebGameState, WebMenuPlugin};
+// Desktop UI system adapted for web
+use crate::ui::{GameState, MainMenuPlugin};
 
 // MQTT plugin and related modules
 use crate::config::MqttConfig;
@@ -144,7 +144,7 @@ pub fn setup_touch_areas(mut touch_state: ResMut<TouchInputState>, windows: Quer
 /// Enhanced camera control system with continuous touch support for mobile devices
 pub fn touch_camera_control_system(
     time: Res<Time>,
-    mut camera_controller: ResMut<CameraController>,
+    mut camera_controller: Option<ResMut<CameraController>>,
     keyboard_input: Res<ButtonInput<KeyCode>>,
     mut camera_query: Query<&mut Transform, With<Camera3d>>,
     mut windows: Query<&mut Window>,
@@ -153,7 +153,12 @@ pub fn touch_camera_control_system(
     mut touch_events: EventReader<TouchInput>,
     mut touch_state: ResMut<TouchInputState>,
 ) {
-    if !camera_controller.enabled {
+    // Check if camera controller exists and is enabled
+    let Some(ref controller) = camera_controller else {
+        return; // No camera controller resource available
+    };
+
+    if !controller.enabled {
         return;
     }
 
@@ -329,46 +334,48 @@ pub fn touch_camera_control_system(
     // ============ CONTINUOUS LOOK ROTATION ============
 
     if touch_state.look_delta_accumulator != Vec2::ZERO {
-        let sensitivity = camera_controller.touch_sensitivity * 0.0025; // Reduced sensitivity by 75% total
+        if let Some(ref mut controller) = camera_controller {
+            let sensitivity = controller.touch_sensitivity * 0.0025; // Reduced sensitivity by 75% total
 
-        // Apply accumulated rotation to camera controller
-        let old_yaw = camera_controller.yaw;
-        let old_pitch = camera_controller.pitch;
+            // Apply accumulated rotation to camera controller
+            let old_yaw = controller.yaw;
+            let old_pitch = controller.pitch;
 
-        camera_controller.yaw -= touch_state.look_delta_accumulator.x * sensitivity;
-        camera_controller.pitch -= touch_state.look_delta_accumulator.y * sensitivity;
+            controller.yaw -= touch_state.look_delta_accumulator.x * sensitivity;
+            controller.pitch -= touch_state.look_delta_accumulator.y * sensitivity;
 
-        // Clamp pitch to prevent over-rotation
-        camera_controller.pitch = camera_controller.pitch.clamp(
-            -std::f32::consts::FRAC_PI_2 * 0.9,
-            std::f32::consts::FRAC_PI_2 * 0.9,
-        );
+            // Clamp pitch to prevent over-rotation
+            controller.pitch = controller.pitch.clamp(
+                -std::f32::consts::FRAC_PI_2 * 0.9,
+                std::f32::consts::FRAC_PI_2 * 0.9,
+            );
 
-        // Smooth decay of accumulated delta for natural feel
-        touch_state.look_delta_accumulator *= 0.7; // Faster decay for better responsiveness
+            // Smooth decay of accumulated delta for natural feel
+            touch_state.look_delta_accumulator *= 0.7; // Faster decay for better responsiveness
 
-        // Clear very small deltas to prevent jitter
-        if touch_state.look_delta_accumulator.length() < 0.1 {
-            touch_state.look_delta_accumulator = Vec2::ZERO;
+            // Clear very small deltas to prevent jitter
+            if touch_state.look_delta_accumulator.length() < 0.1 {
+                touch_state.look_delta_accumulator = Vec2::ZERO;
+            }
+
+            info!(
+                "🎮 Look control: yaw={:.3} (Δ{:.3}), pitch={:.3} (Δ{:.3}), delta={:?}",
+                controller.yaw,
+                controller.yaw - old_yaw,
+                controller.pitch,
+                controller.pitch - old_pitch,
+                touch_state.look_delta_accumulator
+            );
+
+            #[cfg(target_arch = "wasm32")]
+            web_sys::console::log_1(
+                &format!(
+                    "🎮 Camera rotation: yaw={:.3}, pitch={:.3}",
+                    controller.yaw, controller.pitch
+                )
+                .into(),
+            );
         }
-
-        info!(
-            "🎮 Look control: yaw={:.3} (Δ{:.3}), pitch={:.3} (Δ{:.3}), delta={:?}",
-            camera_controller.yaw,
-            camera_controller.yaw - old_yaw,
-            camera_controller.pitch,
-            camera_controller.pitch - old_pitch,
-            touch_state.look_delta_accumulator
-        );
-
-        #[cfg(target_arch = "wasm32")]
-        web_sys::console::log_1(
-            &format!(
-                "🎮 Camera rotation: yaw={:.3}, pitch={:.3}",
-                camera_controller.yaw, camera_controller.pitch
-            )
-            .into(),
-        );
     }
 
     // ============ KEYBOARD INPUT (for desktop compatibility) ============
@@ -393,9 +400,11 @@ pub fn touch_camera_control_system(
 
     // Apply arrow key rotation
     if yaw_change != 0.0 || pitch_change != 0.0 {
-        camera_controller.yaw += yaw_change.to_radians() * dt;
-        camera_controller.pitch = (camera_controller.pitch + pitch_change.to_radians() * dt)
-            .clamp(-std::f32::consts::PI / 2.0, std::f32::consts::PI / 2.0);
+        if let Some(ref mut controller) = camera_controller {
+            controller.yaw += yaw_change.to_radians() * dt;
+            controller.pitch = (controller.pitch + pitch_change.to_radians() * dt)
+                .clamp(-std::f32::consts::PI / 2.0, std::f32::consts::PI / 2.0);
+        }
     }
 
     // Handle WASD movement (desktop)
@@ -423,33 +432,34 @@ pub fn touch_camera_control_system(
     // Handle mouse look (only if we have delta information)
     for cursor_event in cursor_moved_events.read() {
         if let Some(delta) = cursor_event.delta {
-            let delta_x = delta.x * camera_controller.sensitivity * dt;
-            let delta_y = delta.y * camera_controller.sensitivity * dt;
+            if let Some(ref mut controller) = camera_controller {
+                let delta_x = delta.x * controller.sensitivity * dt;
+                let delta_y = delta.y * controller.sensitivity * dt;
 
-            camera_controller.yaw -= delta_x * 0.01;
-            camera_controller.pitch -= delta_y * 0.01;
+                controller.yaw -= delta_x * 0.01;
+                controller.pitch -= delta_y * 0.01;
 
-            // Clamp pitch
-            camera_controller.pitch = camera_controller.pitch.clamp(
-                -std::f32::consts::FRAC_PI_2 * 0.9,
-                std::f32::consts::FRAC_PI_2 * 0.9,
-            );
+                // Clamp pitch
+                controller.pitch = controller.pitch.clamp(
+                    -std::f32::consts::FRAC_PI_2 * 0.9,
+                    std::f32::consts::FRAC_PI_2 * 0.9,
+                );
+            }
         }
     }
 
     // ============ APPLY TRANSFORMS ============
 
     // Apply rotation changes from all input sources
-    camera_transform.rotation = Quat::from_euler(
-        EulerRot::ZYX,
-        0.0,
-        camera_controller.yaw,
-        camera_controller.pitch,
-    );
+    if let Some(ref controller) = camera_controller {
+        camera_transform.rotation =
+            Quat::from_euler(EulerRot::ZYX, 0.0, controller.yaw, controller.pitch);
+    }
 
     // Apply movement
     if velocity != Vec3::ZERO {
-        camera_transform.translation += velocity.normalize() * camera_controller.speed * dt;
+        let speed = camera_controller.as_ref().map(|c| c.speed).unwrap_or(5.0);
+        camera_transform.translation += velocity.normalize() * speed * dt;
     }
 
     // Handle mouse capture (escape key is handled by menu system)
@@ -644,15 +654,22 @@ pub fn start() {
         // Insert resources BEFORE adding plugins that depend on them
         .insert_resource(MqttConfig::from_web_env())
         .insert_resource(crate::profile::load_or_create_profile_with_override(None))
-        .add_plugins(WebMenuPlugin)
+        // Add desktop fonts and localization systems
+        .add_plugins(crate::fonts::FontPlugin)
+        .add_plugins(crate::localization::LocalizationPlugin)
+        // Add desktop UI system
+        .add_plugins(MainMenuPlugin)
         .add_plugins(MqttPlugin) // MQTT connection working!
         .add_plugins(crate::player_avatar::PlayerAvatarPlugin) // Add avatar animations
         .add_plugins(crate::console::ConsolePlugin) // Add full desktop console (with T key)
+        .add_plugins(crate::web_player_controller::WebPlayerControllerPlugin) // Add web player controller with gravity and fly mode
         .add_plugins(crate::inventory::InventoryPlugin) // Add inventory system
         // Note: EnvironmentPlugin disabled for web - comprehensive scene handled by setup_basic_scene_once
         .add_plugins(crate::multiplayer_web::WebMultiplayerPlugin) // Add web multiplayer for block sync
+        // Add desktop camera controller and player controller plugins
+        .add_plugins(crate::camera_controllers::CameraControllerPlugin)
+        .add_plugins(crate::player_controller::PlayerControllerPlugin)
         .insert_resource(ClearColor(Color::srgb(0.53, 0.81, 0.92)))
-        .insert_resource(CameraController::new())
         .insert_resource(TouchInputState::default())
         // Multiplayer resources
         .insert_resource(WorldId::default())
@@ -677,8 +694,9 @@ pub fn start() {
             Update,
             (
                 rotate_cube,
-                touch_camera_control_system.run_if(in_state(WebGameState::InGame)),
-                update_touch_ui.run_if(in_state(WebGameState::InGame)),
+                manage_camera_controller_based_on_player_mode.run_if(in_state(GameState::InGame)),
+                touch_camera_control_system.run_if(in_state(GameState::InGame)),
+                update_touch_ui.run_if(in_state(GameState::InGame)),
                 process_device_announcements,
                 update_position_timer,
                 publish_local_pose,
@@ -776,6 +794,7 @@ pub fn setup_basic_scene(
     info!("Setting up enhanced IoTCraft world scene...");
 
     // Add a camera positioned like in the original desktop client with explicit order 0
+    // Use the desktop camera controller component instead of simplified resource
     commands.spawn((
         Camera3d::default(),
         Camera {
@@ -783,6 +802,10 @@ pub fn setup_basic_scene(
             ..default()
         },
         Transform::from_xyz(-8.0, 3.0, 15.0).looking_at(Vec3::new(0.0, 1.0, 0.0), Vec3::Y),
+        crate::camera_controllers::CameraController {
+            enabled: false, // Start disabled - only enable in Flying mode
+            ..Default::default()
+        }, // Add desktop camera controller component
     ));
 
     // Add a directional light with shadows like the original
@@ -1038,6 +1061,21 @@ pub fn setup_basic_scene(
     info!(
         "IoTCraft Enhanced Web Scene completed! Total blocks: ~700+ | Features: Terrain, Hills, Water, Devices, Tower"
     );
+}
+
+/// Enable camera controller when entering the game
+pub fn enable_camera_controller(
+    mut camera_query: Query<&mut crate::camera_controllers::CameraController, With<Camera>>,
+) {
+    if let Ok(mut camera_controller) = camera_query.single_mut() {
+        camera_controller.enabled = true;
+        info!("📹 Desktop camera controller enabled for game");
+
+        #[cfg(target_arch = "wasm32")]
+        web_sys::console::log_1(
+            &"📹 Desktop camera controller enabled - WASD, mouse and touch controls ready".into(),
+        );
+    }
 }
 
 /// Guarded version of scene setup to prevent duplicates
@@ -1666,6 +1704,48 @@ pub fn setup_touch_ui(
         web_sys::console::log_1(
             &"📱 Touch UI setup complete with virtual joystick and zone indicators".into(),
         );
+    }
+}
+
+/// Manage camera controller enabled state based on player mode
+pub fn manage_camera_controller_based_on_player_mode(
+    current_mode: Option<Res<crate::player_controller::PlayerMode>>,
+    mut camera_controller_query: Query<
+        &mut crate::camera_controllers::CameraController,
+        With<Camera3d>,
+    >,
+) {
+    let Some(player_mode) = current_mode else {
+        return; // No player mode resource available yet
+    };
+
+    if let Ok(mut camera_controller) = camera_controller_query.single_mut() {
+        let should_be_enabled =
+            matches!(*player_mode, crate::player_controller::PlayerMode::Flying);
+
+        if camera_controller.enabled != should_be_enabled {
+            camera_controller.enabled = should_be_enabled;
+
+            let mode_name = match *player_mode {
+                crate::player_controller::PlayerMode::Flying => "Flying",
+                crate::player_controller::PlayerMode::Walking => "Walking",
+            };
+
+            if should_be_enabled {
+                info!("📹 Camera controller enabled for {} mode", mode_name);
+                #[cfg(target_arch = "wasm32")]
+                web_sys::console::log_1(
+                    &format!("📹 Camera controller enabled for {} mode", mode_name).into(),
+                );
+            } else {
+                info!(
+                    "📹 Camera controller disabled for {} mode - player controller handling movement",
+                    mode_name
+                );
+                #[cfg(target_arch = "wasm32")]
+                web_sys::console::log_1(&format!("📹 Camera controller disabled for {} mode - player controller handling movement", mode_name).into());
+            }
+        }
     }
 }
 

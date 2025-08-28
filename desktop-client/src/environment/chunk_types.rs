@@ -1,6 +1,7 @@
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+#[cfg(not(target_arch = "wasm32"))]
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use super::BlockType;
@@ -121,10 +122,18 @@ pub struct ChunkBoundingBox {
 
 /// Helper function to get current timestamp
 pub fn now_timestamp() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as u64
+    #[cfg(target_arch = "wasm32")]
+    {
+        // For WASM, use JavaScript Date.now() which returns milliseconds since epoch
+        js_sys::Date::now() as u64
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64
+    }
 }
 
 #[cfg(test)]

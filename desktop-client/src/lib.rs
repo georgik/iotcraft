@@ -21,6 +21,9 @@ mod mqtt;
 #[cfg(target_arch = "wasm32")]
 mod player_avatar;
 
+#[cfg(target_arch = "wasm32")]
+mod web_player_controller;
+
 // Note: Multiplayer and full device functionality requires desktop-only dependencies
 // For now, MQTT device announcements are handled in the web MQTT plugin
 
@@ -37,7 +40,7 @@ pub mod profile;
 // Environment and inventory modules available for both desktop and web
 pub mod environment;
 
-#[cfg(not(target_arch = "wasm32"))]
+// World module available for both desktop and web
 pub mod world;
 
 // Inventory module available for both desktop and web
@@ -47,7 +50,7 @@ pub mod inventory;
 #[cfg(target_arch = "wasm32")]
 pub mod multiplayer_web;
 
-#[cfg(not(target_arch = "wasm32"))]
+// Camera controllers module available for both desktop and web
 pub mod camera_controllers;
 
 // Console module available for both desktop and web
@@ -59,19 +62,19 @@ pub mod devices;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod interaction;
 
-#[cfg(not(target_arch = "wasm32"))]
+// Fonts module available for both desktop and web
 pub mod fonts;
 
-#[cfg(not(target_arch = "wasm32"))]
+// Localization module available for both desktop and web
 pub mod localization;
 
-#[cfg(not(target_arch = "wasm32"))]
+// Script module available for both desktop and web
 pub mod script;
 
-#[cfg(not(target_arch = "wasm32"))]
+// UI module available for both desktop and web
 pub mod ui;
 
-#[cfg(not(target_arch = "wasm32"))]
+// Shared materials module available for both desktop and web
 pub mod shared_materials;
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -86,7 +89,7 @@ pub mod mqtt;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod reply {}
 
-#[cfg(not(target_arch = "wasm32"))]
+// Player controller module available for both desktop and web
 pub mod player_controller;
 
 #[cfg(not(target_arch = "wasm32"))]
