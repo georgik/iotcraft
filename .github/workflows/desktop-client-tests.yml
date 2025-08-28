@@ -68,5 +68,5 @@ jobs:
     - name: Run unit tests
       run: |
         cd desktop-client
-        cargo run xtask test all
+        cargo xtask test all
 
