@@ -110,6 +110,10 @@ impl Default for WorldId {
     }
 }
 
+/// Guard to prevent duplicate scene setup
+#[derive(Resource)]
+pub struct SceneSetupGuard(pub bool);
+
 // ============ TOUCH CONTROL SYSTEMS ============
 
 /// Setup touch control areas based on screen size
@@ -643,19 +647,27 @@ pub fn start() {
         .add_plugins(WebMenuPlugin)
         .add_plugins(MqttPlugin) // MQTT connection working!
         .add_plugins(crate::player_avatar::PlayerAvatarPlugin) // Add avatar animations
-        .add_plugins(crate::console::web_console::WebConsolePlugin) // Add web console
+        .add_plugins(crate::console::ConsolePlugin) // Add full desktop console (with T key)
+        .add_plugins(crate::inventory::InventoryPlugin) // Add inventory system
+        // Note: EnvironmentPlugin disabled for web - comprehensive scene handled by setup_basic_scene_once
+        .add_plugins(crate::multiplayer_web::WebMultiplayerPlugin) // Add web multiplayer for block sync
         .insert_resource(ClearColor(Color::srgb(0.53, 0.81, 0.92)))
-        .insert_resource(crate::console::BlinkState::default())
         .insert_resource(CameraController::new())
         .insert_resource(TouchInputState::default())
         // Multiplayer resources
         .insert_resource(WorldId::default())
         .insert_resource(MultiplayerConnectionStatus::default())
         .insert_resource(PositionTimer::default())
+        // VoxelWorld resource needed for multiplayer block synchronization
+        .insert_resource(crate::environment::VoxelWorld::default())
+        // Console resources for desktop console integration
+        .insert_resource(crate::console::BlinkState::default())
+        // Prevent duplicate scene setup - only one startup system should handle it
+        .insert_resource(SceneSetupGuard(false))
         .add_systems(
             Startup,
             (
-                setup_basic_scene,
+                setup_basic_scene_once, // Use guarded version to prevent duplicates
                 setup_multiplayer_connections,
                 setup_touch_areas,
                 setup_touch_ui,
@@ -693,7 +705,7 @@ struct WebMqttDevice {
 }
 
 /// Simple camera controller for web
-#[derive(Resource, Default)]
+#[derive(Component, Resource, Default)]
 pub struct CameraController {
     pub enabled: bool,
     pub sensitivity: f32,
@@ -1026,6 +1038,30 @@ pub fn setup_basic_scene(
     info!(
         "IoTCraft Enhanced Web Scene completed! Total blocks: ~700+ | Features: Terrain, Hills, Water, Devices, Tower"
     );
+}
+
+/// Guarded version of scene setup to prevent duplicates
+pub fn setup_basic_scene_once(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    asset_server: Res<AssetServer>,
+    mut setup_guard: ResMut<SceneSetupGuard>,
+) {
+    // Only set up scene once
+    if setup_guard.0 {
+        info!("Scene already set up, skipping duplicate setup");
+        #[cfg(target_arch = "wasm32")]
+        web_sys::console::log_1(&"🚫 Scene already set up, skipping duplicate setup".into());
+        return;
+    }
+
+    setup_guard.0 = true;
+    info!("🎬 Setting up scene (guarded) - first time only");
+    #[cfg(target_arch = "wasm32")]
+    web_sys::console::log_1(&"🎬 Setting up scene (guarded) - first time only".into());
+
+    setup_basic_scene(commands, meshes, materials, asset_server);
 }
 pub fn rotate_cube(time: Res<Time>, mut query: Query<&mut Transform, With<DemoCube>>) {
     for mut transform in &mut query {

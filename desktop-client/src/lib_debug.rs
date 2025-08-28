@@ -79,11 +79,13 @@ pub fn debug_start() {
         .insert_resource(crate::lib_gradual::WorldId::default())
         .insert_resource(crate::lib_gradual::MultiplayerConnectionStatus::default())
         .insert_resource(crate::lib_gradual::PositionTimer::default())
+        .insert_resource(crate::lib_gradual::SceneSetupGuard(false))
         .insert_resource(DebugState::default())
         .add_systems(
             Startup,
             (
-                setup_full_debug_scene, // Use full scene instead of minimal
+                // Use the guarded scene setup to prevent duplicates
+                crate::lib_gradual::setup_basic_scene_once,
                 crate::lib_gradual::setup_multiplayer_connections,
                 crate::lib_gradual::setup_touch_areas,
                 crate::lib_gradual::setup_touch_ui,

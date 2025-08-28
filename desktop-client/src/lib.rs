@@ -34,14 +34,18 @@ pub mod config;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod profile;
 
-#[cfg(not(target_arch = "wasm32"))]
+// Environment and inventory modules available for both desktop and web
 pub mod environment;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub mod world;
 
-#[cfg(not(target_arch = "wasm32"))]
+// Inventory module available for both desktop and web
 pub mod inventory;
+
+// Multiplayer - available for both desktop and web with shared types
+#[cfg(target_arch = "wasm32")]
+pub mod multiplayer_web;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub mod camera_controllers;
