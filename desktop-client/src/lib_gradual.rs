@@ -647,7 +647,7 @@ pub fn start() {
         .add_plugins(WebMenuPlugin)
         .add_plugins(MqttPlugin) // MQTT connection working!
         .add_plugins(crate::player_avatar::PlayerAvatarPlugin) // Add avatar animations
-        .add_plugins(crate::console::web_console::WebConsolePlugin) // Add web console
+        .add_plugins(crate::console::ConsolePlugin) // Add full desktop console (with T key)
         .add_plugins(crate::inventory::InventoryPlugin) // Add inventory system
         // Note: EnvironmentPlugin disabled for web - comprehensive scene handled by setup_basic_scene_once
         .add_plugins(crate::multiplayer_web::WebMultiplayerPlugin) // Add web multiplayer for block sync
@@ -660,6 +660,8 @@ pub fn start() {
         .insert_resource(PositionTimer::default())
         // VoxelWorld resource needed for multiplayer block synchronization
         .insert_resource(crate::environment::VoxelWorld::default())
+        // Console resources for desktop console integration
+        .insert_resource(crate::console::BlinkState::default())
         // Prevent duplicate scene setup - only one startup system should handle it
         .insert_resource(SceneSetupGuard(false))
         .add_systems(
