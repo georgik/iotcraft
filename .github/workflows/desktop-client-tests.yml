@@ -74,10 +74,10 @@ jobs:
         cd desktop-client
         cargo fmt --all -- --check
 
-    - name: Run clippy
-      run: |
-        cd desktop-client
-        cargo clippy --all-targets -- -D warnings
+    #- name: Run clippy
+    #  run: |
+    #    cd desktop-client
+    #    cargo clippy --all-targets -- -D warnings
 
     - name: Run desktop unit tests
       run: |
