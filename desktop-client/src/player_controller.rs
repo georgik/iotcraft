@@ -10,6 +10,7 @@ impl Plugin for PlayerControllerPlugin {
         app.insert_resource(PlayerMode::Walking).add_systems(
             Update,
             (
+                enable_gravity_after_world_populated,
                 handle_mode_switch,
                 player_movement,
                 force_walking_mode_on_world_start,
@@ -147,6 +148,8 @@ pub struct PlayerMovement {
     pub ground_check_distance: f32,
     pub last_spacebar_press: Option<f64>,
     pub double_tap_window: f64,
+    /// Whether gravity has been properly initialized after world generation
+    pub gravity_initialized: bool,
 }
 
 impl Default for PlayerMovement {
@@ -160,6 +163,7 @@ impl Default for PlayerMovement {
             ground_check_distance: 10.0, // Increased from 1.2 to 10.0 for better ground detection
             last_spacebar_press: None,
             double_tap_window: 0.25,
+            gravity_initialized: false,
         }
     }
 }
@@ -404,6 +408,35 @@ fn force_walking_mode_on_world_start(
             }
 
             LAST_GAME_STATE = Some(game_state.get().clone());
+        }
+    }
+}
+
+/// Enable gravity after the voxel world has been populated to avoid starting with gravity disabled
+fn enable_gravity_after_world_populated(
+    voxel_world: Res<crate::environment::VoxelWorld>,
+    mut camera_query: Query<(&mut Transform, &mut PlayerMovement), With<Camera>>,
+) {
+    if voxel_world.blocks.is_empty() {
+        return; // World not ready yet
+    }
+
+    if let Ok((mut transform, mut movement)) = camera_query.get_single_mut() {
+        if !movement.gravity_initialized {
+            movement.is_grounded = false; // allow gravity to start affecting the player
+            // Kickstart gravity slightly so it begins falling next frame
+            if movement.gravity_scale >= 0.0 {
+                movement.gravity_scale = -0.1;
+            }
+            movement.gravity_initialized = true;
+            // Ensure the player is not below the ground unexpectedly
+            if transform.translation.y < 1.5 {
+                transform.translation.y = 3.0;
+            }
+            info!(
+                "Gravity initialized after world population ({} blocks)",
+                voxel_world.blocks.len()
+            );
         }
     }
 }

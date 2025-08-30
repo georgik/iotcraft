@@ -796,6 +796,7 @@ pub fn setup_basic_scene(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     asset_server: Res<AssetServer>,
+    mut voxel_world: ResMut<crate::environment::VoxelWorld>,
 ) {
     info!("Setting up enhanced IoTCraft world scene...");
 
@@ -886,10 +887,15 @@ pub fn setup_basic_scene(
     info!("Building grass terrain...");
     for x in -15..=15 {
         for z in -15..=15 {
+            let position = IVec3::new(x, 0, z);
+            // Add to VoxelWorld for collision detection
+            voxel_world.set_block(position, crate::environment::BlockType::Grass);
+
             commands.spawn((
                 Mesh3d(cube_mesh.clone()),
                 MeshMaterial3d(grass_material.clone()),
                 Transform::from_translation(Vec3::new(x as f32, 0.0, z as f32)),
+                crate::environment::VoxelBlock { position },
                 Ground,
             ));
         }
@@ -900,10 +906,15 @@ pub fn setup_basic_scene(
     for x in -10..=-5 {
         for y in 1..=2 {
             for z in -10..=-5 {
+                let position = IVec3::new(x, y, z);
+                // Add to VoxelWorld for collision detection
+                voxel_world.set_block(position, crate::environment::BlockType::Dirt);
+
                 commands.spawn((
                     Mesh3d(cube_mesh.clone()),
                     MeshMaterial3d(dirt_material.clone()),
                     Transform::from_translation(Vec3::new(x as f32, y as f32, z as f32)),
+                    crate::environment::VoxelBlock { position },
                 ));
             }
         }
@@ -911,10 +922,17 @@ pub fn setup_basic_scene(
     // Grass top of hill 1
     for x in -10..=-5 {
         for z in -10..=-5 {
+            let position = IVec3::new(x, 0, z); // Note: y=0 for the grass top since it replaces ground
+            // Add to VoxelWorld for collision detection
+            voxel_world.set_block(position, crate::environment::BlockType::Grass);
+
             commands.spawn((
                 Mesh3d(cube_mesh.clone()),
                 MeshMaterial3d(grass_material.clone()),
                 Transform::from_translation(Vec3::new(x as f32, 3.0, z as f32)),
+                crate::environment::VoxelBlock {
+                    position: IVec3::new(x, 3, z),
+                },
             ));
         }
     }
@@ -923,10 +941,15 @@ pub fn setup_basic_scene(
     for x in 5..=10 {
         for y in 1..=3 {
             for z in 5..=10 {
+                let position = IVec3::new(x, y, z);
+                // Add to VoxelWorld for collision detection
+                voxel_world.set_block(position, crate::environment::BlockType::Dirt);
+
                 commands.spawn((
                     Mesh3d(cube_mesh.clone()),
                     MeshMaterial3d(dirt_material.clone()),
                     Transform::from_translation(Vec3::new(x as f32, y as f32, z as f32)),
+                    crate::environment::VoxelBlock { position },
                 ));
             }
         }
@@ -934,10 +957,15 @@ pub fn setup_basic_scene(
     // Grass top of hill 2
     for x in 5..=10 {
         for z in 5..=10 {
+            let position = IVec3::new(x, 4, z);
+            // Add to VoxelWorld for collision detection
+            voxel_world.set_block(position, crate::environment::BlockType::Grass);
+
             commands.spawn((
                 Mesh3d(cube_mesh.clone()),
                 MeshMaterial3d(grass_material.clone()),
                 Transform::from_translation(Vec3::new(x as f32, 4.0, z as f32)),
+                crate::environment::VoxelBlock { position },
             ));
         }
     }
@@ -1091,6 +1119,7 @@ pub fn setup_basic_scene_once(
     mut materials: ResMut<Assets<StandardMaterial>>,
     asset_server: Res<AssetServer>,
     mut setup_guard: ResMut<SceneSetupGuard>,
+    voxel_world: ResMut<crate::environment::VoxelWorld>,
 ) {
     // Only set up scene once
     if setup_guard.0 {
@@ -1105,7 +1134,7 @@ pub fn setup_basic_scene_once(
     #[cfg(target_arch = "wasm32")]
     web_sys::console::log_1(&"🎬 Setting up scene (guarded) - first time only".into());
 
-    setup_basic_scene(commands, meshes, materials, asset_server);
+    setup_basic_scene(commands, meshes, materials, asset_server, voxel_world);
 }
 pub fn rotate_cube(time: Res<Time>, mut query: Query<&mut Transform, With<DemoCube>>) {
     for mut transform in &mut query {
@@ -1428,7 +1457,29 @@ fn execute_pending_commands_web_wrapper(
         ),
         With<Camera>,
     >,
+    setup_guard: Res<SceneSetupGuard>,
 ) {
+    // If the hardcoded scene has been set up, don't execute scripts to avoid conflicts
+    if setup_guard.0 {
+        // Clear commands to prevent accumulation, but don't execute them
+        if !pending_commands.commands.is_empty() {
+            info!(
+                "Web: Skipping {} script commands because hardcoded scene is active",
+                pending_commands.commands.len()
+            );
+            #[cfg(target_arch = "wasm32")]
+            web_sys::console::log_1(
+                &format!(
+                    "Web: Skipping {} script commands because hardcoded scene is active",
+                    pending_commands.commands.len()
+                )
+                .into(),
+            );
+            pending_commands.commands.clear();
+        }
+        return;
+    }
+
     // Simplified web implementation of command execution
     // Process pending commands with basic functionality for web client
 
@@ -1497,35 +1548,110 @@ fn execute_pending_commands_web_wrapper(
                         parts[4].parse::<i32>(),
                     ) {
                         let block_type_str = parts[1];
-                        let block_type = match block_type_str {
-                            "grass" => crate::environment::BlockType::Grass,
-                            "dirt" => crate::environment::BlockType::Dirt,
-                            "stone" => crate::environment::BlockType::Stone,
-                            "quartz_block" => crate::environment::BlockType::QuartzBlock,
-                            "glass_pane" => crate::environment::BlockType::GlassPane,
-                            "cyan_terracotta" => crate::environment::BlockType::CyanTerracotta,
-                            "water" => crate::environment::BlockType::Water,
-                            _ => continue, // Skip unknown block types
-                        };
-                        {
-                            let position = IVec3::new(x, y, z);
+                        if let Some(block_type) = parse_block_type(block_type_str) {
+                            place_block_web(
+                                IVec3::new(x, y, z),
+                                block_type,
+                                block_type_str,
+                                &mut voxel_world,
+                                &mut commands,
+                                &mut meshes,
+                                &mut materials,
+                                &asset_server,
+                            );
+                        }
+                    }
+                }
+            }
+            "wall" => {
+                if parts.len() == 8 {
+                    if let (Ok(x1), Ok(y1), Ok(z1), Ok(x2), Ok(y2), Ok(z2)) = (
+                        parts[2].parse::<i32>(),
+                        parts[3].parse::<i32>(),
+                        parts[4].parse::<i32>(),
+                        parts[5].parse::<i32>(),
+                        parts[6].parse::<i32>(),
+                        parts[7].parse::<i32>(),
+                    ) {
+                        let block_type_str = parts[1];
+                        if let Some(block_type) = parse_block_type(block_type_str) {
+                            // Create wall by filling area between two points
+                            let min_x = x1.min(x2);
+                            let max_x = x1.max(x2);
+                            let min_y = y1.min(y2);
+                            let max_y = y1.max(y2);
+                            let min_z = z1.min(z2);
+                            let max_z = z1.max(z2);
 
-                            // Add block to VoxelWorld
-                            voxel_world.set_block(position, block_type);
+                            let mut blocks_added = 0;
+                            for x in min_x..=max_x {
+                                for y in min_y..=max_y {
+                                    for z in min_z..=max_z {
+                                        place_block_web(
+                                            IVec3::new(x, y, z),
+                                            block_type,
+                                            block_type_str,
+                                            &mut voxel_world,
+                                            &mut commands,
+                                            &mut meshes,
+                                            &mut materials,
+                                            &asset_server,
+                                        );
+                                        blocks_added += 1;
+                                    }
+                                }
+                            }
 
                             info!(
-                                "Web: Placed {} block at ({}, {}, {})",
-                                block_type_str, x, y, z
+                                "Web: Created {} wall from ({},{},{}) to ({},{},{}) with {} blocks",
+                                block_type_str, x1, y1, z1, x2, y2, z2, blocks_added
                             );
-
-                            #[cfg(target_arch = "wasm32")]
-                            web_sys::console::log_1(
-                                &format!(
-                                    "Web: Placed {} block at ({}, {}, {})",
-                                    block_type_str, x, y, z
-                                )
-                                .into(),
-                            );
+                        }
+                    }
+                }
+            }
+            "tp" | "teleport" => {
+                if parts.len() == 4 {
+                    if let (Ok(x), Ok(y), Ok(z)) = (
+                        parts[1].parse::<f32>(),
+                        parts[2].parse::<f32>(),
+                        parts[3].parse::<f32>(),
+                    ) {
+                        // Teleport camera to position
+                        for (mut camera_transform, _) in camera_query.iter_mut() {
+                            camera_transform.translation = Vec3::new(x, y, z);
+                            info!("Web: Teleported camera to ({}, {}, {})", x, y, z);
+                            break; // Only teleport the first camera
+                        }
+                    }
+                }
+            }
+            "look" => {
+                if parts.len() == 3 {
+                    if let (Ok(yaw), Ok(pitch)) = (parts[1].parse::<f32>(), parts[2].parse::<f32>())
+                    {
+                        // Set camera rotation
+                        for (mut camera_transform, _) in camera_query.iter_mut() {
+                            let yaw_rad = yaw.to_radians();
+                            let pitch_rad = pitch.to_radians();
+                            camera_transform.rotation =
+                                Quat::from_euler(EulerRot::YXZ, yaw_rad, pitch_rad, 0.0);
+                            info!("Web: Set camera look to yaw={}, pitch={}", yaw, pitch);
+                            break; // Only affect the first camera
+                        }
+                    }
+                }
+            }
+            "give" => {
+                if parts.len() == 3 {
+                    if let Ok(count) = parts[2].parse::<u32>() {
+                        let item_type = parts[1];
+                        if let Some(block_type) = parse_block_type(item_type) {
+                            inventory.add_item(crate::inventory::InventoryItem {
+                                item_type: crate::inventory::ItemType::Block(block_type),
+                                count,
+                            });
+                            info!("Web: Gave {} {} to player inventory", count, item_type);
                         }
                     }
                 }
@@ -1533,6 +1659,103 @@ fn execute_pending_commands_web_wrapper(
             _ => {
                 info!("Web: Unknown command: {}", parts[0]);
             }
+        }
+    }
+}
+
+/// Parse block type from string
+fn parse_block_type(block_type_str: &str) -> Option<crate::environment::BlockType> {
+    match block_type_str {
+        "grass" => Some(crate::environment::BlockType::Grass),
+        "dirt" => Some(crate::environment::BlockType::Dirt),
+        "stone" => Some(crate::environment::BlockType::Stone),
+        "quartz_block" => Some(crate::environment::BlockType::QuartzBlock),
+        "glass_pane" => Some(crate::environment::BlockType::GlassPane),
+        "cyan_terracotta" => Some(crate::environment::BlockType::CyanTerracotta),
+        "water" => Some(crate::environment::BlockType::Water),
+        _ => None,
+    }
+}
+
+/// Place a block in both VoxelWorld and create visual representation
+fn place_block_web(
+    position: IVec3,
+    block_type: crate::environment::BlockType,
+    block_type_str: &str,
+    voxel_world: &mut ResMut<crate::environment::VoxelWorld>,
+    commands: &mut Commands,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    materials: &mut ResMut<Assets<StandardMaterial>>,
+    asset_server: &AssetServer,
+) {
+    // Add block to VoxelWorld for collision detection
+    voxel_world.set_block(position, block_type);
+
+    // Create visual representation
+    let cube_mesh = meshes.add(Cuboid::new(1.0, 1.0, 1.0));
+    let material = create_block_material_web(block_type, asset_server, materials);
+
+    commands.spawn((
+        Mesh3d(cube_mesh),
+        MeshMaterial3d(material),
+        Transform::from_translation(Vec3::new(
+            position.x as f32,
+            position.y as f32,
+            position.z as f32,
+        )),
+        crate::environment::VoxelBlock { position },
+        Name::new(format!(
+            "ScriptBlock-{}-{}-{}",
+            position.x, position.y, position.z
+        )),
+    ));
+
+    info!(
+        "Web: Placed {} block at ({}, {}, {}) - added to both VoxelWorld and visual scene",
+        block_type_str, position.x, position.y, position.z
+    );
+
+    #[cfg(target_arch = "wasm32")]
+    web_sys::console::log_1(
+        &format!(
+            "Web: Placed {} block at ({}, {}, {}) - VoxelWorld has {} blocks",
+            block_type_str,
+            position.x,
+            position.y,
+            position.z,
+            voxel_world.blocks.len()
+        )
+        .into(),
+    );
+}
+
+/// Create block material for web version
+fn create_block_material_web(
+    block_type: crate::environment::BlockType,
+    asset_server: &AssetServer,
+    materials: &mut ResMut<Assets<StandardMaterial>>,
+) -> Handle<StandardMaterial> {
+    match block_type {
+        crate::environment::BlockType::Water => materials.add(StandardMaterial {
+            base_color: Color::srgba(0.0, 0.35, 0.9, 0.6),
+            alpha_mode: AlphaMode::Blend,
+            ..default()
+        }),
+        _ => {
+            let texture_path = match block_type {
+                crate::environment::BlockType::Grass => "textures/grass.webp",
+                crate::environment::BlockType::Dirt => "textures/dirt.webp",
+                crate::environment::BlockType::Stone => "textures/stone.webp",
+                crate::environment::BlockType::QuartzBlock => "textures/quartz_block.webp",
+                crate::environment::BlockType::GlassPane => "textures/glass_pane.webp",
+                crate::environment::BlockType::CyanTerracotta => "textures/cyan_terracotta.webp",
+                _ => "textures/stone.webp", // fallback
+            };
+            let texture: Handle<Image> = asset_server.load(texture_path);
+            materials.add(StandardMaterial {
+                base_color_texture: Some(texture),
+                ..default()
+            })
         }
     }
 }

@@ -18,8 +18,9 @@ env:
   MQTT_SERVER_TIMEOUT: 180
 
 jobs:
-  test:
-    name: Run Tests with xtask
+  # Desktop tests (Linux native)
+  desktop-tests:
+    name: Desktop Tests (Linux)
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -60,6 +61,7 @@ jobs:
         workspaces: |
           desktop-client
           mqtt-server
+        key: desktop-${{ runner.os }}
 
     - name: Pre-build MQTT server for tests
       run: |
@@ -72,8 +74,148 @@ jobs:
         cd desktop-client
         cargo fmt --all -- --check
 
-    - name: Run unit tests
+    - name: Run clippy
       run: |
         cd desktop-client
-        cargo xtask test all
+        cargo clippy --all-targets -- -D warnings
+
+    - name: Run desktop unit tests
+      run: |
+        cd desktop-client
+        cargo xtask test unit
+
+    - name: Run desktop integration tests
+      run: |
+        cd desktop-client
+        cargo xtask test integration
+
+    - name: Run MQTT integration tests
+      run: |
+        cd desktop-client
+        cargo xtask test mqtt
+
+  # WASM tests (Web target)
+  wasm-tests:
+    name: WASM Tests (Web)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      checks: write
+      pull-requests: write
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Install Linux dependencies for WASM
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          pkg-config \
+          libx11-dev \
+          libasound2-dev \
+          libudev-dev \
+          mosquitto-clients \
+          google-chrome-stable
+
+    - name: Setup Rust
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        targets: wasm32-unknown-unknown
+        components: rustfmt, clippy
+
+    - name: Install wasm-pack
+      run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+
+    - name: Cache Rust dependencies
+      uses: Swatinem/rust-cache@v2
+      with:
+        workspaces: |
+          desktop-client
+          mqtt-server
+        key: wasm-${{ runner.os }}
+
+    - name: Pre-build MQTT server for tests
+      run: |
+        cd mqtt-server
+        cargo build --release
+        echo "MQTT server pre-built successfully for WASM tests"
+
+    - name: Verify WASM compilation
+      run: |
+        cd desktop-client
+        cargo check --target wasm32-unknown-unknown
+
+    - name: Run WASM unit tests
+      run: |
+        cd desktop-client
+        cargo xtask test wasm-unit
+
+    - name: Run WASM integration tests
+      run: |
+        cd desktop-client
+        cargo xtask test wasm-integration
+
+    - name: Build web version for verification
+      run: |
+        cd desktop-client
+        cargo xtask web-build --release
+
+    - name: Upload WASM build artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: iotcraft-wasm-test-build
+        path: desktop-client/dist/
+        retention-days: 7
+
+  # Cross-platform validation
+  cross-platform-validation:
+    name: Cross-Platform Validation
+    runs-on: ubuntu-latest
+    needs: [desktop-tests, wasm-tests]
+    if: always()
+    permissions:
+      contents: read
+      checks: write
+      pull-requests: write
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Rust
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        targets: wasm32-unknown-unknown
+
+    - name: Install wasm-pack
+      run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+
+    - name: Cache Rust dependencies
+      uses: Swatinem/rust-cache@v2
+      with:
+        workspaces: desktop-client
+        key: validation-${{ runner.os }}
+
+    - name: Run cross-platform validation
+      run: |
+        cd desktop-client
+        # Build both targets to ensure cross-platform compatibility
+        cargo xtask web-build
+        cargo build
+        echo "✅ Both desktop and WASM builds completed successfully"
+
+    - name: Validate test results
+      run: |
+        echo "📊 Test Results Summary:"
+        echo "Desktop Tests: ${{ needs.desktop-tests.result }}"
+        echo "WASM Tests: ${{ needs.wasm-tests.result }}"
+        
+        if [[ "${{ needs.desktop-tests.result }}" == "success" && "${{ needs.wasm-tests.result }}" == "success" ]]; then
+          echo "✅ All tests passed successfully!"
+          exit 0
+        else
+          echo "❌ Some tests failed. Check individual job outputs for details."
+          exit 1
+        fi
 
