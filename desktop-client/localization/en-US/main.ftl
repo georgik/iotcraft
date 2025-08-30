@@ -13,6 +13,7 @@ menu-singleplayer = Singleplayer
 menu-multiplayer = Multiplayer
 menu-join-world = Join World
 menu-publish-world = Publish World
+menu-share-world = Share World
 menu-world-published = World Published
 menu-world-unpublished = World Unpublished
 menu-online-worlds = Online Worlds

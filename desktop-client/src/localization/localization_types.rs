@@ -167,7 +167,7 @@ impl Default for LocalizationConfig {
 }
 
 /// Event sent when the language changes
-#[derive(Event, Debug, Clone)]
+#[derive(Event, BufferedEvent, Debug, Clone)]
 pub struct LanguageChangeEvent {
     pub new_language: Language,
 }

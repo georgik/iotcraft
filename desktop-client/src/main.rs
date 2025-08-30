@@ -1,12 +1,14 @@
+use bevy::math::IVec2;
 use bevy::prelude::*;
-use bevy::window::CursorGrabMode;
-use bevy_console::{
-    AddConsoleCommand, ConsoleCommand, ConsoleConfiguration, ConsoleOpen, ConsolePlugin,
-    ConsoleSet, PrintConsoleLine, reply,
-};
+use bevy::window::{CursorGrabMode, WindowPosition};
+
+// Console imports - only available with console feature
+#[cfg(feature = "console")]
+use crate::console::{BlinkCube, BlinkState, ConsoleManager, ConsolePlugin, ConsoleSet};
+
 #[cfg(not(target_arch = "wasm32"))]
 use clap::Parser;
-use log::{error, info, warn};
+use log::{info, warn};
 use rumqttc::{Client, Event, MqttOptions, Outgoing, QoS};
 use serde_json::json;
 use std::time::Duration;
@@ -28,7 +30,6 @@ mod ui;
 use mcp::mcp_types::CommandExecutedEvent;
 
 mod multiplayer;
-mod physics;
 mod player_avatar;
 mod player_controller;
 mod profile;
@@ -39,49 +40,54 @@ mod world;
 // Re-export types for easier access
 use camera_controllers::{CameraController, CameraControllerPlugin};
 use config::MqttConfig;
-use console::console_types::{ListCommand, LookCommand, TeleportCommand};
-use console::*;
 use devices::*;
 use environment::*;
 use fonts::{FontPlugin, Fonts};
 use interaction::InteractionPlugin as MyInteractionPlugin;
-use inventory::{InventoryPlugin, PlayerInventory, handle_give_command};
+use inventory::{InventoryPlugin, PlayerInventory};
 use localization::{LocalizationConfig, LocalizationPlugin};
 use minimap::MinimapPlugin;
 use mqtt::{MqttPlugin, *};
 use multiplayer::{
     MultiplayerPlugin, SharedWorldPlugin, WorldDiscoveryPlugin, WorldPublisherPlugin,
 };
-use physics::PhysicsManagerPlugin;
 use player_avatar::PlayerAvatarPlugin;
 use player_controller::PlayerControllerPlugin;
 use shared_materials::SharedMaterialsPlugin;
 use ui::{CrosshairPlugin, ErrorIndicatorPlugin, GameState, InventoryUiPlugin, MainMenuPlugin};
 use world::WorldPlugin;
 
-// Define handle_blink_command function for console
-fn handle_blink_command(
-    mut log: ConsoleCommand<BlinkCommand>,
-    mut blink_state: ResMut<BlinkState>,
-) {
-    if let Some(Ok(BlinkCommand { action })) = log.take() {
-        info!("Console command: blink {}", action);
-        match action.as_str() {
-            "start" => {
-                blink_state.blinking = true;
-                reply!(log, "Blink started");
-                info!("Blink started via console");
-            }
-            "stop" => {
-                blink_state.blinking = false;
-                reply!(log, "Blink stopped");
-                info!("Blink stopped via console");
-            }
-            _ => {
-                reply!(log, "Usage: blink [start|stop]");
-            }
+// Helper function to extract client number from player ID for window positioning
+fn extract_client_number(player_id: &str) -> Option<u32> {
+    // Try to extract number from formats like "player-1", "player-2", "client-1", etc.
+    if let Some(last_part) = player_id.split('-').last() {
+        if let Ok(num) = last_part.parse::<u32>() {
+            return Some(num);
         }
     }
+
+    // Try to parse the entire ID as a number (e.g., "1", "2")
+    if let Ok(num) = player_id.parse::<u32>() {
+        return Some(num);
+    }
+
+    // Extract any trailing number from the string
+    let trailing_digits: String = player_id
+        .chars()
+        .rev()
+        .take_while(|c| c.is_ascii_digit())
+        .collect::<String>()
+        .chars()
+        .rev()
+        .collect();
+
+    if !trailing_digits.is_empty() {
+        if let Ok(num) = trailing_digits.parse::<u32>() {
+            return Some(num);
+        }
+    }
+
+    None
 }
 
 // CLI arguments
@@ -98,367 +104,25 @@ struct Args {
     #[arg(short, long)]
     mqtt_server: Option<String>,
     /// Player ID override for multiplayer testing (default: auto-generated)
-    #[arg(short, long)]
+    #[arg(short = 'p', long = "player-id")]
     player_id: Option<String>,
     /// Run in MCP (Model Context Protocol) server mode
     #[arg(long)]
     mcp: bool,
 }
 
-fn handle_place_block_command(
-    mut log: ConsoleCommand<PlaceBlockCommand>,
-    mut voxel_world: ResMut<VoxelWorld>,
-    mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-    asset_server: Res<AssetServer>,
-) {
-    if let Some(Ok(PlaceBlockCommand {
-        block_type,
-        x,
-        y,
-        z,
-    })) = log.take()
-    {
-        let block_type = match block_type.as_str() {
-            "grass" => BlockType::Grass,
-            "dirt" => BlockType::Dirt,
-            "stone" => BlockType::Stone,
-            "quartz_block" => BlockType::QuartzBlock,
-            "glass_pane" => BlockType::GlassPane,
-            "cyan_terracotta" => BlockType::CyanTerracotta,
-            "water" => BlockType::Water,
-            _ => {
-                reply!(log, "Invalid block type: {}", block_type);
-                return;
-            }
-        };
-
-        voxel_world.set_block(IVec3::new(x, y, z), block_type);
-
-        // Spawn the block
-        let cube_mesh = meshes.add(Cuboid::new(CUBE_SIZE, CUBE_SIZE, CUBE_SIZE));
-        let material = match block_type {
-            BlockType::Water => materials.add(StandardMaterial {
-                base_color: Color::srgba(0.0, 0.35, 0.9, 0.6),
-                alpha_mode: AlphaMode::Blend,
-                ..default()
-            }),
-            _ => {
-                let texture_path = match block_type {
-                    BlockType::Grass => "textures/grass.webp",
-                    BlockType::Dirt => "textures/dirt.webp",
-                    BlockType::Stone => "textures/stone.webp",
-                    BlockType::QuartzBlock => "textures/quartz_block.webp",
-                    BlockType::GlassPane => "textures/glass_pane.webp",
-                    BlockType::CyanTerracotta => "textures/cyan_terracotta.webp",
-                    _ => unreachable!(),
-                };
-                let texture: Handle<Image> = asset_server.load(texture_path);
-                materials.add(StandardMaterial {
-                    base_color_texture: Some(texture),
-                    ..default()
-                })
-            }
-        };
-
-        commands.spawn((
-            Mesh3d(cube_mesh),
-            MeshMaterial3d(material),
-            Transform::from_translation(Vec3::new(x as f32, y as f32, z as f32)),
-            VoxelBlock {
-                position: IVec3::new(x, y, z),
-            },
-            // Physics colliders are managed by PhysicsManagerPlugin based on distance and mode
-        ));
-
-        reply!(log, "Placed block at ({}, {}, {})", x, y, z);
-    }
-}
-
-fn handle_wall_command(
-    mut log: ConsoleCommand<WallCommand>,
-    mut voxel_world: ResMut<VoxelWorld>,
-    mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-    asset_server: Res<AssetServer>,
-) {
-    if let Some(Ok(WallCommand {
-        block_type,
-        x1,
-        y1,
-        z1,
-        x2,
-        y2,
-        z2,
-    })) = log.take()
-    {
-        let block_type_enum = match block_type.as_str() {
-            "grass" => BlockType::Grass,
-            "dirt" => BlockType::Dirt,
-            "stone" => BlockType::Stone,
-            "quartz_block" => BlockType::QuartzBlock,
-            "glass_pane" => BlockType::GlassPane,
-            "cyan_terracotta" => BlockType::CyanTerracotta,
-            "water" => BlockType::Water,
-            _ => {
-                reply!(log, "Invalid block type: {}", block_type);
-                return;
-            }
-        };
-
-        let material = match block_type_enum {
-            BlockType::Water => materials.add(StandardMaterial {
-                base_color: Color::srgba(0.0, 0.35, 0.9, 0.6),
-                alpha_mode: AlphaMode::Blend,
-                ..default()
-            }),
-            _ => {
-                let texture_path = match block_type_enum {
-                    BlockType::Grass => "textures/grass.webp",
-                    BlockType::Dirt => "textures/dirt.webp",
-                    BlockType::Stone => "textures/stone.webp",
-                    BlockType::QuartzBlock => "textures/quartz_block.webp",
-                    BlockType::GlassPane => "textures/glass_pane.webp",
-                    BlockType::CyanTerracotta => "textures/cyan_terracotta.webp",
-                    _ => unreachable!(),
-                };
-                let texture: Handle<Image> = asset_server.load(texture_path);
-                materials.add(StandardMaterial {
-                    base_color_texture: Some(texture),
-                    ..default()
-                })
-            }
-        };
-
-        let cube_mesh = meshes.add(Cuboid::new(CUBE_SIZE, CUBE_SIZE, CUBE_SIZE));
-
-        for x in x1..=x2 {
-            for y in y1..=y2 {
-                for z in z1..=z2 {
-                    voxel_world.set_block(IVec3::new(x, y, z), block_type_enum);
-
-                    commands.spawn((
-                        Mesh3d(cube_mesh.clone()),
-                        MeshMaterial3d(material.clone()),
-                        Transform::from_translation(Vec3::new(x as f32, y as f32, z as f32)),
-                        VoxelBlock {
-                            position: IVec3::new(x, y, z),
-                        },
-                        // Physics colliders are managed by PhysicsManagerPlugin based on distance and mode
-                    ));
-                }
-            }
-        }
-
-        reply!(
-            log,
-            "Created a wall of {} from ({}, {}, {}) to ({}, {}, {})",
-            block_type,
-            x1,
-            y1,
-            z1,
-            x2,
-            y2,
-            z2
-        );
-    }
-}
-
-fn handle_remove_block_command(
-    mut log: ConsoleCommand<RemoveBlockCommand>,
-    mut voxel_world: ResMut<VoxelWorld>,
-    mut commands: Commands,
-    query: Query<(Entity, &VoxelBlock)>,
-) {
-    if let Some(Ok(RemoveBlockCommand { x, y, z })) = log.take() {
-        let position = IVec3::new(x, y, z);
-        if voxel_world.remove_block(&position).is_some() {
-            // Remove the block entity
-            for (entity, block) in query.iter() {
-                if block.position == position {
-                    commands.entity(entity).despawn();
-                }
-            }
-            reply!(log, "Removed block at ({}, {}, {})", x, y, z);
-        } else {
-            reply!(log, "No block found at ({}, {}, {})", x, y, z);
-        }
-    }
-}
-
-fn handle_save_map_command(mut log: ConsoleCommand<SaveMapCommand>, voxel_world: Res<VoxelWorld>) {
-    if let Some(Ok(SaveMapCommand { filename })) = log.take() {
-        match voxel_world.save_to_file(&filename) {
-            Ok(_) => {
-                reply!(
-                    log,
-                    "Map saved to '{}' with {} blocks",
-                    filename,
-                    voxel_world.blocks.len()
-                );
-                info!(
-                    "Map saved to '{}' with {} blocks",
-                    filename,
-                    voxel_world.blocks.len()
-                );
-            }
-            Err(e) => {
-                reply!(log, "Failed to save map: {}", e);
-                error!("Failed to save map to '{}': {}", filename, e);
-            }
-        }
-    }
-}
-
-fn handle_teleport_command(
-    mut log: ConsoleCommand<TeleportCommand>,
-    mut camera_query: Query<(&mut Transform, &mut CameraController), With<Camera>>,
-) {
-    if let Some(Ok(TeleportCommand { x, y, z })) = log.take() {
-        if let Ok((mut transform, _camera_controller)) = camera_query.single_mut() {
-            // Set the camera position
-            transform.translation = Vec3::new(x, y, z);
-
-            reply!(log, "Teleported to ({:.1}, {:.1}, {:.1})", x, y, z);
-            info!("Camera teleported to ({:.1}, {:.1}, {:.1})", x, y, z);
-        } else {
-            reply!(log, "Error: Could not find camera to teleport");
-        }
-    }
-}
-
-fn handle_look_command(
-    mut log: ConsoleCommand<LookCommand>,
-    mut camera_query: Query<(&mut Transform, &mut CameraController), With<Camera>>,
-) {
-    if let Some(Ok(LookCommand { yaw, pitch })) = log.take() {
-        if let Ok((mut transform, mut camera_controller)) = camera_query.single_mut() {
-            // Convert degrees to radians for internal use
-            let yaw_rad = yaw.to_radians();
-            let pitch_rad = pitch.to_radians();
-
-            // Update the camera controller's internal yaw and pitch
-            camera_controller.yaw = yaw_rad;
-            camera_controller.pitch =
-                pitch_rad.clamp(-std::f32::consts::PI / 2.0, std::f32::consts::PI / 2.0);
-
-            // Apply the rotation to the transform using the same logic as the camera controller
-            transform.rotation = Quat::from_euler(
-                bevy::math::EulerRot::ZYX,
-                0.0,
-                camera_controller.yaw,
-                camera_controller.pitch,
-            );
-
-            reply!(
-                log,
-                "Set look angles to yaw: {:.1}°, pitch: {:.1}°",
-                yaw,
-                pitch
-            );
-            info!(
-                "Camera look angles set to yaw: {:.1}°, pitch: {:.1}°",
-                yaw, pitch
-            );
-        } else {
-            reply!(log, "Error: Could not find camera to set look direction");
-        }
-    }
-}
-
-fn handle_load_map_command(
-    mut log: ConsoleCommand<LoadMapCommand>,
-    mut voxel_world: ResMut<VoxelWorld>,
-    mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-    asset_server: Res<AssetServer>,
-    existing_blocks_query: Query<Entity, With<VoxelBlock>>,
-) {
-    if let Some(Ok(LoadMapCommand { filename })) = log.take() {
-        // First, despawn all existing voxel blocks
-        for entity in existing_blocks_query.iter() {
-            commands.entity(entity).despawn();
-        }
-
-        // Load the map from file
-        match voxel_world.load_from_file(&filename) {
-            Ok(_) => {
-                // Spawn all blocks from the loaded map
-                let cube_mesh = meshes.add(Cuboid::new(CUBE_SIZE, CUBE_SIZE, CUBE_SIZE));
-
-                for (position, block_type) in voxel_world.blocks.iter() {
-                    let material = match block_type {
-                        BlockType::Water => materials.add(StandardMaterial {
-                            base_color: Color::srgba(0.0, 0.35, 0.9, 0.6),
-                            alpha_mode: AlphaMode::Blend,
-                            ..default()
-                        }),
-                        _ => {
-                            let texture_path = match block_type {
-                                BlockType::Grass => "textures/grass.webp",
-                                BlockType::Dirt => "textures/dirt.webp",
-                                BlockType::Stone => "textures/stone.webp",
-                                BlockType::QuartzBlock => "textures/quartz_block.webp",
-                                BlockType::GlassPane => "textures/glass_pane.webp",
-                                BlockType::CyanTerracotta => "textures/cyan_terracotta.webp",
-                                _ => unreachable!(),
-                            };
-                            let texture: Handle<Image> = asset_server.load(texture_path);
-                            materials.add(StandardMaterial {
-                                base_color_texture: Some(texture),
-                                ..default()
-                            })
-                        }
-                    };
-
-                    let mut entity_commands = commands.spawn((
-                        Mesh3d(cube_mesh.clone()),
-                        MeshMaterial3d(material),
-                        Transform::from_translation(Vec3::new(
-                            position.x as f32,
-                            position.y as f32,
-                            position.z as f32,
-                        )),
-                        VoxelBlock {
-                            position: *position,
-                        },
-                        // Physics colliders are managed by PhysicsManagerPlugin based on distance and mode
-                    ));
-
-                    // Add WaterBlock component for water blocks to enable water detection
-                    if *block_type == BlockType::Water {
-                        entity_commands.insert(crate::physics::WaterBlock);
-                    }
-                }
-
-                reply!(
-                    log,
-                    "Map loaded from '{}' with {} blocks",
-                    filename,
-                    voxel_world.blocks.len()
-                );
-                info!(
-                    "Map loaded from '{}' with {} blocks",
-                    filename,
-                    voxel_world.blocks.len()
-                );
-            }
-            Err(e) => {
-                reply!(log, "Failed to load map: {}", e);
-                error!("Failed to load map from '{}': {}", filename, e);
-            }
-        }
-    }
+// Helper function to write to console if available
+#[cfg(feature = "console")]
+fn write_to_console(_writer: &mut Option<()>, message: String) {
+    // Log the message instead since PrintConsoleLine was removed
+    info!("Console: {}", message);
 }
 
 fn execute_pending_commands(
     mut pending_commands: ResMut<crate::script::script_types::PendingCommands>,
-    mut print_console_line: EventWriter<PrintConsoleLine>,
+    #[cfg(feature = "console")] mut print_console_line: Option<()>,
     mut command_executed_events: EventWriter<CommandExecutedEvent>,
-    mut blink_state: ResMut<BlinkState>,
+    #[cfg(feature = "console")] mut blink_state: ResMut<BlinkState>,
     temperature: Res<TemperatureResource>,
     mqtt_config: Res<MqttConfig>,
     mut voxel_world: ResMut<VoxelWorld>,
@@ -495,21 +159,33 @@ fn execute_pending_commands(
                     let action = parts[1];
                     match action {
                         "start" => {
-                            blink_state.blinking = true;
-                            print_console_line
-                                .write(PrintConsoleLine::new("Blink started".to_string()));
+                            #[cfg(feature = "console")]
+                            {
+                                blink_state.blinking = true;
+                                write_to_console(
+                                    &mut print_console_line,
+                                    "Blink started".to_string(),
+                                );
+                            }
                             info!("Blink started via script");
                         }
                         "stop" => {
-                            blink_state.blinking = false;
-                            print_console_line
-                                .write(PrintConsoleLine::new("Blink stopped".to_string()));
+                            #[cfg(feature = "console")]
+                            {
+                                blink_state.blinking = false;
+                                write_to_console(
+                                    &mut print_console_line,
+                                    "Blink stopped".to_string(),
+                                );
+                            }
                             info!("Blink stopped via script");
                         }
                         _ => {
-                            print_console_line.write(PrintConsoleLine::new(
+                            #[cfg(feature = "console")]
+                            write_to_console(
+                                &mut print_console_line,
                                 "Usage: blink [start|stop]".to_string(),
-                            ));
+                            );
                         }
                     }
                 }
@@ -524,7 +200,8 @@ fn execute_pending_commands(
                             } else {
                                 "Connecting to MQTT broker..."
                             };
-                            print_console_line.write(PrintConsoleLine::new(status.to_string()));
+                            #[cfg(feature = "console")]
+                            write_to_console(&mut print_console_line, status.to_string());
                             info!("MQTT status requested via script");
                         }
                         "temp" => {
@@ -533,12 +210,15 @@ fn execute_pending_commands(
                             } else {
                                 "No temperature data available".to_string()
                             };
-                            print_console_line.write(PrintConsoleLine::new(temp_msg));
+                            #[cfg(feature = "console")]
+                            write_to_console(&mut print_console_line, temp_msg);
                         }
                         _ => {
-                            print_console_line.write(PrintConsoleLine::new(
+                            #[cfg(feature = "console")]
+                            write_to_console(
+                                &mut print_console_line,
                                 "Usage: mqtt [status|temp]".to_string(),
-                            ));
+                            );
                         }
                     }
                 }
@@ -606,7 +286,8 @@ fn execute_pending_commands(
 
                                 let result_msg =
                                     format!("Spawn command sent for device {}", device_id);
-                                print_console_line.write(PrintConsoleLine::new(result_msg.clone()));
+                                #[cfg(feature = "console")]
+                                write_to_console(&mut print_console_line, result_msg.clone());
 
                                 // Emit command executed event if this was from MCP
                                 if let Some(req_id) = request_id.clone() {
@@ -664,7 +345,8 @@ fn execute_pending_commands(
 
                                 let result_msg =
                                     format!("Spawn door command sent for device {}", device_id);
-                                print_console_line.write(PrintConsoleLine::new(result_msg.clone()));
+                                #[cfg(feature = "console")]
+                                write_to_console(&mut print_console_line, result_msg.clone());
 
                                 // Emit command executed event if this was from MCP
                                 if let Some(req_id) = request_id.clone() {
@@ -695,8 +377,11 @@ fn execute_pending_commands(
                                     _ => {
                                         let error_msg =
                                             format!("Invalid block type: {}", block_type_str);
-                                        print_console_line
-                                            .write(PrintConsoleLine::new(error_msg.clone()));
+                                        #[cfg(feature = "console")]
+                                        write_to_console(
+                                            &mut print_console_line,
+                                            error_msg.clone(),
+                                        );
 
                                         // Emit error event if this was from MCP
                                         if let Some(req_id) = request_id.clone() {
@@ -757,7 +442,8 @@ fn execute_pending_commands(
                                     "Placed {} block at ({}, {}, {})",
                                     block_type_str, x, y, z
                                 );
-                                print_console_line.write(PrintConsoleLine::new(result_msg.clone()));
+                                #[cfg(feature = "console")]
+                                write_to_console(&mut print_console_line, result_msg.clone());
 
                                 // Emit command executed event if this was from MCP
                                 if let Some(req_id) = request_id.clone() {
@@ -789,7 +475,8 @@ fn execute_pending_commands(
                                     format!("No block found at ({}, {}, {})", x, y, z)
                                 };
 
-                                print_console_line.write(PrintConsoleLine::new(result_msg.clone()));
+                                #[cfg(feature = "console")]
+                                write_to_console(&mut print_console_line, result_msg.clone());
 
                                 // Emit command executed event if this was from MCP
                                 if let Some(req_id) = request_id.clone() {
@@ -820,19 +507,21 @@ fn execute_pending_commands(
                             }
                             "water" => crate::inventory::ItemType::Block(BlockType::Water),
                             _ => {
-                                print_console_line.write(PrintConsoleLine::new(format!(
-                                    "Invalid item type: {}",
-                                    item_type_str
-                                )));
+                                #[cfg(feature = "console")]
+                                write_to_console(
+                                    &mut print_console_line,
+                                    format!("Invalid item type: {}", item_type_str),
+                                );
                                 continue;
                             }
                         };
 
                         inventory.add_items(item_type, quantity as u32);
-                        print_console_line.write(PrintConsoleLine::new(format!(
-                            "Added {} x {}",
-                            quantity, item_type_str
-                        )));
+                        #[cfg(feature = "console")]
+                        write_to_console(
+                            &mut print_console_line,
+                            format!("Added {} x {}", quantity, item_type_str),
+                        );
                     }
                 }
             }
@@ -854,11 +543,13 @@ fn execute_pending_commands(
                                                 "cyan_terracotta" => BlockType::CyanTerracotta,
                                                 "water" => BlockType::Water,
                                                 _ => {
-                                                    print_console_line.write(
-                                                        PrintConsoleLine::new(format!(
+                                                    #[cfg(feature = "console")]
+                                                    write_to_console(
+                                                        &mut print_console_line,
+                                                        format!(
                                                             "Invalid block type: {}",
                                                             block_type_str
-                                                        )),
+                                                        ),
                                                     );
                                                     continue;
                                                 }
@@ -970,8 +661,11 @@ fn execute_pending_commands(
                                                 z2,
                                                 blocks_added
                                             );
-                                            print_console_line
-                                                .write(PrintConsoleLine::new(result_msg.clone()));
+                                            #[cfg(feature = "console")]
+                                            write_to_console(
+                                                &mut print_console_line,
+                                                result_msg.clone(),
+                                            );
 
                                             // Emit command executed event if this was from MCP
                                             if let Some(req_id) = request_id.clone() {
@@ -1001,15 +695,18 @@ fn execute_pending_commands(
                                     // Set the camera position
                                     transform.translation = Vec3::new(x, y, z);
 
-                                    print_console_line.write(PrintConsoleLine::new(format!(
-                                        "Teleported to ({:.1}, {:.1}, {:.1})",
-                                        x, y, z
-                                    )));
+                                    #[cfg(feature = "console")]
+                                    write_to_console(
+                                        &mut print_console_line,
+                                        format!("Teleported to ({:.1}, {:.1}, {:.1})", x, y, z),
+                                    );
                                     info!("Camera teleported to ({:.1}, {:.1}, {:.1})", x, y, z);
                                 } else {
-                                    print_console_line.write(PrintConsoleLine::new(
+                                    #[cfg(feature = "console")]
+                                    write_to_console(
+                                        &mut print_console_line,
                                         "Error: Could not find camera to teleport".to_string(),
-                                    ));
+                                    );
                                 }
                             }
                         }
@@ -1040,19 +737,25 @@ fn execute_pending_commands(
                                     camera_controller.pitch,
                                 );
 
-                                print_console_line.write(PrintConsoleLine::new(format!(
-                                    "Set look angles to yaw: {:.1}°, pitch: {:.1}°",
-                                    yaw, pitch
-                                )));
+                                #[cfg(feature = "console")]
+                                write_to_console(
+                                    &mut print_console_line,
+                                    format!(
+                                        "Set look angles to yaw: {:.1}°, pitch: {:.1}°",
+                                        yaw, pitch
+                                    ),
+                                );
                                 info!(
                                     "Camera look angles set to yaw: {:.1}°, pitch: {:.1}°",
                                     yaw, pitch
                                 );
                             } else {
-                                print_console_line.write(PrintConsoleLine::new(
+                                #[cfg(feature = "console")]
+                                write_to_console(
+                                    &mut print_console_line,
                                     "Error: Could not find camera to set look direction"
                                         .to_string(),
-                                ));
+                                );
                             }
                         }
                     }
@@ -1080,7 +783,8 @@ fn execute_pending_commands(
                     format!("Devices:\n{}", device_list.join("\n"))
                 };
 
-                print_console_line.write(PrintConsoleLine::new(result_text.clone()));
+                #[cfg(feature = "console")]
+                write_to_console(&mut print_console_line, result_text.clone());
                 info!("Executed list command, found {} devices", device_list.len());
 
                 // Emit command executed event if this was from MCP
@@ -1092,16 +796,51 @@ fn execute_pending_commands(
                 }
             }
             _ => {
-                print_console_line.write(PrintConsoleLine::new(format!(
-                    "Unknown command: {}",
-                    command
-                )));
+                #[cfg(feature = "console")]
+                write_to_console(
+                    &mut print_console_line,
+                    format!("Unknown command: {}", command),
+                );
             }
         }
     }
 }
 
 /// Tests for core game commands to prevent regressions
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::Parser;
+
+    #[test]
+    fn test_cli_player_id_short_form() {
+        // Test the short form -p argument
+        let args = Args::try_parse_from(&["iotcraft", "-p", "test-123"]).unwrap();
+        assert_eq!(args.player_id, Some("test-123".to_string()));
+    }
+
+    #[test]
+    fn test_cli_player_id_long_form() {
+        // Test the long form --player-id argument
+        let args = Args::try_parse_from(&["iotcraft", "--player-id", "test-456"]).unwrap();
+        assert_eq!(args.player_id, Some("test-456".to_string()));
+    }
+
+    #[test]
+    fn test_cli_player_id_numeric() {
+        // Test numeric player IDs like the one used in the logs
+        let args = Args::try_parse_from(&["iotcraft", "-p", "2"]).unwrap();
+        assert_eq!(args.player_id, Some("2".to_string()));
+    }
+
+    #[test]
+    fn test_cli_no_player_id() {
+        // Test when no player ID is provided
+        let args = Args::try_parse_from(&["iotcraft"]).unwrap();
+        assert_eq!(args.player_id, None);
+    }
+}
+
 #[cfg(test)]
 mod wall_command_tests {
     use super::*;
@@ -1233,8 +972,24 @@ fn main() {
         ));
     // Script resources are now handled by the ScriptPlugin
 
-    // Add default plugins and initialize AssetServer
-    app.add_plugins(DefaultPlugins);
+    // Add default plugins with custom window configuration
+    let player_profile = app.world().resource::<profile::PlayerProfile>();
+    let window_title = format!("IoTCraft - {}", player_profile.player_id);
+
+    // Get client number from player_id (assuming format like "player-1", "player-2", etc.)
+    let client_offset = extract_client_number(&player_profile.player_id).unwrap_or(0);
+    let window_x = 50.0 + (client_offset as f32 * 300.0); // Offset by 300px per client
+    let window_y = 50.0 + (client_offset as f32 * 50.0); // Offset by 50px per client
+
+    app.add_plugins(DefaultPlugins.set(WindowPlugin {
+        primary_window: Some(Window {
+            title: window_title,
+            resolution: bevy::window::WindowResolution::new(1280, 720),
+            position: WindowPosition::At(IVec2::new(window_x as i32, window_y as i32)),
+            ..default()
+        }),
+        ..default()
+    }));
 
     // Initialize fonts resource immediately after AssetServer is available
     // We need to do this in a way that ensures AssetServer exists
@@ -1245,15 +1000,18 @@ fn main() {
         });
 
     app.add_plugins(FontPlugin) // Keep FontPlugin for any additional font-related systems
-        .add_plugins(LocalizationPlugin) // Load localization after fonts
-        .add_plugins(avian3d::PhysicsPlugins::default()) // Add physics engine
-        .add_plugins(PhysicsManagerPlugin) // Add physics optimization manager
-        .add_plugins(CameraControllerPlugin)
+        .add_plugins(LocalizationPlugin); // Load localization after fonts
+
+    app.add_plugins(CameraControllerPlugin)
         .add_plugins(PlayerControllerPlugin) // Add player controller for walking/flying modes
         .add_plugins(script::script_systems::ScriptPlugin) // Add script plugin early for PendingCommands resource
-        .add_plugins(SharedMaterialsPlugin) // Add shared materials for optimized rendering
-        .add_plugins(ConsolePlugin)
-        .add_plugins(DevicePlugin)
+        .add_plugins(SharedMaterialsPlugin); // Add shared materials for optimized rendering
+
+    // Add console plugin conditionally
+    #[cfg(feature = "console")]
+    app.add_plugins(ConsolePlugin);
+
+    app.add_plugins(DevicePlugin)
         .add_plugins(DevicePositioningPlugin)
         .add_plugins(EnvironmentPlugin)
         .add_plugins(MyInteractionPlugin)
@@ -1280,52 +1038,37 @@ fn main() {
         app.add_plugins(mcp::McpPlugin);
     }
 
-    app.init_state::<GameState>()
-        .insert_resource(ConsoleConfiguration {
-            keys: vec![KeyCode::F12],
-            left_pos: 200.0,
-            top_pos: 100.0,
-            height: 400.0,
-            width: 800.0,
-            ..default()
-        })
-        .add_console_command::<BlinkCommand, _>(handle_blink_command)
-        .add_console_command::<MqttCommand, _>(handle_mqtt_command)
-        .add_console_command::<SpawnCommand, _>(handle_spawn_command)
-        .add_console_command::<SpawnDoorCommand, _>(
-            crate::console::console_systems::handle_spawn_door_command,
-        )
-        .add_console_command::<MoveCommand, _>(crate::console::console_systems::handle_move_command)
-        .add_console_command::<PlaceBlockCommand, _>(handle_place_block_command)
-        .add_console_command::<RemoveBlockCommand, _>(handle_remove_block_command)
-        .add_console_command::<WallCommand, _>(handle_wall_command)
-        .add_console_command::<SaveMapCommand, _>(handle_save_map_command)
-        .add_console_command::<LoadMapCommand, _>(handle_load_map_command)
-        .add_console_command::<GiveCommand, _>(handle_give_command)
-        .add_console_command::<TestErrorCommand, _>(
-            crate::console::console_systems::handle_test_error_command,
-        )
-        .add_console_command::<TeleportCommand, _>(handle_teleport_command)
-        .add_console_command::<LookCommand, _>(handle_look_command)
-        .add_console_command::<ListCommand, _>(crate::console::console_systems::handle_list_command)
-        .insert_resource(BlinkState::default())
-        // .add_systems(Update, draw_cursor) // Disabled: InteractionPlugin handles cursor drawing
-        .add_systems(
-            Update,
-            (
-                blink_publisher_system,
-                rotate_logo_system,
-                crate::devices::device_positioning::draw_drag_feedback,
-            ),
-        )
-        .add_systems(Update, manage_camera_controller)
-        .add_systems(Update, handle_console_t_key.after(ConsoleSet::Commands))
-        .add_systems(Update, handle_mouse_capture.after(ConsoleSet::Commands))
-        .add_systems(
-            Update,
-            crate::console::esc_handling::handle_esc_key.after(ConsoleSet::Commands),
-        )
-        .init_resource::<DiagnosticsVisible>()
+    app.init_state::<GameState>();
+
+    // Console is now managed by ConsolePlugin - no additional configuration needed
+
+    #[cfg(feature = "console")]
+    app.insert_resource(BlinkState::default());
+
+    // .add_systems(Update, draw_cursor) // Disabled: InteractionPlugin handles cursor drawing
+    app.add_systems(
+        Update,
+        (
+            rotate_logo_system,
+            crate::devices::device_positioning::draw_drag_feedback,
+        ),
+    );
+
+    // Add console-specific systems only when console feature is enabled
+    #[cfg(feature = "console")]
+    app.add_systems(Update, blink_publisher_system);
+
+    app.add_systems(Update, manage_camera_controller)
+        .add_systems(Update, handle_mouse_capture);
+
+    // Add console-dependent systems only when console feature is enabled
+    #[cfg(feature = "console")]
+    app.add_systems(
+        Update,
+        crate::console::esc_handling::handle_esc_key.after(ConsoleSet::COMMANDS),
+    );
+
+    app.init_resource::<DiagnosticsVisible>()
         .add_systems(Startup, setup_diagnostics_ui)
         .add_systems(Update, execute_pending_commands)
         .add_systems(Update, handle_inventory_input)
@@ -1334,79 +1077,10 @@ fn main() {
         .run();
 }
 
-fn handle_mqtt_command(
-    mut log: ConsoleCommand<MqttCommand>,
-    temperature: Res<TemperatureResource>,
-) {
-    if let Some(Ok(MqttCommand { action })) = log.take() {
-        info!("Console command: mqtt {}", action);
-        match action.as_str() {
-            "status" => {
-                let status = if temperature.value.is_some() {
-                    "Connected to MQTT broker"
-                } else {
-                    "Connecting to MQTT broker..."
-                };
-                reply!(log, "{}", status);
-                info!("MQTT status requested via console");
-            }
-            "temp" => {
-                let temp_msg = if let Some(val) = temperature.value {
-                    format!("Current temperature: {:.1}°C", val)
-                } else {
-                    "No temperature data available".to_string()
-                };
-                reply!(log, "{}", temp_msg);
-            }
-            _ => {
-                reply!(log, "Usage: mqtt [status|temp]");
-            }
-        }
-    }
-}
-
-fn handle_spawn_command(mut log: ConsoleCommand<SpawnCommand>, mqtt_config: Res<MqttConfig>) {
-    if let Some(Ok(SpawnCommand { device_id, x, y, z })) = log.take() {
-        info!("Console command: spawn {} {} {} {}", device_id, x, y, z);
-
-        // Use the same MQTT announcement system as spawn_door for consistency
-        let payload = json!({
-            "device_id": device_id,
-            "device_type": "lamp",
-            "state": "online",
-            "location": { "x": x, "y": y, "z": z }
-        })
-        .to_string();
-
-        // Create a temporary client for simulation
-        let mut mqtt_options =
-            MqttOptions::new("spawn-client", &mqtt_config.host, mqtt_config.port);
-        mqtt_options.set_keep_alive(Duration::from_secs(5));
-        let (client, mut connection) = Client::new(mqtt_options, 10);
-
-        client
-            .publish(
-                "devices/announce",
-                QoS::AtMostOnce,
-                false,
-                payload.as_bytes(),
-            )
-            .unwrap();
-
-        // Drive the event loop to ensure the message is sent
-        for notification in connection.iter() {
-            if let Ok(Event::Outgoing(Outgoing::Publish(_))) = notification {
-                break;
-            }
-        }
-
-        reply!(log, "Spawn command sent for device {}", device_id);
-    }
-}
-
+#[cfg(feature = "console")]
 fn blink_publisher_system(
     mut blink_state: ResMut<BlinkState>,
-    device_query: Query<&DeviceEntity, With<BlinkCube>>,
+    #[cfg(feature = "console")] device_query: Query<&DeviceEntity, With<BlinkCube>>,
     mqtt_config: Res<MqttConfig>,
 ) {
     if blink_state.light_state != blink_state.last_sent {
@@ -1469,13 +1143,26 @@ fn rotate_logo_system(time: Res<Time>, mut query: Query<&mut Transform, With<Log
 }
 
 // System to manage camera controller state based on console state
+#[cfg(feature = "console")]
 fn manage_camera_controller(
-    console_open: Res<ConsoleOpen>,
+    console_manager: Option<Res<ConsoleManager>>,
     mut camera_query: Query<&mut CameraController, With<Camera>>,
 ) {
     if let Ok(mut camera_controller) = camera_query.single_mut() {
         // Disable camera controller when console is open
-        camera_controller.enabled = !console_open.open;
+        let console_open = console_manager
+            .map(|manager| manager.console.is_visible())
+            .unwrap_or(false);
+        camera_controller.enabled = !console_open;
+    }
+}
+
+// Alternative system when console feature is disabled
+#[cfg(not(feature = "console"))]
+fn manage_camera_controller(mut camera_query: Query<&mut CameraController, With<Camera>>) {
+    if let Ok(mut camera_controller) = camera_query.single_mut() {
+        // Always enable camera controller when console is not available
+        camera_controller.enabled = true;
     }
 }
 
@@ -1536,6 +1223,9 @@ fn update_diagnostics_content(
     local_profile: Res<crate::profile::PlayerProfile>,
     temperature: Res<TemperatureResource>,
     time: Res<Time>,
+    multiplayer_mode: Res<crate::multiplayer::MultiplayerMode>,
+    multiplayer_status: Res<crate::multiplayer::MultiplayerConnectionStatus>,
+    world_discovery: Res<crate::multiplayer::WorldDiscovery>,
 ) {
     if !diagnostics_visible.visible {
         return;
@@ -1610,49 +1300,141 @@ fn update_diagnostics_content(
                 "🔄 Connecting to MQTT broker..."
             };
 
+            // Get multiplayer mode information and world ID
+            let (multiplayer_mode_text, current_world_id) = match &*multiplayer_mode {
+                crate::multiplayer::MultiplayerMode::SinglePlayer => {
+                    ("🚫 SinglePlayer".to_string(), "None".to_string())
+                }
+                crate::multiplayer::MultiplayerMode::HostingWorld {
+                    world_id,
+                    is_published,
+                } => {
+                    let mode_text = if *is_published {
+                        "🏠 Hosting (Public)"
+                    } else {
+                        "🏠 Hosting (Private)"
+                    };
+                    (mode_text.to_string(), world_id.clone())
+                }
+                crate::multiplayer::MultiplayerMode::JoinedWorld {
+                    world_id,
+                    host_player: _,
+                } => ("👥 Joined World".to_string(), world_id.clone()),
+            };
+
+            let multiplayer_enabled = if multiplayer_status.connection_available {
+                "✅ Enabled"
+            } else {
+                "❌ Disabled"
+            };
+
+            // Get MQTT subscription information from WorldDiscovery resource
+            let subscribed_topics = vec![
+                "iotcraft/worlds/+/info".to_string(),
+                "iotcraft/worlds/+/data".to_string(),
+                "iotcraft/worlds/+/data/chunk".to_string(),
+                "iotcraft/worlds/+/changes".to_string(),
+                "iotcraft/worlds/+/state/blocks/placed".to_string(),
+                "iotcraft/worlds/+/state/blocks/removed".to_string(),
+            ];
+
+            // Get last messages from WorldDiscovery resource
+            let last_messages = if let Ok(messages) = world_discovery.last_messages.try_lock() {
+                messages.clone()
+            } else {
+                std::collections::HashMap::new()
+            };
+
+            let topics_text = subscribed_topics
+                .iter()
+                .map(|topic| {
+                    // Find matching topic in last_messages (handling wildcards)
+                    let _pattern = topic.replace("+", "[^/]+");
+                    let matching_message = last_messages.iter().find(|(msg_topic, _)| {
+                        // Simple pattern matching for wildcard topics
+                        if topic.contains("+") {
+                            // Create a basic regex-like match
+                            let pattern_parts: Vec<&str> = topic.split("+").collect();
+                            if pattern_parts.len() == 2 {
+                                msg_topic.starts_with(pattern_parts[0])
+                                    && msg_topic.ends_with(pattern_parts[1])
+                            } else {
+                                false
+                            }
+                        } else {
+                            *msg_topic == topic
+                        }
+                    });
+
+                    if let Some((_, last_msg)) = matching_message {
+                        format!("  • {}: {}", topic, last_msg.content)
+                    } else {
+                        format!("  • {}: (no messages)", topic)
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+
             let uptime = time.elapsed_secs();
             let minutes = (uptime / 60.0) as u32;
             let seconds = (uptime % 60.0) as u32;
 
             text.0 = format!(
-                "IoTCraft Debug Information (Press F3 to toggle)\n\
-                ------------------------------------------------------------------------------------------
-                \n\
-                - PLAYER INFORMATION\n\
-                Position: X={:.2}  Y={:.2}  Z={:.2}\n\
-                Rotation: Yaw={:.1}°  Pitch={:.1}°\n\
-                Selected Slot: {} ({})\n\
-                \n\
-                - MULTIPLAYER INFORMATION\n\
-                MQTT Broker: {}\n\
-                Connected Players: {} (1 local + {} remote)\n\
-                {}\n\
-                \n\
-                - WORLD INFORMATION\n\
-                Total Blocks: {}\n\
-                IoT Devices: {}\n\
-                Session Time: {}m {}s\n\
-                \n\
-                - SCRIPT COMMANDS\n\
-                Teleport: tp {:.2} {:.2} {:.2}\n\
-                Look Direction: look {:.1} {:.1}\n\
-                \n\
-                - CONTROLS\n\
-                F3: Toggle this debug screen\n\
-                T: Open console\n\
-                1-9: Select inventory slot\n\
-                Mouse Wheel: Scroll inventory slots",
-                translation.x, translation.y, translation.z,
-                yaw_degrees, pitch_degrees,
-                selected_slot, selected_item,
+                "IoTCraft Debug Information (Press F3 to toggle)                        MQTT SUBSCRIPTIONS\n\
+                -------------------------------------------------  |  --------------------------------------\n\
+                                                               |\n\
+                - PLAYER INFORMATION                           |  Current World Filter: {}\n\
+                Position: X={:.2}  Y={:.2}  Z={:.2}               |\n\
+                Rotation: Yaw={:.1}°  Pitch={:.1}°                    |  Subscribed Topics:\n\
+                Selected Slot: {} ({})                        |  {}\n\
+                                                               |\n\
+                - MULTIPLAYER INFORMATION                      |\n\
+                MQTT Broker: {}                               |\n\
+                Multiplayer Status: {}                        |\n\
+                Multiplayer Mode: {}                          |\n\
+                Current World ID: {}                          |\n\
+                Connected Players: {} (1 local + {} remote)   |\n\
+                {}                                             |\n\
+                                                               |\n\
+                - WORLD INFORMATION                            |\n\
+                Total Blocks: {}                              |\n\
+                IoT Devices: {}                               |\n\
+                Session Time: {}m {}s                         |\n\
+                                                               |\n\
+                - SCRIPT COMMANDS                              |\n\
+                Teleport: tp {:.2} {:.2} {:.2}                    |\n\
+                Look Direction: look {:.1} {:.1}                  |\n\
+                                                               |\n\
+                - CONTROLS                                     |\n\
+                F3: Toggle this debug screen                  |\n\
+                T: Open console                               |\n\
+                1-9: Select inventory slot                    |\n\
+                Mouse Wheel: Scroll inventory slots           |",
+                current_world_id, // Used for the filter line
+                translation.x,
+                translation.y,
+                translation.z,
+                yaw_degrees,
+                pitch_degrees,
+                selected_slot,
+                selected_item,
+                topics_text,
                 mqtt_connection_status,
-                remote_player_count + 1, remote_player_count,
+                multiplayer_enabled,
+                multiplayer_mode_text,
+                current_world_id,
+                remote_player_count + 1,
+                remote_player_count,
                 players_text,
                 block_count,
                 device_count,
-                minutes, seconds,
-                translation.x, translation.y, translation.z,
-                yaw_degrees, pitch_degrees
+                minutes,
+                seconds,
+                translation.x,
+                translation.y,
+                translation.z,
+                yaw_degrees,
+                pitch_degrees
             );
         }
     }
@@ -1696,53 +1478,104 @@ fn setup_diagnostics_ui(mut commands: Commands, fonts: Res<Fonts>) {
 // System to handle mouse capture when window is clicked...
 fn handle_mouse_capture(
     mut windows: Query<&mut Window>,
+    mut cursor_options_query: Query<&mut bevy::window::CursorOptions>,
     mouse_button_input: Res<ButtonInput<MouseButton>>,
     game_state: Res<State<GameState>>,
 ) {
     // Only handle mouse recapture in InGame state (after it was released)
     if *game_state.get() == GameState::InGame && mouse_button_input.just_pressed(MouseButton::Left)
     {
-        for mut window in &mut windows {
+        for window in &mut windows {
             if !window.focused {
                 continue;
             }
 
-            // Only capture if cursor is currently not captured
-            if window.cursor_options.grab_mode == CursorGrabMode::None {
-                window.cursor_options.grab_mode = CursorGrabMode::Locked;
-                window.cursor_options.visible = false;
+            // Query for cursor options - now in separate component in Bevy 0.17
+            if let Ok(mut cursor_options) = cursor_options_query.single_mut() {
+                // Only capture if cursor is currently not captured
+                if cursor_options.grab_mode == CursorGrabMode::None {
+                    cursor_options.grab_mode = CursorGrabMode::Locked;
+                    cursor_options.visible = false;
+                }
             }
         }
     }
 }
 
-// System to handle 't' key to open console (only when closed)
-fn handle_console_t_key(
-    mut console_open: ResMut<ConsoleOpen>,
-    keyboard_input: Res<ButtonInput<KeyCode>>,
-    mut game_state: ResMut<NextState<GameState>>,
-    current_state: Res<State<GameState>>,
-) {
-    // Only open console with 't' when it's currently closed and in game
-    if keyboard_input.just_pressed(KeyCode::KeyT)
-        && !console_open.open
-        && *current_state.get() == GameState::InGame
-    {
-        console_open.open = true;
-        game_state.set(GameState::ConsoleOpen);
-    }
-}
-
 // System to handle inventory slot selection with number keys and mouse wheel
+#[cfg(feature = "console")]
 fn handle_inventory_input(
     keyboard_input: Res<ButtonInput<KeyCode>>,
     mut inventory: ResMut<PlayerInventory>,
     accumulated_mouse_scroll: Res<bevy::input::mouse::AccumulatedMouseScroll>,
-    console_open: Res<ConsoleOpen>,
+    console_manager: Option<Res<ConsoleManager>>,
     game_state: Res<State<GameState>>,
 ) {
     // Don't handle input when console is open or in any menu state
-    if console_open.open || *game_state.get() != GameState::InGame {
+    let console_open = console_manager
+        .map(|manager| manager.console.is_visible())
+        .unwrap_or(false);
+    if console_open || *game_state.get() != GameState::InGame {
+        return;
+    }
+
+    // Handle mouse wheel for inventory slot switching
+    if accumulated_mouse_scroll.delta.y != 0.0 {
+        let current_slot = inventory.selected_slot;
+        let new_slot = if accumulated_mouse_scroll.delta.y > 0.0 {
+            // Scroll up - previous slot (wraps around)
+            if current_slot == 0 {
+                8
+            } else {
+                current_slot - 1
+            }
+        } else {
+            // Scroll down - next slot (wraps around)
+            if current_slot == 8 {
+                0
+            } else {
+                current_slot + 1
+            }
+        };
+
+        if new_slot != current_slot {
+            inventory.select_slot(new_slot);
+            info!("Selected inventory slot {}", new_slot + 1);
+        }
+    }
+
+    // Handle number keys 1-9 for slot selection
+    let key_mappings = [
+        (KeyCode::Digit1, 0),
+        (KeyCode::Digit2, 1),
+        (KeyCode::Digit3, 2),
+        (KeyCode::Digit4, 3),
+        (KeyCode::Digit5, 4),
+        (KeyCode::Digit6, 5),
+        (KeyCode::Digit7, 6),
+        (KeyCode::Digit8, 7),
+        (KeyCode::Digit9, 8),
+    ];
+
+    for (key, slot) in key_mappings {
+        if keyboard_input.just_pressed(key) {
+            inventory.select_slot(slot);
+            info!("Selected inventory slot {}", slot + 1);
+            break;
+        }
+    }
+}
+
+// Alternative system for inventory input when console feature is disabled
+#[cfg(not(feature = "console"))]
+fn handle_inventory_input(
+    keyboard_input: Res<ButtonInput<KeyCode>>,
+    mut inventory: ResMut<PlayerInventory>,
+    accumulated_mouse_scroll: Res<bevy::input::mouse::AccumulatedMouseScroll>,
+    game_state: Res<State<GameState>>,
+) {
+    // Don't handle input when in any menu state (console not available to check)
+    if *game_state.get() != GameState::InGame {
         return;
     }
 

@@ -2,6 +2,7 @@ use crate::devices::device_types::{DeviceEntity, DeviceType};
 use crate::environment::{BlockType, VoxelWorld};
 use crate::interaction::interaction_types::LampState;
 use crate::ui::GameState;
+use bevy::asset::RenderAssetUsages;
 use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use bevy::tasks::{AsyncComputeTaskPool, Task, block_on, poll_once};
@@ -302,8 +303,7 @@ fn setup_minimap(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
         TextureDimension::D2,
         initial_pixels,
         TextureFormat::Rgba8UnormSrgb,
-        bevy::render::render_asset::RenderAssetUsages::MAIN_WORLD
-            | bevy::render::render_asset::RenderAssetUsages::RENDER_WORLD,
+        RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD,
     );
 
     let minimap_image_handle = images.add(minimap_image);
@@ -320,7 +320,7 @@ fn setup_minimap(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
                 border: UiRect::all(Val::Px(2.0)),
                 ..default()
             },
-            BorderColor(Color::WHITE),
+            BorderColor::all(Color::WHITE),
             BackgroundColor(Color::NONE),
             Visibility::Visible, // Start visible (performance is good now)
             MinimapUI,

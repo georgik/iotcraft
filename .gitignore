@@ -2,7 +2,11 @@ dist/
 dist-dev/
 dist-release/
 dist-test/
+node_modules/
 target/
 Cargo.lock
 
 .DS_Store
+
+logs/
+

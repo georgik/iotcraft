@@ -206,20 +206,20 @@ impl PlayerInventory {
 }
 
 /// Event for giving items to the player
-#[derive(Event)]
+#[derive(Event, BufferedEvent)]
 pub struct GiveItemEvent {
     pub item_type: ItemType,
     pub count: u32,
 }
 
 /// Event for when player tries to place a block
-#[derive(Event)]
+#[derive(Event, BufferedEvent)]
 pub struct PlaceBlockEvent {
     pub position: IVec3,
 }
 
 /// Event for when player tries to break a block
-#[derive(Event)]
+#[derive(Event, BufferedEvent)]
 pub struct BreakBlockEvent {
     pub position: IVec3,
 }
