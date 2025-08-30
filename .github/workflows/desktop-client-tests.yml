@@ -15,6 +15,7 @@ on:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
+  MQTT_SERVER_TIMEOUT: 180
 
 jobs:
   test:
@@ -24,11 +25,11 @@ jobs:
       contents: read
       checks: write
       pull-requests: write
-    
+
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
-      
+
     - name: Install Linux dependencies
       run: |
         sudo apt-get update
@@ -59,7 +60,13 @@ jobs:
         workspaces: |
           desktop-client
           mqtt-server
-        
+
+    - name: Pre-build MQTT server for tests
+      run: |
+        cd mqtt-server
+        cargo build --release
+        echo "MQTT server pre-built successfully"
+
     - name: Check formatting
       run: |
         cd desktop-client

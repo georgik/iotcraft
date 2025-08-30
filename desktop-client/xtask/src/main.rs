@@ -1048,7 +1048,8 @@ async fn run_integration_tests() -> Result<()> {
     tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
 
     // Check if server is ready
-    match wait_for_port("localhost", mqtt_port, 10).await {
+    let timeout = get_mqtt_server_timeout();
+    match wait_for_port("localhost", mqtt_port, timeout).await {
         Ok(_) => println!("   ✅ MQTT server ready on port {}", mqtt_port),
         Err(e) => {
             server_handle.abort();
@@ -1100,7 +1101,8 @@ async fn run_mqtt_tests() -> Result<()> {
     tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
 
     // Check if server is ready
-    match wait_for_port("localhost", mqtt_port, 10).await {
+    let timeout = get_mqtt_server_timeout();
+    match wait_for_port("localhost", mqtt_port, timeout).await {
         Ok(_) => println!("   ✅ MQTT server ready on port {}", mqtt_port),
         Err(e) => {
             server_handle.abort();
@@ -1184,6 +1186,32 @@ async fn wait_for_port(host: &str, port: u16, timeout_secs: u64) -> Result<()> {
         port,
         timeout_secs
     ))
+}
+
+/// Get appropriate timeout for MQTT server startup based on environment
+fn get_mqtt_server_timeout() -> u64 {
+    // Check if we're in CI environment
+    let is_ci = std::env::var("CI").is_ok()
+        || std::env::var("GITHUB_ACTIONS").is_ok()
+        || std::env::var("GITLAB_CI").is_ok()
+        || std::env::var("TRAVIS").is_ok()
+        || std::env::var("JENKINS_URL").is_ok();
+
+    // Allow override via environment variable
+    if let Ok(timeout_str) = std::env::var("MQTT_SERVER_TIMEOUT") {
+        if let Ok(timeout) = timeout_str.parse::<u64>() {
+            println!("   Using custom MQTT server timeout: {} seconds", timeout);
+            return timeout;
+        }
+    }
+
+    if is_ci {
+        println!("   Detected CI environment, using extended timeout: 120 seconds");
+        120 // 2 minutes for CI environments where build might be needed
+    } else {
+        println!("   Using standard timeout: 30 seconds");
+        30 // 30 seconds for local development
+    }
 }
 
 /// Enhanced multi-client runner with full environment support
@@ -1445,7 +1473,7 @@ async fn run_mqtt_server(log_file: PathBuf, port: u16) -> Result<()> {
     let has_config = config_path.exists();
 
     println!("[DEBUG] Starting MQTT server with:");
-    println!("[DEBUG]   Command: cargo run -- --port {}", port);
+    println!("[DEBUG]   Command: cargo run --release -- --port {}", port);
     println!("[DEBUG]   Working directory: {}", server_dir.display());
     println!(
         "[DEBUG]   Config file: {} ({})",
@@ -1470,7 +1498,7 @@ async fn run_mqtt_server(log_file: PathBuf, port: u16) -> Result<()> {
          Port: {}\n\
          Working directory: {}\n\
          Config file: {} ({})\n\
-         Command: cargo run -- --port {}\n\
+         Command: cargo run --release -- --port {}\n\
          ===================\n\n",
         chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC"),
         port,
@@ -1489,7 +1517,7 @@ async fn run_mqtt_server(log_file: PathBuf, port: u16) -> Result<()> {
 
     // Start the MQTT server process
     let mut child = TokioCommand::new("cargo")
-        .args(&["run", "--", "--port", &port.to_string()])
+        .args(&["run", "--release", "--", "--port", &port.to_string()])
         .current_dir(&server_dir)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
