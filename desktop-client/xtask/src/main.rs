@@ -1552,13 +1552,13 @@ async fn run_mqtt_server(log_file: PathBuf, port: u16) -> Result<()> {
     }
 
     // Start the MQTT server process
-    let mut child = TokioCommand::new("cargo")
-        .args(&["run", "--release", "--", "--port", &port.to_string()])
-        .current_dir(&server_dir)
+    let mut child = TokioCommand::new(&command)
+        .args(&args)
+        .current_dir(&working_dir)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .with_context(|| format!("Failed to start MQTT server in {}", server_dir.display()))?;
+        .with_context(|| format!("Failed to start MQTT server in {}", working_dir.display()))?;
 
     println!(
         "[DEBUG] MQTT server process started with PID: {:?}",
