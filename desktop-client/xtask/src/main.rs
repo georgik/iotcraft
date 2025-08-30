@@ -1472,15 +1472,44 @@ async fn run_mqtt_server(log_file: PathBuf, port: u16) -> Result<()> {
     let config_path = server_dir.join("rumqttd.toml");
     let has_config = config_path.exists();
 
+    // Check for pre-built binary first (CI optimization)
+    let pre_built_binary = server_dir.join("target/release/iotcraft-mqtt-server");
+    let use_prebuilt = pre_built_binary.exists() && std::env::var("CI").is_ok();
+
+    let (command, args, working_dir) = if use_prebuilt {
+        println!("[DEBUG] Using pre-built MQTT server binary (CI optimization)");
+        (
+            pre_built_binary.to_string_lossy().to_string(),
+            vec!["--port".to_string(), port.to_string()],
+            server_dir.clone(),
+        )
+    } else {
+        println!("[DEBUG] Building and running MQTT server with cargo");
+        (
+            "cargo".to_string(),
+            vec![
+                "run".to_string(),
+                "--release".to_string(),
+                "--".to_string(),
+                "--port".to_string(),
+                port.to_string(),
+            ],
+            server_dir.clone(),
+        )
+    };
+
     println!("[DEBUG] Starting MQTT server with:");
-    println!("[DEBUG]   Command: cargo run --release -- --port {}", port);
-    println!("[DEBUG]   Working directory: {}", server_dir.display());
+    println!("[DEBUG]   Command: {} {}", command, args.join(" "));
+    println!("[DEBUG]   Working directory: {}", working_dir.display());
     println!(
         "[DEBUG]   Config file: {} ({})",
         config_path.display(),
         if has_config { "found" } else { "MISSING" }
     );
     println!("[DEBUG]   Log file: {}", log_file.display());
+    if use_prebuilt {
+        println!("[DEBUG]   Using pre-built binary to avoid rebuild");
+    }
 
     // Create and open log file
     let mut log_handle = fs::OpenOptions::new()
@@ -1498,14 +1527,21 @@ async fn run_mqtt_server(log_file: PathBuf, port: u16) -> Result<()> {
          Port: {}\n\
          Working directory: {}\n\
          Config file: {} ({})\n\
-         Command: cargo run --release -- --port {}\n\
+         Command: {} {}\n\
+         Mode: {}\n\
          ===================\n\n",
         chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC"),
         port,
-        server_dir.display(),
+        working_dir.display(),
         config_path.display(),
         if has_config { "found" } else { "MISSING" },
-        port
+        command,
+        args.join(" "),
+        if use_prebuilt {
+            "pre-built binary"
+        } else {
+            "cargo run"
+        }
     );
 
     log_handle.write_all(header.as_bytes()).await?;
