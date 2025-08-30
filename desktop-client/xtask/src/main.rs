@@ -1875,15 +1875,9 @@ async fn run_wasm_integration_tests() -> Result<()> {
 
 /// Run WASM tests in browser environment with MQTT integration
 async fn run_wasm_browser_tests(mqtt_port: u16) -> Result<()> {
-    // Start a simple HTTP server to serve test files
+    // Use a simpler approach: start HTTP server using Python's built-in server
+    // This avoids the Send trait issues with warp in tokio::spawn
     let server_port = 8081;
-    let server_handle = tokio::spawn(async {
-        let routes = warp::fs::dir("dist-test");
-        warp::serve(routes).run(([127, 0, 0, 1], server_port)).await;
-    });
-
-    // Give server time to start
-    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
 
     // Create test HTML that validates WASM functionality
     let test_html = create_wasm_test_html(mqtt_port);
@@ -1891,6 +1885,40 @@ async fn run_wasm_browser_tests(mqtt_port: u16) -> Result<()> {
     fs::write(&test_html_path, test_html)
         .await
         .context("Failed to write test HTML")?;
+
+    // Start Python HTTP server (most systems have this available)
+    let mut server_handle = if which::which("python3").is_ok() {
+        TokioCommand::new("python3")
+            .args(&["-m", "http.server", &server_port.to_string()])
+            .current_dir("dist-test")
+            .stdout(Stdio::null()) // Suppress output for cleaner test logs
+            .stderr(Stdio::null())
+            .spawn()
+            .context("Failed to start Python3 HTTP server")?
+    } else if which::which("python").is_ok() {
+        TokioCommand::new("python")
+            .args(&["-m", "http.server", &server_port.to_string()])
+            .current_dir("dist-test")
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .context("Failed to start Python HTTP server")?
+    } else {
+        return Err(anyhow::anyhow!(
+            "No Python interpreter found. Python is required for serving WASM test files."
+        ));
+    };
+
+    // Give server time to start
+    tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+
+    // Verify server is running
+    if !is_port_open("localhost", server_port) {
+        return Err(anyhow::anyhow!(
+            "HTTP server failed to start on port {}",
+            server_port
+        ));
+    }
 
     // Run browser-based tests
     let test_url = format!("http://localhost:{}/test.html", server_port);
@@ -1921,7 +1949,8 @@ async fn run_wasm_browser_tests(mqtt_port: u16) -> Result<()> {
         .output()
         .context("Failed to execute browser")?;
 
-    server_handle.abort();
+    // Clean up server
+    let _ = server_handle.kill().await;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);

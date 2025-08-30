@@ -122,11 +122,12 @@ fn setup_full_debug_scene(
     meshes: ResMut<Assets<Mesh>>,
     materials: ResMut<Assets<StandardMaterial>>,
     asset_server: Res<AssetServer>,
+    voxel_world: ResMut<crate::environment::VoxelWorld>,
 ) {
     web_sys::console::log_1(&"🚨 DEBUG: Setting up FULL IoTCraft scene...".into());
 
     // Use the exact same scene setup as the main app
-    crate::lib_gradual::setup_basic_scene(commands, meshes, materials, asset_server);
+    crate::lib_gradual::setup_basic_scene(commands, meshes, materials, asset_server, voxel_world);
 
     web_sys::console::log_1(&"🚨 DEBUG: Full scene setup complete".into());
 }

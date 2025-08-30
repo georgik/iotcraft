@@ -1647,11 +1647,18 @@ fn execute_pending_commands_web_wrapper(
                     if let Ok(count) = parts[2].parse::<u32>() {
                         let item_type = parts[1];
                         if let Some(block_type) = parse_block_type(item_type) {
-                            inventory.add_item(crate::inventory::InventoryItem {
-                                item_type: crate::inventory::ItemType::Block(block_type),
-                                count,
-                            });
-                            info!("Web: Gave {} {} to player inventory", count, item_type);
+                            let item_type = crate::inventory::ItemType::Block(block_type);
+                            let remaining = inventory.add_items(item_type, count);
+                            if remaining > 0 {
+                                info!(
+                                    "Web: Gave {} {} to player inventory ({} couldn't fit)",
+                                    count - remaining,
+                                    parts[1],
+                                    remaining
+                                );
+                            } else {
+                                info!("Web: Gave {} {} to player inventory", count, parts[1]);
+                            }
                         }
                     }
                 }

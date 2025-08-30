@@ -12,6 +12,7 @@ impl Plugin for WebPlayerControllerPlugin {
         app.insert_resource(PlayerMode::Walking).add_systems(
             Update,
             (
+                enable_gravity_after_world_populated_web,
                 handle_mode_switch_web,
                 player_movement_web,
                 force_walking_mode_on_world_start_web,
@@ -227,6 +228,43 @@ fn force_walking_mode_on_world_start_web(
 }
 
 // Re-use the helper functions from the desktop player controller module
+
+/// Enable gravity after the voxel world has been populated (web version)
+fn enable_gravity_after_world_populated_web(
+    voxel_world: Res<crate::environment::VoxelWorld>,
+    mut camera_query: Query<(&mut Transform, &mut PlayerMovement), With<Camera>>,
+) {
+    if voxel_world.blocks.is_empty() {
+        return; // World not ready yet
+    }
+
+    if let Ok((mut transform, mut movement)) = camera_query.single_mut() {
+        if !movement.gravity_initialized {
+            movement.is_grounded = false; // allow gravity to start affecting the player
+            // Kickstart gravity slightly so it begins falling next frame
+            if movement.gravity_scale >= 0.0 {
+                movement.gravity_scale = -0.1;
+            }
+            movement.gravity_initialized = true;
+            // Ensure the player is not below the ground unexpectedly
+            if transform.translation.y < 1.5 {
+                transform.translation.y = 3.0;
+            }
+            info!(
+                "Web: Gravity initialized after world population ({} blocks)",
+                voxel_world.blocks.len()
+            );
+            #[cfg(target_arch = "wasm32")]
+            web_sys::console::log_1(
+                &format!(
+                    "Web: Gravity initialized after world population ({} blocks)",
+                    voxel_world.blocks.len()
+                )
+                .into(),
+            );
+        }
+    }
+}
 
 /// Handle double spacebar press to toggle flight mode (reused from desktop)
 fn handle_double_spacebar_flight_toggle(

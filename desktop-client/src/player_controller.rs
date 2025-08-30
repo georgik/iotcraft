@@ -421,7 +421,7 @@ fn enable_gravity_after_world_populated(
         return; // World not ready yet
     }
 
-    if let Ok((mut transform, mut movement)) = camera_query.get_single_mut() {
+    if let Ok((mut transform, mut movement)) = camera_query.single_mut() {
         if !movement.gravity_initialized {
             movement.is_grounded = false; // allow gravity to start affecting the player
             // Kickstart gravity slightly so it begins falling next frame
