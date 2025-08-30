@@ -1,4 +1,6 @@
 // IoTCraft Desktop Client - Web Version (Gradual Build)
+use crate::script::script_systems::ScriptPlugin;
+use crate::script::script_types::PendingCommands;
 use bevy::prelude::*;
 
 #[cfg(target_arch = "wasm32")]
@@ -666,6 +668,8 @@ pub fn start() {
         .add_plugins(crate::inventory::InventoryPlugin) // Add inventory system
         // Note: EnvironmentPlugin disabled for web - comprehensive scene handled by setup_basic_scene_once
         .add_plugins(crate::multiplayer_web::WebMultiplayerPlugin) // Add web multiplayer for block sync
+        // Add script system for unified world creation
+        .add_plugins(ScriptPlugin)
         // Add desktop camera controller and player controller plugins
         .add_plugins(crate::camera_controllers::CameraControllerPlugin)
         .add_plugins(crate::player_controller::PlayerControllerPlugin)
@@ -679,6 +683,7 @@ pub fn start() {
         .insert_resource(crate::environment::VoxelWorld::default())
         // Console resources for desktop console integration
         .insert_resource(crate::console::BlinkState::default())
+        // MCP event needed by execute_pending_commands
         // Prevent duplicate scene setup - only one startup system should handle it
         .insert_resource(SceneSetupGuard(false))
         .add_systems(
@@ -701,6 +706,7 @@ pub fn start() {
                 update_position_timer,
                 publish_local_pose,
                 apply_remote_poses,
+                execute_pending_commands_web_wrapper, // Execute script commands to populate VoxelWorld
                 log_fps,
             ),
         )
@@ -1399,6 +1405,136 @@ pub fn log_fps(time: Res<Time>, mut timer: Local<Timer>) {
 #[cfg(not(target_arch = "wasm32"))]
 fn log_fps(_time: Res<Time>) {
     // No-op for non-wasm targets
+}
+
+/// Web wrapper for execute_pending_commands that handles missing resources gracefully
+fn execute_pending_commands_web_wrapper(
+    mut pending_commands: ResMut<PendingCommands>,
+    mut blink_state: ResMut<crate::console::BlinkState>,
+    temperature: Res<crate::mqtt::TemperatureResource>,
+    mqtt_config: Res<MqttConfig>,
+    mut voxel_world: ResMut<crate::environment::VoxelWorld>,
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    asset_server: Res<AssetServer>,
+    query: Query<(Entity, &crate::environment::VoxelBlock)>,
+    device_query: Query<(&DeviceEntity, &Transform), Without<Camera>>,
+    mut inventory: ResMut<crate::inventory::PlayerInventory>,
+    mut camera_query: Query<
+        (
+            &mut Transform,
+            &mut crate::camera_controllers::CameraController,
+        ),
+        With<Camera>,
+    >,
+) {
+    // Simplified web implementation of command execution
+    // Process pending commands with basic functionality for web client
+
+    for command in pending_commands.commands.drain(..) {
+        info!("Web: Executing queued command: {}", command);
+
+        #[cfg(target_arch = "wasm32")]
+        web_sys::console::log_1(&format!("Web: Executing command: {}", command).into());
+
+        // Parse command string and dispatch to appropriate handler
+        let parts: Vec<&str> = command.split_whitespace().collect();
+        if parts.is_empty() {
+            continue;
+        }
+
+        match parts[0] {
+            "blink" => {
+                if parts.len() == 2 {
+                    let action = parts[1];
+                    match action {
+                        "start" => {
+                            blink_state.blinking = true;
+                            info!("Web: Blink started via script");
+                        }
+                        "stop" => {
+                            blink_state.blinking = false;
+                            info!("Web: Blink stopped via script");
+                        }
+                        _ => {
+                            info!("Web: Usage: blink [start|stop]");
+                        }
+                    }
+                }
+            }
+            "mqtt" => {
+                if parts.len() == 2 {
+                    let action = parts[1];
+                    match action {
+                        "status" => {
+                            let status = if temperature.value.is_some() {
+                                "Connected to MQTT broker"
+                            } else {
+                                "Connecting to MQTT broker..."
+                            };
+                            info!("Web: MQTT status: {}", status);
+                        }
+                        "temp" => {
+                            let temp_msg = if let Some(val) = temperature.value {
+                                format!("Current temperature: {:.1}°C", val)
+                            } else {
+                                "No temperature data available".to_string()
+                            };
+                            info!("Web: {}", temp_msg);
+                        }
+                        _ => {
+                            info!("Web: Usage: mqtt [status|temp]");
+                        }
+                    }
+                }
+            }
+            "place" => {
+                if parts.len() == 5 {
+                    if let (Ok(x), Ok(y), Ok(z)) = (
+                        parts[2].parse::<i32>(),
+                        parts[3].parse::<i32>(),
+                        parts[4].parse::<i32>(),
+                    ) {
+                        let block_type_str = parts[1];
+                        let block_type = match block_type_str {
+                            "grass" => crate::environment::BlockType::Grass,
+                            "dirt" => crate::environment::BlockType::Dirt,
+                            "stone" => crate::environment::BlockType::Stone,
+                            "quartz_block" => crate::environment::BlockType::QuartzBlock,
+                            "glass_pane" => crate::environment::BlockType::GlassPane,
+                            "cyan_terracotta" => crate::environment::BlockType::CyanTerracotta,
+                            "water" => crate::environment::BlockType::Water,
+                            _ => continue, // Skip unknown block types
+                        };
+                        {
+                            let position = IVec3::new(x, y, z);
+
+                            // Add block to VoxelWorld
+                            voxel_world.set_block(position, block_type);
+
+                            info!(
+                                "Web: Placed {} block at ({}, {}, {})",
+                                block_type_str, x, y, z
+                            );
+
+                            #[cfg(target_arch = "wasm32")]
+                            web_sys::console::log_1(
+                                &format!(
+                                    "Web: Placed {} block at ({}, {}, {})",
+                                    block_type_str, x, y, z
+                                )
+                                .into(),
+                            );
+                        }
+                    }
+                }
+            }
+            _ => {
+                info!("Web: Unknown command: {}", parts[0]);
+            }
+        }
+    }
 }
 
 // ============ MULTIPLAYER SYSTEMS ============
