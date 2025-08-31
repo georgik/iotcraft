@@ -57,9 +57,12 @@ enum Commands {
     },
     /// Run multiple client instances for testing
     MultiClient {
-        /// Number of client instances to run
+        /// Number of desktop client instances to run
         #[arg(short, long, default_value = "2")]
         count: usize,
+        /// Number of web client instances to run
+        #[arg(short, long, default_value = "0")]
+        web_clients: usize,
         /// MQTT server address override
         #[arg(short, long)]
         mqtt_server: Option<String>,
@@ -75,6 +78,15 @@ enum Commands {
         /// MQTT server port (default: 1883)
         #[arg(long, default_value = "1883")]
         mqtt_port: u16,
+        /// Web server port for serving WASM clients (default: 8000)
+        #[arg(long, default_value = "8000")]
+        web_port: u16,
+        /// Browser command to use for web clients (e.g., 'chrome', 'firefox')
+        #[arg(long)]
+        browser_cmd: Option<String>,
+        /// Use clean browser instances (isolated, no cache/extensions)
+        #[arg(long)]
+        clean_browser: bool,
         /// Complete test environment (server + observer + clients)
         #[arg(long)]
         full_env: bool,
@@ -128,21 +140,29 @@ async fn main() -> Result<()> {
         }
         Commands::MultiClient {
             count,
+            web_clients,
             mqtt_server,
             log_dir,
             with_mqtt_server,
             with_observer,
             mqtt_port,
+            web_port,
+            browser_cmd,
+            clean_browser,
             full_env,
             client_args,
         } => {
             multi_client_env(
                 *count,
+                *web_clients,
                 mqtt_server.as_deref(),
                 log_dir,
                 *with_mqtt_server,
                 *with_observer,
                 *mqtt_port,
+                *web_port,
+                browser_cmd.as_deref(),
+                *clean_browser,
                 *full_env,
                 client_args,
             )
@@ -1252,11 +1272,15 @@ fn get_mqtt_server_timeout() -> u64 {
 /// Enhanced multi-client runner with full environment support
 async fn multi_client_env(
     count: usize,
+    web_clients: usize,
     mqtt_server_override: Option<&str>,
     log_dir: &str,
     with_mqtt_server: bool,
     with_observer: bool,
     mqtt_port: u16,
+    web_port: u16,
+    browser_cmd: Option<&str>,
+    clean_browser: bool,
     full_env: bool,
     client_args: &[String],
 ) -> Result<()> {
@@ -1264,8 +1288,13 @@ async fn multi_client_env(
     let start_server = full_env || with_mqtt_server;
     let start_observer = full_env || with_observer;
 
-    if count == 0 {
-        return Err(anyhow::anyhow!("Client count must be greater than 0"));
+    // Web server is needed if we have web clients
+    let start_web_server = web_clients > 0;
+
+    if count == 0 && web_clients == 0 {
+        return Err(anyhow::anyhow!(
+            "At least one client (desktop or web) must be specified"
+        ));
     }
 
     // If no server override is provided and we're starting our own server, use localhost
@@ -1276,10 +1305,16 @@ async fn multi_client_env(
     };
 
     println!("🚀 Starting IoTCraft test environment...");
-    println!("   Client instances: {}", count);
+    println!("   Desktop client instances: {}", count);
+    if web_clients > 0 {
+        println!("   Web client instances: {}", web_clients);
+    }
     println!("   Log directory: {}", log_dir);
     if start_server {
         println!("   ✅ MQTT server: localhost:{}", mqtt_port);
+    }
+    if start_web_server {
+        println!("   ✅ Web server: localhost:{}", web_port);
     }
     if start_observer {
         println!("   ✅ MQTT observer: mosquitto_sub");
@@ -1361,6 +1396,33 @@ async fn multi_client_env(
         tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
     }
 
+    // Start web server if requested (for web clients)
+    if start_web_server {
+        println!("🟢 Starting web server...");
+
+        // First, build the web version if needed
+        println!("   Building web version for clients...");
+        web_build(false, "dist")
+            .await
+            .context("Failed to build web version for clients")?;
+
+        let web_server_log_file = run_log_dir.join("web-server.log");
+        let web_server_handle = tokio::spawn(run_web_server(web_server_log_file, web_port));
+        abort_handles.push(web_server_handle.abort_handle());
+        handles.push(web_server_handle);
+        component_names.push("Web Server".to_string());
+
+        // Wait for web server port to become available
+        println!("   Waiting for web server to open port {}...", web_port);
+        match wait_for_port("localhost", web_port, 30).await {
+            Ok(_) => println!("   ✅ Web server is ready and serving on port {}", web_port),
+            Err(e) => {
+                println!("   ⚠️  Warning: {}", e);
+                println!("   ⚠️  Proceeding anyway - server might still be starting up");
+            }
+        }
+    }
+
     // Start clients
     for client_id in 0..count {
         let player_id = format!("player-{}", client_id + 1);
@@ -1415,6 +1477,51 @@ async fn multi_client_env(
         tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
     }
 
+    // Start web clients
+    for client_id in 0..web_clients {
+        let player_id = format!("player-{}", count + client_id + 1);
+        let log_file = run_log_dir.join(format!("web-client-{}.log", client_id + 1));
+
+        println!(
+            "🟢 Starting web client {} (Player ID: {})...",
+            client_id + 1,
+            player_id
+        );
+        println!("[DEBUG] Web client {} command details:", client_id + 1);
+        println!(
+            "[DEBUG]   Browser: {}",
+            browser_cmd.unwrap_or("auto-detect")
+        );
+        println!(
+            "[DEBUG]   URL: http://localhost:{}?player={}",
+            web_port, player_id
+        );
+        println!("[DEBUG]   Log file: {}", log_file.display());
+
+        let log_file_clone = log_file.clone();
+        let player_id_clone = player_id.clone();
+        let browser_cmd_clone = browser_cmd.map(|s| s.to_string());
+
+        let handle = tokio::spawn(async move {
+            run_web_client_instance(
+                client_id + 1,
+                player_id_clone,
+                web_port,
+                browser_cmd_clone.as_deref(),
+                clean_browser,
+                log_file_clone,
+            )
+            .await
+        });
+
+        abort_handles.push(handle.abort_handle());
+        handles.push(handle);
+        component_names.push(format!("Web Client {}", client_id + 1));
+
+        // Small delay between starting web clients to avoid resource contention
+        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+    }
+
     println!();
     println!("✅ All components started successfully!");
     if start_server {
@@ -1423,7 +1530,13 @@ async fn multi_client_env(
     if start_observer {
         println!("   👁️  MQTT Observer: monitoring all topics");
     }
-    println!("   🎮 Clients: {} instances running", count);
+    if start_web_server {
+        println!("   🌐 Web Server: serving on port {}", web_port);
+    }
+    println!("   🎮 Desktop Clients: {} instances running", count);
+    if web_clients > 0 {
+        println!("   🌍 Web Clients: {} instances running", web_clients);
+    }
     println!();
     println!("💡 Monitoring all processes...");
     println!("   Press Ctrl+C to stop all components and exit");
@@ -1474,7 +1587,13 @@ async fn multi_client_env(
     if start_observer {
         println!("   MQTT Observer: monitoring enabled");
     }
-    println!("   Clients: {}", count);
+    if start_web_server {
+        println!("   Web Server: started on port {}", web_port);
+    }
+    println!("   Desktop Clients: {}", count);
+    if web_clients > 0 {
+        println!("   Web Clients: {}", web_clients);
+    }
     println!("   Logs location: {}", run_log_dir.display());
     println!();
     println!("🔍 To view logs:");
@@ -1489,7 +1608,19 @@ async fn multi_client_env(
     for client_id in 0..count {
         let log_file = run_log_dir.join(format!("client-{}.log", client_id + 1));
         println!(
-            "   tail -f {} # Client {}",
+            "   tail -f {} # Desktop Client {}",
+            log_file.display(),
+            client_id + 1
+        );
+    }
+    if start_web_server {
+        let web_server_log = run_log_dir.join("web-server.log");
+        println!("   tail -f {} # Web Server", web_server_log.display());
+    }
+    for client_id in 0..web_clients {
+        let log_file = run_log_dir.join(format!("web-client-{}.log", client_id + 1));
+        println!(
+            "   tail -f {} # Web Client {}",
             log_file.display(),
             client_id + 1
         );
@@ -2306,6 +2437,316 @@ async fn run_cross_platform_validation() -> Result<()> {
 
     println!("   ✅ Cross-platform validation completed");
     Ok(())
+}
+
+/// Run a web server for serving WASM clients
+async fn run_web_server(log_file: PathBuf, port: u16) -> Result<()> {
+    println!("[DEBUG] Starting web server with:");
+    println!(
+        "[DEBUG]   Command: cargo xtask web-serve --port {} --dir dist",
+        port
+    );
+    println!("[DEBUG]   Log file: {}", log_file.display());
+
+    // Create and open log file
+    let mut log_handle = fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(true)
+        .open(&log_file)
+        .await
+        .with_context(|| format!("Failed to create log file: {}", log_file.display()))?;
+
+    // Write header to log file
+    let header = format!(
+        "=== Web Server ===\n\
+         Started at: {}\n\
+         Port: {}\n\
+         Directory: dist\n\
+         Command: cargo xtask web-serve --port {} --dir dist\n\
+         ==================\n\n",
+        chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC"),
+        port,
+        port
+    );
+
+    log_handle.write_all(header.as_bytes()).await?;
+    log_handle.flush().await?;
+
+    // Start the web server process
+    let mut child = TokioCommand::new("cargo")
+        .args(&[
+            "xtask",
+            "web-serve",
+            "--port",
+            &port.to_string(),
+            "--dir",
+            "dist",
+        ])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .context("Failed to start web server")?;
+
+    println!(
+        "[DEBUG] Web server process started with PID: {:?}",
+        child.id()
+    );
+
+    // Get stdout and stderr
+    let stdout = child.stdout.take().unwrap();
+    let stderr = child.stderr.take().unwrap();
+
+    let stdout_reader = BufReader::new(stdout);
+    let stderr_reader = BufReader::new(stderr);
+
+    let log_file_clone = log_file.clone();
+
+    // Spawn tasks to handle stdout and stderr
+    let stdout_task = tokio::spawn(async move {
+        handle_process_stdout_stream(stdout_reader, log_file_clone, "Web-Server", "STDOUT").await
+    });
+
+    let stderr_task = tokio::spawn(async move {
+        handle_process_stderr_stream(stderr_reader, log_file, "Web-Server", "STDERR").await
+    });
+
+    // Wait for the process to complete
+    let exit_status = child
+        .wait()
+        .await
+        .context("Failed to wait for web server")?;
+
+    // Wait for output handling to complete
+    let _ = tokio::try_join!(stdout_task, stderr_task);
+
+    if exit_status.success() {
+        println!("✅ Web Server exited successfully");
+    } else {
+        println!("❌ Web Server exited with code: {:?}", exit_status.code());
+        return Err(anyhow::anyhow!(
+            "Web Server exited with non-zero status: {:?}",
+            exit_status
+        ));
+    }
+
+    Ok(())
+}
+
+/// Run a web client instance in a browser
+async fn run_web_client_instance(
+    client_num: usize,
+    player_id: String,
+    web_port: u16,
+    browser_cmd: Option<&str>,
+    clean_browser: bool,
+    log_file: PathBuf,
+) -> Result<()> {
+    // Detect available browser if not specified
+    let browser = if let Some(cmd) = browser_cmd {
+        cmd.to_string()
+    } else {
+        detect_browser()?
+    };
+
+    let web_url = format!("http://localhost:{}?player={}", web_port, player_id);
+
+    println!("[DEBUG] Starting web client with:");
+    println!("[DEBUG]   Browser: {}", browser);
+    println!("[DEBUG]   URL: {}", web_url);
+    println!("[DEBUG]   Log file: {}", log_file.display());
+
+    // Create and open log file
+    let mut log_handle = fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(true)
+        .open(&log_file)
+        .await
+        .with_context(|| format!("Failed to create log file: {}", log_file.display()))?;
+
+    // Write header to log file
+    let header = format!(
+        "=== IoTCraft Web Client {} (Player: {}) ===\n\
+         Started at: {}\n\
+         Browser: {}\n\
+         URL: {}\n\
+         =============================================\n\n",
+        client_num,
+        player_id,
+        chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC"),
+        browser,
+        web_url
+    );
+
+    log_handle.write_all(header.as_bytes()).await?;
+    log_handle.flush().await?;
+
+    // Start the browser process
+    let mut child = if browser == "open" {
+        // macOS open command - just open the URL in the default browser
+        TokioCommand::new(&browser)
+            .args(&[&web_url])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .with_context(|| {
+                format!(
+                    "Failed to start web client {} with open command",
+                    client_num
+                )
+            })?
+    } else {
+        // Direct browser execution
+        let mut cmd = TokioCommand::new(&browser);
+
+        if clean_browser {
+            // Clean browser mode: isolated instance with no cache/extensions
+            cmd.args(&[
+                "--new-window",
+                &web_url,
+                &format!(
+                    "--user-data-dir=/tmp/iotcraft-web-client-data-{}",
+                    client_num
+                ),
+                "--no-first-run",
+                "--disable-extensions",
+                "--disable-plugins",
+                "--incognito", // Incognito mode for additional isolation
+            ]);
+        } else {
+            // Default mode: open in existing browser instance (better UX)
+            cmd.args(&[&web_url]);
+        }
+
+        cmd.stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .with_context(|| {
+                format!(
+                    "Failed to start web client {} with browser {}",
+                    client_num, browser
+                )
+            })?
+    };
+
+    println!(
+        "[DEBUG] Web client {} process started with PID: {:?}",
+        client_num,
+        child.id()
+    );
+
+    // Get stdout and stderr
+    let stdout = child.stdout.take().unwrap();
+    let stderr = child.stderr.take().unwrap();
+
+    let stdout_reader = BufReader::new(stdout);
+    let stderr_reader = BufReader::new(stderr);
+
+    let log_file_clone = log_file.clone();
+
+    // Spawn tasks to handle stdout and stderr
+    let stdout_task = tokio::spawn(async move {
+        handle_process_stdout_stream(
+            stdout_reader,
+            log_file_clone,
+            &format!("Web-Client-{}", client_num),
+            "STDOUT",
+        )
+        .await
+    });
+
+    let stderr_task = tokio::spawn(async move {
+        handle_process_stderr_stream(
+            stderr_reader,
+            log_file,
+            &format!("Web-Client-{}", client_num),
+            "STDERR",
+        )
+        .await
+    });
+
+    // Wait for the process to complete
+    let exit_status = child
+        .wait()
+        .await
+        .with_context(|| format!("Failed to wait for web client {}", client_num))?;
+
+    // Wait for output handling to complete
+    let _ = tokio::try_join!(stdout_task, stderr_task);
+
+    if exit_status.success() {
+        println!(
+            "✅ Web Client {} (Player: {}) exited successfully",
+            client_num, player_id
+        );
+    } else {
+        println!(
+            "❌ Web Client {} (Player: {}) exited with code: {:?}",
+            client_num,
+            player_id,
+            exit_status.code()
+        );
+        return Err(anyhow::anyhow!(
+            "Web Client {} exited with non-zero status: {:?}",
+            client_num,
+            exit_status
+        ));
+    }
+
+    Ok(())
+}
+
+/// Detect available browser for web clients
+fn detect_browser() -> Result<String> {
+    // On macOS, check for browsers in /Applications first
+    if cfg!(target_os = "macos") {
+        let macos_browsers = [
+            (
+                "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+                "Google Chrome",
+            ),
+            ("/Applications/Chrome.app/Contents/MacOS/Chrome", "Chrome"),
+            (
+                "/Applications/Chromium.app/Contents/MacOS/Chromium",
+                "Chromium",
+            ),
+            (
+                "/Applications/Firefox.app/Contents/MacOS/firefox",
+                "Firefox",
+            ),
+            ("/Applications/Safari.app/Contents/MacOS/Safari", "Safari"),
+        ];
+
+        for (path, name) in &macos_browsers {
+            if std::path::Path::new(path).exists() {
+                println!("[DEBUG] Found browser: {} at {}", name, path);
+                return Ok(path.to_string());
+            }
+        }
+    }
+
+    // Try browsers in PATH (Linux/Windows style)
+    let browsers = ["google-chrome", "chrome", "chromium", "firefox", "safari"];
+
+    for browser in &browsers {
+        if which::which(browser).is_ok() {
+            return Ok(browser.to_string());
+        }
+    }
+
+    // On macOS, try using `open` command as fallback
+    if cfg!(target_os = "macos") {
+        if which::which("open").is_ok() {
+            println!("[DEBUG] No direct browser found, will use macOS 'open' command");
+            return Ok("open".to_string());
+        }
+    }
+
+    Err(anyhow::anyhow!(
+        "No supported browser found. Please install one of: {}",
+        browsers.join(", ")
+    ))
 }
 
 /// Handle stderr stream for generic processes (server/observer)
