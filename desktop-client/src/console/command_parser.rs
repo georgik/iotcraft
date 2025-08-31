@@ -6,8 +6,11 @@ use crate::console::BlinkState;
 
 use crate::mqtt::TemperatureResource;
 
-// Imports for environment and inventory (now available on both platforms)
-use crate::environment::{BlockType, VoxelBlock, VoxelWorld};
+// Platform-specific imports for environment and inventory
+// Also include for tests since test code needs access to these types
+#[cfg(any(not(target_arch = "wasm32"), test))]
+use crate::environment::{BlockType, VoxelWorld};
+#[cfg(any(not(target_arch = "wasm32"), test))]
 use crate::inventory::{ItemType, PlaceBlockEvent, PlayerInventory};
 
 /// Unified command parser that works with any console implementation
@@ -58,10 +61,14 @@ impl CommandParser {
             "blink" => self.handle_blink_command(args, world),
             "mqtt" => self.handle_mqtt_command(args, world),
             "test_error" => self.handle_test_error_command(args, world),
-            // Inventory and environment commands (now available on both platforms)
+            // Inventory and environment commands (desktop only due to dependencies)
+            #[cfg(not(target_arch = "wasm32"))]
             "place" => self.handle_place_command(args, world),
+            #[cfg(not(target_arch = "wasm32"))]
             "remove" => self.handle_remove_command(args, world),
+            #[cfg(not(target_arch = "wasm32"))]
             "wall" => self.handle_wall_command(args, world),
+            #[cfg(not(target_arch = "wasm32"))]
             "give" => self.handle_give_command(args, world),
             // Desktop-only commands that require modules not available on WASM
             #[cfg(not(target_arch = "wasm32"))]
@@ -80,10 +87,43 @@ impl CommandParser {
             "move" => self.handle_move_command(args, world),
             #[cfg(not(target_arch = "wasm32"))]
             "list" => self.handle_list_command(args, world),
+            // Multiplayer world sharing commands (desktop-only for now)
+            #[cfg(not(target_arch = "wasm32"))]
+            "publish_world" => self.handle_publish_world_command(args, world),
+            #[cfg(not(target_arch = "wasm32"))]
+            "unpublish_world" => self.handle_unpublish_world_command(args, world),
+            #[cfg(not(target_arch = "wasm32"))]
+            "join_world" => self.handle_join_world_command(args, world),
+            #[cfg(not(target_arch = "wasm32"))]
+            "leave_world" => self.handle_leave_world_command(args, world),
+            #[cfg(not(target_arch = "wasm32"))]
+            "list_online_worlds" => self.handle_list_online_worlds_command(args, world),
+            #[cfg(not(target_arch = "wasm32"))]
+            "get_multiplayer_status" => self.handle_get_multiplayer_status_command(args, world),
+            #[cfg(not(target_arch = "wasm32"))]
+            "wait_for_condition" => self.handle_wait_for_condition_command(args, world),
             // WASM-only simplified commands (for desktop-only functionality)
             #[cfg(target_arch = "wasm32")]
-            "spawn" | "spawn_door" | "save" | "load" | "tp" | "teleport" | "look" | "move"
-            | "list" => ConsoleResult::Success(format!(
+            "spawn"
+            | "spawn_door"
+            | "save"
+            | "load"
+            | "tp"
+            | "teleport"
+            | "look"
+            | "move"
+            | "list"
+            | "publish_world"
+            | "unpublish_world"
+            | "join_world"
+            | "leave_world"
+            | "list_online_worlds"
+            | "get_multiplayer_status"
+            | "wait_for_condition"
+            | "place"
+            | "remove"
+            | "wall"
+            | "give" => ConsoleResult::Success(format!(
                 "{} command is not available in web version",
                 command
             )),
@@ -120,6 +160,15 @@ impl CommandParser {
             "  move <device_id> <x> <y> <z> - Move a device",
             "  list - List all connected devices",
             "  test_error <message> - Test error indicator",
+            "",
+            "Multiplayer world sharing commands:",
+            "  publish_world [name] [max_players] [is_public] - Publish current world for sharing",
+            "  unpublish_world - Stop sharing the current world",
+            "  join_world <world_id> - Join a shared world by ID",
+            "  leave_world - Leave the current shared world",
+            "  list_online_worlds - List all discoverable shared worlds",
+            "  get_multiplayer_status - Show current multiplayer mode and status",
+            "  wait_for_condition <condition> [timeout] [expected] - Wait for a test condition",
         ];
         ConsoleResult::Success(help_text.join("\n"))
     }
@@ -229,6 +278,7 @@ impl CommandParser {
         ))
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn handle_place_command(&self, args: &[&str], world: &mut World) -> ConsoleResult {
         if args.len() != 4 {
             return ConsoleResult::InvalidArgs("Usage: place <block_type> <x> <y> <z>".to_string());
@@ -291,6 +341,7 @@ impl CommandParser {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn handle_remove_command(&self, args: &[&str], world: &mut World) -> ConsoleResult {
         if args.len() != 3 {
             return ConsoleResult::InvalidArgs("Usage: remove <x> <y> <z>".to_string());
@@ -347,6 +398,7 @@ impl CommandParser {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn handle_wall_command(&self, args: &[&str], world: &mut World) -> ConsoleResult {
         if args.len() != 7 {
             return ConsoleResult::InvalidArgs(
@@ -474,6 +526,7 @@ impl CommandParser {
         ConsoleResult::Success(format!("Load command: {}", args[0]))
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn handle_give_command(&self, args: &[&str], world: &mut World) -> ConsoleResult {
         if args.len() != 2 {
             return ConsoleResult::InvalidArgs("Usage: give <item_type> <count>".to_string());
@@ -600,6 +653,230 @@ impl CommandParser {
     fn handle_list_command(&self, _args: &[&str], _world: &mut World) -> ConsoleResult {
         ConsoleResult::Success("List command executed".to_string())
     }
+
+    // Multiplayer world sharing command handlers
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn handle_publish_world_command(&self, args: &[&str], world: &mut World) -> ConsoleResult {
+        use crate::multiplayer::shared_world::PublishWorldEvent;
+        use bevy::ecs::event::Events;
+
+        let world_name = args.get(0).map_or("", |v| v).to_string();
+        let max_players = args.get(1).and_then(|s| s.parse::<u32>().ok()).unwrap_or(4);
+        let is_public = args
+            .get(2)
+            .and_then(|s| s.parse::<bool>().ok())
+            .unwrap_or(true);
+
+        // Send publish world event
+        if let Some(mut publish_events) = world.get_resource_mut::<Events<PublishWorldEvent>>() {
+            publish_events.write(PublishWorldEvent {
+                world_name: if world_name.is_empty() {
+                    "Shared World".to_string()
+                } else {
+                    world_name.clone()
+                },
+                max_players,
+                is_public,
+            });
+
+            ConsoleResult::Success(format!(
+                "Publishing world '{}' (max players: {}, public: {})",
+                if world_name.is_empty() {
+                    "Shared World"
+                } else {
+                    &world_name
+                },
+                max_players,
+                is_public
+            ))
+        } else {
+            ConsoleResult::Error("Multiplayer events not available".to_string())
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn handle_unpublish_world_command(&self, _args: &[&str], world: &mut World) -> ConsoleResult {
+        use crate::multiplayer::shared_world::{MultiplayerMode, UnpublishWorldEvent};
+        use bevy::ecs::event::Events;
+
+        // Get current world ID from multiplayer mode
+        if let Some(multiplayer_mode) = world.get_resource::<MultiplayerMode>() {
+            let world_id = match &*multiplayer_mode {
+                MultiplayerMode::HostingWorld { world_id, .. } => world_id.clone(),
+                MultiplayerMode::JoinedWorld { .. } => {
+                    return ConsoleResult::Error(
+                        "Cannot unpublish a joined world - use leave_world instead".to_string(),
+                    );
+                }
+                MultiplayerMode::SinglePlayer => {
+                    return ConsoleResult::Error("No world is currently published".to_string());
+                }
+            };
+
+            // Send unpublish event
+            if let Some(mut unpublish_events) =
+                world.get_resource_mut::<Events<UnpublishWorldEvent>>()
+            {
+                unpublish_events.write(UnpublishWorldEvent {
+                    world_id: world_id.clone(),
+                });
+                ConsoleResult::Success(format!("Unpublished world {}", world_id))
+            } else {
+                ConsoleResult::Error("Multiplayer events not available".to_string())
+            }
+        } else {
+            ConsoleResult::Error("Multiplayer mode not available".to_string())
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn handle_join_world_command(&self, args: &[&str], world: &mut World) -> ConsoleResult {
+        use crate::multiplayer::shared_world::JoinSharedWorldEvent;
+        use bevy::ecs::event::Events;
+
+        if args.is_empty() {
+            return ConsoleResult::InvalidArgs("Usage: join_world <world_id>".to_string());
+        }
+
+        let world_id = args[0].to_string();
+
+        // Send join world event
+        if let Some(mut join_events) = world.get_resource_mut::<Events<JoinSharedWorldEvent>>() {
+            join_events.write(JoinSharedWorldEvent {
+                world_id: world_id.clone(),
+            });
+            ConsoleResult::Success(format!("Attempting to join world {}", world_id))
+        } else {
+            ConsoleResult::Error("Multiplayer events not available".to_string())
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn handle_leave_world_command(&self, _args: &[&str], world: &mut World) -> ConsoleResult {
+        use crate::multiplayer::shared_world::LeaveSharedWorldEvent;
+        use bevy::ecs::event::Events;
+
+        // Send leave world event
+        if let Some(mut leave_events) = world.get_resource_mut::<Events<LeaveSharedWorldEvent>>() {
+            leave_events.write(LeaveSharedWorldEvent);
+            ConsoleResult::Success("Left shared world".to_string())
+        } else {
+            ConsoleResult::Error("Multiplayer events not available".to_string())
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn handle_list_online_worlds_command(
+        &self,
+        _args: &[&str],
+        world: &mut World,
+    ) -> ConsoleResult {
+        use crate::multiplayer::shared_world::{OnlineWorlds, RefreshOnlineWorldsEvent};
+        use bevy::ecs::event::Events;
+
+        // Trigger refresh of online worlds
+        if let Some(mut refresh_events) =
+            world.get_resource_mut::<Events<RefreshOnlineWorldsEvent>>()
+        {
+            refresh_events.write(RefreshOnlineWorldsEvent);
+        }
+
+        // Display current online worlds
+        if let Some(online_worlds) = world.get_resource::<OnlineWorlds>() {
+            if online_worlds.worlds.is_empty() {
+                ConsoleResult::Success("No online worlds found. Use 'list_online_worlds' again after a moment to refresh.".to_string())
+            } else {
+                let mut world_list = vec!["Online worlds:".to_string()];
+                for (world_id, world_info) in &online_worlds.worlds {
+                    world_list.push(format!(
+                        "  {} - {} (host: {}, players: {}/{}, public: {})",
+                        world_id,
+                        world_info.world_name,
+                        world_info.host_name,
+                        world_info.player_count,
+                        world_info.max_players,
+                        world_info.is_public
+                    ));
+                }
+                ConsoleResult::Success(world_list.join("\n"))
+            }
+        } else {
+            ConsoleResult::Error("Online worlds resource not available".to_string())
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn handle_get_multiplayer_status_command(
+        &self,
+        _args: &[&str],
+        world: &mut World,
+    ) -> ConsoleResult {
+        use crate::multiplayer::shared_world::MultiplayerMode;
+
+        if let Some(multiplayer_mode) = world.get_resource::<MultiplayerMode>() {
+            let status = match &*multiplayer_mode {
+                MultiplayerMode::SinglePlayer => "Single Player".to_string(),
+                MultiplayerMode::HostingWorld {
+                    world_id,
+                    is_published,
+                } => {
+                    format!("Hosting world {} (published: {})", world_id, is_published)
+                }
+                MultiplayerMode::JoinedWorld {
+                    world_id,
+                    host_player,
+                } => {
+                    format!("Joined world {} hosted by {}", world_id, host_player)
+                }
+            };
+            ConsoleResult::Success(format!("Multiplayer status: {}", status))
+        } else {
+            ConsoleResult::Error("Multiplayer mode not available".to_string())
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn handle_wait_for_condition_command(
+        &self,
+        args: &[&str],
+        _world: &mut World,
+    ) -> ConsoleResult {
+        if args.is_empty() {
+            return ConsoleResult::InvalidArgs(
+                "Usage: wait_for_condition <condition> [timeout_seconds] [expected_value]"
+                    .to_string(),
+            );
+        }
+
+        let condition = args[0];
+        let timeout = args
+            .get(1)
+            .and_then(|s| s.parse::<u64>().ok())
+            .unwrap_or(30);
+        let expected = args.get(2).map_or("", |v| v);
+
+        // For now, this is a placeholder - a real implementation would wait for actual conditions
+        match condition {
+            "world_published" | "world_joined" | "player_connected" | "block_placed" => {
+                if expected.is_empty() {
+                    ConsoleResult::Success(format!(
+                        "Waiting for '{}' condition (timeout: {}s)",
+                        condition, timeout
+                    ))
+                } else {
+                    ConsoleResult::Success(format!(
+                        "Waiting for '{}' condition with expected value '{}' (timeout: {}s)",
+                        condition, expected, timeout
+                    ))
+                }
+            }
+            _ => ConsoleResult::InvalidArgs(format!(
+                "Invalid condition: {}. Valid conditions: world_published, world_joined, player_connected, block_placed",
+                condition
+            )),
+        }
+    }
 }
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
@@ -607,9 +884,9 @@ mod tests {
     use super::*;
     use crate::camera_controllers::CameraController;
     use crate::console::console_trait::ConsoleResult;
-    use crate::environment::{BlockType, VoxelWorld};
+    use crate::environment::VoxelWorld;
     use crate::inventory::PlaceBlockEvent;
-    use crate::inventory::{ItemType, PlayerInventory};
+    use crate::inventory::PlayerInventory;
     use bevy::ecs::event::Events;
 
     /// Helper function to create a minimal Bevy World for testing

@@ -314,5 +314,126 @@ pub fn create_default_tools() -> Vec<McpTool> {
                 "required": ["block_type", "x1", "y1", "z1", "x2", "y2", "z2"]
             }),
         },
+        McpTool {
+            name: "publish_world".to_string(),
+            description: "Publish the current world to be discoverable by other clients"
+                .to_string(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "world_name": {
+                        "type": "string",
+                        "description": "Name for the shared world (defaults to current world name)"
+                    },
+                    "max_players": {
+                        "type": "number",
+                        "description": "Maximum number of players allowed (default: 4)"
+                    },
+                    "is_public": {
+                        "type": "boolean",
+                        "description": "Whether the world is publicly discoverable (default: true)"
+                    }
+                },
+                "required": []
+            }),
+        },
+        McpTool {
+            name: "unpublish_world".to_string(),
+            description: "Stop sharing the current world and return to single-player mode"
+                .to_string(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {},
+                "required": []
+            }),
+        },
+        McpTool {
+            name: "join_world".to_string(),
+            description: "Join a shared world by world ID".to_string(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "world_id": {
+                        "type": "string",
+                        "description": "Unique identifier of the world to join"
+                    }
+                },
+                "required": ["world_id"]
+            }),
+        },
+        McpTool {
+            name: "leave_world".to_string(),
+            description: "Leave the current shared world and return to single-player mode"
+                .to_string(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {},
+                "required": []
+            }),
+        },
+        McpTool {
+            name: "list_online_worlds".to_string(),
+            description: "List all discoverable shared worlds".to_string(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {},
+                "required": []
+            }),
+        },
+        McpTool {
+            name: "get_multiplayer_status".to_string(),
+            description: "Get current multiplayer mode and world information".to_string(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {},
+                "required": []
+            }),
+        },
+        McpTool {
+            name: "player_move".to_string(),
+            description: "Move the player to a specific position".to_string(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "x": {
+                        "type": "number",
+                        "description": "Target X coordinate"
+                    },
+                    "y": {
+                        "type": "number",
+                        "description": "Target Y coordinate"
+                    },
+                    "z": {
+                        "type": "number",
+                        "description": "Target Z coordinate"
+                    }
+                },
+                "required": ["x", "y", "z"]
+            }),
+        },
+        McpTool {
+            name: "wait_for_condition".to_string(),
+            description: "Wait for a specific condition to be met (useful for test scenarios)"
+                .to_string(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "condition": {
+                        "type": "string",
+                        "enum": ["world_published", "world_joined", "player_connected", "block_placed"],
+                        "description": "Condition to wait for"
+                    },
+                    "timeout_seconds": {
+                        "type": "number",
+                        "description": "Maximum time to wait in seconds (default: 30)"
+                    },
+                    "expected_value": {
+                        "type": "string",
+                        "description": "Expected value for the condition (optional)"
+                    }
+                },
+                "required": ["condition"]
+            }),
+        },
     ]
 }

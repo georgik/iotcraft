@@ -377,6 +377,14 @@ pub fn should_queue_as_command(tool_name: &str) -> bool {
             | "set_camera_angle"
             | "save_world"
             | "load_world"
+            | "publish_world"
+            | "unpublish_world"
+            | "join_world"
+            | "leave_world"
+            | "list_online_worlds"
+            | "get_multiplayer_status"
+            | "player_move"
+            | "wait_for_condition"
     )
 }
 
@@ -460,6 +468,57 @@ pub fn convert_tool_call_to_command(tool_name: &str, arguments: &Value) -> Optio
         "load_world" => {
             let filename = arguments.get("filename")?.as_str()?;
             Some(format!("load_map {}", filename))
+        }
+        "publish_world" => {
+            let world_name = arguments
+                .get("world_name")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let max_players = arguments
+                .get("max_players")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(4);
+            let is_public = arguments
+                .get("is_public")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(true);
+            Some(format!(
+                "publish_world {} {} {}",
+                world_name, max_players, is_public
+            ))
+        }
+        "unpublish_world" => Some("unpublish_world".to_string()),
+        "join_world" => {
+            let world_id = arguments.get("world_id")?.as_str()?;
+            Some(format!("join_world {}", world_id))
+        }
+        "leave_world" => Some("leave_world".to_string()),
+        "list_online_worlds" => Some("list_online_worlds".to_string()),
+        "get_multiplayer_status" => Some("get_multiplayer_status".to_string()),
+        "player_move" => {
+            let x = arguments.get("x")?.as_f64()?;
+            let y = arguments.get("y")?.as_f64()?;
+            let z = arguments.get("z")?.as_f64()?;
+            Some(format!("tp {} {} {}", x, y, z))
+        }
+        "wait_for_condition" => {
+            let condition = arguments.get("condition")?.as_str()?;
+            let timeout = arguments
+                .get("timeout_seconds")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(30);
+            let expected = arguments
+                .get("expected_value")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            if expected.is_empty() {
+                Some(format!("wait_for_condition {} {}", condition, timeout))
+            } else {
+                Some(format!(
+                    "wait_for_condition {} {} {}",
+                    condition, timeout, expected
+                ))
+            }
         }
         _ => None,
     }

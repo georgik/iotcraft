@@ -220,15 +220,15 @@ pub fn place_block_multiplayer_sync_system(
         #[cfg(not(target_arch = "wasm32"))]
         let is_multiplayer_with_world = matches!(
             &*multiplayer_mode,
-            crate::multiplayer::MultiplayerMode::HostingWorld { world_id, .. }
-                | crate::multiplayer::MultiplayerMode::JoinedWorld { world_id, .. }
+            crate::multiplayer::MultiplayerMode::HostingWorld { world_id: _, .. }
+                | crate::multiplayer::MultiplayerMode::JoinedWorld { world_id: _, .. }
         );
 
         #[cfg(target_arch = "wasm32")]
         let is_multiplayer_with_world = matches!(
             &*multiplayer_mode,
-            crate::multiplayer_web::MultiplayerMode::HostingWorld { world_id, .. }
-                | crate::multiplayer_web::MultiplayerMode::JoinedWorld { world_id, .. }
+            crate::multiplayer_web::MultiplayerMode::HostingWorld { world_id: _, .. }
+                | crate::multiplayer_web::MultiplayerMode::JoinedWorld { world_id: _, .. }
         );
 
         if is_multiplayer_with_world {

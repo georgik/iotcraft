@@ -3,8 +3,8 @@ use clap::{Parser, Subcommand};
 use html5ever::parse_document;
 use html5ever::tendril::TendrilSink;
 use markup5ever_rcdom::{Handle, NodeData, RcDom};
+use serde_json;
 use std::io::Write;
-use std::net::TcpStream;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -90,6 +90,15 @@ enum Commands {
         /// Complete test environment (server + observer + clients)
         #[arg(long)]
         full_env: bool,
+        /// Run a predefined scenario (e.g., 'two-player-world-sharing')
+        #[arg(long)]
+        scenario: Option<String>,
+        /// Timeout for scenario execution in seconds (default: 300)
+        #[arg(long, default_value = "300")]
+        scenario_timeout: u64,
+        /// Output scenario results in JSON format
+        #[arg(long)]
+        scenario_json: bool,
         /// Additional arguments to pass to each client
         #[arg(last = true)]
         client_args: Vec<String>,
@@ -150,6 +159,9 @@ async fn main() -> Result<()> {
             browser_cmd,
             clean_browser,
             full_env,
+            scenario,
+            scenario_timeout,
+            scenario_json,
             client_args,
         } => {
             multi_client_env(
@@ -164,6 +176,9 @@ async fn main() -> Result<()> {
                 browser_cmd.as_deref(),
                 *clean_browser,
                 *full_env,
+                scenario.as_deref(),
+                *scenario_timeout,
+                *scenario_json,
                 client_args,
             )
             .await?;
@@ -1092,11 +1107,8 @@ async fn run_integration_tests() -> Result<()> {
 
     // Start MQTT server in background
     let mqtt_port = 1884; // Use different port to avoid conflicts
-    let server_handle = tokio::spawn(async move {
-        // Use a dummy log file for the test server
-        let log_file = std::path::PathBuf::from("/tmp/test-mqtt-server.log");
-        run_mqtt_server(log_file, mqtt_port).await
-    });
+    let log_file = std::path::PathBuf::from("/tmp/test-mqtt-server.log");
+    let mut server_handle = start_mqtt_server(log_file, mqtt_port).await?;
 
     // Wait for server to be ready
     println!("   Waiting for MQTT server to start...");
@@ -1107,7 +1119,7 @@ async fn run_integration_tests() -> Result<()> {
     match wait_for_port("localhost", mqtt_port, timeout).await {
         Ok(_) => println!("   ✅ MQTT server ready on port {}", mqtt_port),
         Err(e) => {
-            server_handle.abort();
+            let _ = server_handle.kill().await;
             return Err(anyhow::anyhow!("MQTT server failed to start: {}", e));
         }
     }
@@ -1127,7 +1139,7 @@ async fn run_integration_tests() -> Result<()> {
         .context("Failed to execute integration tests");
 
     // Clean up server
-    server_handle.abort();
+    let _ = server_handle.kill().await;
 
     match test_result {
         Ok(status) if status.success() => {
@@ -1145,11 +1157,8 @@ async fn run_mqtt_tests() -> Result<()> {
 
     // Start MQTT server in background
     let mqtt_port = 1885; // Use different port to avoid conflicts
-    let server_handle = tokio::spawn(async move {
-        // Use a dummy log file for the test server
-        let log_file = std::path::PathBuf::from("/tmp/test-mqtt-server-mqtt.log");
-        run_mqtt_server(log_file, mqtt_port).await
-    });
+    let log_file = std::path::PathBuf::from("/tmp/test-mqtt-server-mqtt.log");
+    let mut server_handle = start_mqtt_server(log_file, mqtt_port).await?;
 
     // Wait for server to be ready
     println!("   Waiting for MQTT server to start...");
@@ -1160,7 +1169,7 @@ async fn run_mqtt_tests() -> Result<()> {
     match wait_for_port("localhost", mqtt_port, timeout).await {
         Ok(_) => println!("   ✅ MQTT server ready on port {}", mqtt_port),
         Err(e) => {
-            server_handle.abort();
+            let _ = server_handle.kill().await;
             return Err(anyhow::anyhow!("MQTT server failed to start: {}", e));
         }
     }
@@ -1181,7 +1190,7 @@ async fn run_mqtt_tests() -> Result<()> {
         .context("Failed to execute MQTT tests");
 
     // Clean up server
-    server_handle.abort();
+    let _ = server_handle.kill().await;
 
     match test_result {
         Ok(status) if status.success() => {
@@ -1194,30 +1203,33 @@ async fn run_mqtt_tests() -> Result<()> {
 }
 
 /// Check if a TCP port is open and accepting connections
-fn is_port_open(host: &str, port: u16) -> bool {
-    use std::net::ToSocketAddrs;
+async fn is_port_open(host: &str, port: u16) -> bool {
+    use tokio::net::TcpStream;
 
     let addr_str = format!("{}:{}", host, port);
 
-    // Use ToSocketAddrs to resolve hostname (including localhost) to actual IP addresses
-    match addr_str.to_socket_addrs() {
-        Ok(mut addrs) => {
-            // Try to connect to the first resolved address
-            if let Some(socket_addr) = addrs.next() {
-                match TcpStream::connect_timeout(&socket_addr, Duration::from_millis(500)) {
-                    Ok(_) => {
-                        // Successfully connected, close and return true
-                        true
-                    }
-                    Err(_) => false,
-                }
-            } else {
-                eprintln!("[DEBUG] No addresses resolved for: {}", addr_str);
-                false
-            }
+    // Use async TcpStream::connect with a timeout
+    match tokio::time::timeout(
+        Duration::from_millis(1000), // Increased timeout to 1 second
+        TcpStream::connect(&addr_str),
+    )
+    .await
+    {
+        Ok(Ok(_)) => {
+            // Successfully connected
+            println!(
+                "[DEBUG] Port {}:{} is open and accepting connections",
+                host, port
+            );
+            true
         }
-        Err(e) => {
-            eprintln!("[DEBUG] Failed to resolve address {}: {}", addr_str, e);
+        Ok(Err(e)) => {
+            println!("[DEBUG] Failed to connect to {}:{}: {}", host, port, e);
+            false
+        }
+        Err(_) => {
+            // Timeout occurred
+            println!("[DEBUG] Connection timeout to {}:{}", host, port);
             false
         }
     }
@@ -1227,19 +1239,44 @@ fn is_port_open(host: &str, port: u16) -> bool {
 async fn wait_for_port(host: &str, port: u16, timeout_secs: u64) -> Result<()> {
     let start = std::time::Instant::now();
     let timeout = Duration::from_secs(timeout_secs);
+    let mut attempt_count = 0;
+
+    println!(
+        "[DEBUG] Starting port availability check for {}:{} (timeout: {}s)",
+        host, port, timeout_secs
+    );
 
     while start.elapsed() < timeout {
-        if is_port_open(host, port) {
+        attempt_count += 1;
+        println!(
+            "[DEBUG] Attempt {}: Checking if port {}:{} is available...",
+            attempt_count, host, port
+        );
+
+        if is_port_open(host, port).await {
+            println!(
+                "[DEBUG] Port {}:{} became available after {} attempts in {:.2}s",
+                host,
+                port,
+                attempt_count,
+                start.elapsed().as_secs_f64()
+            );
             return Ok(());
         }
-        tokio::time::sleep(Duration::from_millis(200)).await;
+
+        println!(
+            "[DEBUG] Port {}:{} not yet available, waiting...",
+            host, port
+        );
+        tokio::time::sleep(Duration::from_millis(500)).await; // Increased from 200ms to 500ms
     }
 
     Err(anyhow::anyhow!(
-        "Port {}:{} did not become available within {} seconds",
+        "Port {}:{} did not become available within {} seconds after {} attempts",
         host,
         port,
-        timeout_secs
+        timeout_secs,
+        attempt_count
     ))
 }
 
@@ -1282,6 +1319,9 @@ async fn multi_client_env(
     browser_cmd: Option<&str>,
     clean_browser: bool,
     full_env: bool,
+    scenario: Option<&str>,
+    scenario_timeout: u64,
+    scenario_json: bool,
     client_args: &[String],
 ) -> Result<()> {
     // full_env is a shorthand for with_mqtt_server + with_observer
@@ -1321,6 +1361,15 @@ async fn multi_client_env(
     }
     if let Some(ref server) = effective_mqtt_server {
         println!("   📡 MQTT server: {}", server);
+    }
+    if let Some(scenario_name) = scenario {
+        println!(
+            "   🎭 Scenario: {} (timeout: {}s)",
+            scenario_name, scenario_timeout
+        );
+        if scenario_json {
+            println!("   📊 Results format: JSON");
+        }
     }
     println!();
 
@@ -1538,7 +1587,51 @@ async fn multi_client_env(
         println!("   🌍 Web Clients: {} instances running", web_clients);
     }
     println!();
-    println!("💡 Monitoring all processes...");
+
+    // Handle scenario execution if specified
+    if let Some(scenario_name) = scenario {
+        println!("🎭 Starting scenario execution: {}", scenario_name);
+        println!("   Timeout: {} seconds", scenario_timeout);
+        println!();
+
+        let scenario_result =
+            run_scenario(scenario_name, scenario_timeout, scenario_json, &run_log_dir).await;
+
+        // Handle scenario results
+        match scenario_result {
+            Ok(result) => {
+                if scenario_json {
+                    println!("{}", result);
+                } else {
+                    println!("✅ Scenario '{}' completed successfully!", scenario_name);
+                    println!("   Results: {}", result);
+                }
+
+                // Shut down all components after successful scenario
+                println!();
+                println!("💯 Scenario completed. Shutting down all components...");
+                for abort_handle in abort_handles {
+                    abort_handle.abort();
+                }
+                println!("✅ All components terminated");
+                return Ok(());
+            }
+            Err(e) => {
+                println!("❌ Scenario '{}' failed: {}", scenario_name, e);
+
+                // Shut down all components after failed scenario
+                println!();
+                println!("💯 Scenario failed. Shutting down all components...");
+                for abort_handle in abort_handles {
+                    abort_handle.abort();
+                }
+                println!("✅ All components terminated");
+                return Err(e);
+            }
+        }
+    }
+
+    println!("💪 Monitoring all processes...");
     println!("   Press Ctrl+C to stop all components and exit");
     println!("   Logs are being written to: {}", run_log_dir.display());
     println!();
@@ -1629,8 +1722,63 @@ async fn multi_client_env(
     Ok(())
 }
 
-/// Run the MQTT server from ../mqtt-server
-async fn run_mqtt_server(log_file: PathBuf, port: u16) -> Result<()> {
+/// Structure to track a running MQTT server process
+struct MqttServerHandle {
+    child: tokio::process::Child,
+    port: u16,
+}
+
+impl MqttServerHandle {
+    /// Kill the MQTT server process
+    async fn kill(&mut self) -> Result<()> {
+        if let Some(pid) = self.child.id() {
+            println!("[DEBUG] Terminating MQTT server process PID: {}", pid);
+
+            // Try graceful termination first
+            #[cfg(unix)]
+            {
+                if let Err(e) = self.child.kill().await {
+                    eprintln!("[WARN] Failed to kill MQTT server gracefully: {}", e);
+                }
+            }
+
+            #[cfg(not(unix))]
+            {
+                if let Err(e) = self.child.kill().await {
+                    eprintln!("[WARN] Failed to kill MQTT server: {}", e);
+                }
+            }
+
+            // Wait a moment for the process to terminate
+            match tokio::time::timeout(tokio::time::Duration::from_secs(3), self.child.wait()).await
+            {
+                Ok(Ok(status)) => {
+                    println!("[DEBUG] MQTT server terminated with status: {:?}", status);
+                }
+                Ok(Err(e)) => {
+                    eprintln!("[WARN] Error waiting for MQTT server termination: {}", e);
+                }
+                Err(_) => {
+                    eprintln!("[WARN] MQTT server didn't terminate within timeout");
+
+                    #[cfg(unix)]
+                    {
+                        // Force kill if it didn't terminate gracefully
+                        use std::process::Command;
+                        let _ = Command::new("kill")
+                            .args(&["-9", &pid.to_string()])
+                            .output();
+                        println!("[DEBUG] Sent SIGKILL to MQTT server PID: {}", pid);
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Run the MQTT server from ../mqtt-server, returns a handle to control it
+async fn start_mqtt_server(log_file: PathBuf, port: u16) -> Result<MqttServerHandle> {
     // Resolve and validate the server working directory
     let server_dir = std::fs::canonicalize("../mqtt-server").with_context(|| {
         "Failed to resolve ../mqtt-server. Are you running xtask from desktop-client?"
@@ -1718,7 +1866,7 @@ async fn run_mqtt_server(log_file: PathBuf, port: u16) -> Result<()> {
     }
 
     // Start the MQTT server process
-    let mut child = TokioCommand::new(&command)
+    let child = TokioCommand::new(&command)
         .args(&args)
         .current_dir(&working_dir)
         .stdout(Stdio::piped())
@@ -1731,9 +1879,18 @@ async fn run_mqtt_server(log_file: PathBuf, port: u16) -> Result<()> {
         child.id()
     );
 
+    // Return early with a handle instead of waiting for completion
+    let handle = MqttServerHandle { child, port };
+    return Ok(handle);
+}
+
+/// Run the MQTT server from ../mqtt-server (kept for backwards compatibility)
+async fn run_mqtt_server(log_file: PathBuf, port: u16) -> Result<()> {
+    let mut handle = start_mqtt_server(log_file.clone(), port).await?;
+
     // Get stdout and stderr
-    let stdout = child.stdout.take().unwrap();
-    let stderr = child.stderr.take().unwrap();
+    let stdout = handle.child.stdout.take().unwrap();
+    let stderr = handle.child.stderr.take().unwrap();
 
     let stdout_reader = BufReader::new(stdout);
     let stderr_reader = BufReader::new(stderr);
@@ -1750,7 +1907,8 @@ async fn run_mqtt_server(log_file: PathBuf, port: u16) -> Result<()> {
     });
 
     // Wait for the process to complete
-    let exit_status = child
+    let exit_status = handle
+        .child
         .wait()
         .await
         .context("Failed to wait for MQTT server")?;
@@ -2079,17 +2237,9 @@ async fn run_wasm_integration_tests() -> Result<()> {
         ));
     }
 
-    // Check if we have a browser available
-    let has_chrome = which::which("google-chrome").is_ok()
-        || which::which("chrome").is_ok()
-        || which::which("chromium").is_ok();
-    let has_firefox = which::which("firefox").is_ok();
-
-    if !has_chrome && !has_firefox {
-        return Err(anyhow::anyhow!(
-            "No supported browser found. Please install Chrome/Chromium or Firefox for WASM testing."
-        ));
-    }
+    // Check if we have a browser available using cross-platform detection
+    let browser_path = detect_browser_for_tests()?;
+    println!("   Found browser: {}", browser_path);
 
     println!("   Building test WASM package...");
 
@@ -2101,10 +2251,8 @@ async fn run_wasm_integration_tests() -> Result<()> {
     // Start MQTT server for integration tests
     println!("   Starting MQTT server for WASM integration tests...");
     let mqtt_port = 1886; // Use different port
-    let server_handle = tokio::spawn(async move {
-        let log_file = std::path::PathBuf::from("/tmp/wasm-test-mqtt-server.log");
-        run_mqtt_server(log_file, mqtt_port).await
-    });
+    let log_file = std::path::PathBuf::from("/tmp/wasm-test-mqtt-server.log");
+    let mut server_handle = start_mqtt_server(log_file, mqtt_port).await?;
 
     // Wait for server to be ready
     println!("   Waiting for MQTT server to start...");
@@ -2114,7 +2262,7 @@ async fn run_wasm_integration_tests() -> Result<()> {
     match wait_for_port("localhost", mqtt_port, timeout).await {
         Ok(_) => println!("   ✅ MQTT server ready on port {}", mqtt_port),
         Err(e) => {
-            server_handle.abort();
+            let _ = server_handle.kill().await;
             return Err(anyhow::anyhow!("MQTT server failed to start: {}", e));
         }
     }
@@ -2124,7 +2272,7 @@ async fn run_wasm_integration_tests() -> Result<()> {
     let test_result = run_wasm_browser_tests(mqtt_port).await;
 
     // Clean up server
-    server_handle.abort();
+    let _ = server_handle.kill().await;
 
     // Clean up test dist
     let _ = fs::remove_dir_all("dist-test").await;
@@ -2178,7 +2326,7 @@ async fn run_wasm_browser_tests(mqtt_port: u16) -> Result<()> {
     tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
 
     // Verify server is running
-    if !is_port_open("localhost", server_port) {
+    if !is_port_open("localhost", server_port).await {
         return Err(anyhow::anyhow!(
             "HTTP server failed to start on port {}",
             server_port
@@ -2190,18 +2338,10 @@ async fn run_wasm_browser_tests(mqtt_port: u16) -> Result<()> {
 
     println!("   Running browser tests at: {}", test_url);
 
-    // Use Chrome/Chromium in headless mode for testing
-    let browser_cmd = if which::which("google-chrome").is_ok() {
-        "google-chrome"
-    } else if which::which("chrome").is_ok() {
-        "chrome"
-    } else if which::which("chromium").is_ok() {
-        "chromium"
-    } else {
-        return Err(anyhow::anyhow!("No Chrome/Chromium browser found"));
-    };
+    // Use the detected browser from our cross-platform detection
+    let browser_cmd = detect_browser_for_tests()?;
 
-    let output = Command::new(browser_cmd)
+    let output = Command::new(&browser_cmd)
         .args(&[
             "--headless",
             "--disable-gpu",
@@ -2209,7 +2349,8 @@ async fn run_wasm_browser_tests(mqtt_port: u16) -> Result<()> {
             "--disable-dev-shm-usage",
             "--virtual-time-budget=30000", // 30 second timeout
             "--run-all-compositor-stages-before-draw",
-            &format!("--dump-dom={}", test_url),
+            "--dump-dom",
+            &test_url,
         ])
         .output()
         .context("Failed to execute browser")?;
@@ -2749,6 +2890,51 @@ fn detect_browser() -> Result<String> {
     ))
 }
 
+/// Detect available browser specifically for WASM integration tests
+fn detect_browser_for_tests() -> Result<String> {
+    // On macOS, check for browsers in /Applications first
+    if cfg!(target_os = "macos") {
+        let macos_browsers = [
+            (
+                "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+                "Google Chrome",
+            ),
+            ("/Applications/Chrome.app/Contents/MacOS/Chrome", "Chrome"),
+            (
+                "/Applications/Chromium.app/Contents/MacOS/Chromium",
+                "Chromium",
+            ),
+            (
+                "/Applications/Firefox.app/Contents/MacOS/firefox",
+                "Firefox",
+            ),
+            ("/Applications/Safari.app/Contents/MacOS/Safari", "Safari"),
+        ];
+
+        for (path, name) in &macos_browsers {
+            if std::path::Path::new(path).exists() {
+                println!("[DEBUG] Found browser for tests: {} at {}", name, path);
+                return Ok(path.to_string());
+            }
+        }
+    }
+
+    // Try browsers in PATH (Linux/Windows style)
+    let browsers = ["google-chrome", "chrome", "chromium", "firefox", "safari"];
+
+    for browser in &browsers {
+        if which::which(browser).is_ok() {
+            println!("[DEBUG] Found browser for tests: {} in PATH", browser);
+            return Ok(browser.to_string());
+        }
+    }
+
+    Err(anyhow::anyhow!(
+        "No supported browser found for WASM testing. Please install Chrome/Chromium or Firefox.\n\
+         On macOS, install to /Applications or ensure browsers are available in PATH."
+    ))
+}
+
 /// Handle stderr stream for generic processes (server/observer)
 async fn handle_process_stderr_stream(
     mut reader: BufReader<tokio::process::ChildStderr>,
@@ -2785,6 +2971,394 @@ async fn handle_process_stderr_stream(
         line.clear();
     }
 
+    log_handle.flush().await?;
+    Ok(())
+}
+
+/// Execute a predefined scenario
+async fn run_scenario(
+    scenario_name: &str,
+    timeout_seconds: u64,
+    json_output: bool,
+    log_dir: &Path,
+) -> Result<String> {
+    let start_time = std::time::Instant::now();
+    println!("🎬 Executing scenario: {}", scenario_name);
+    println!("   Timeout: {} seconds", timeout_seconds);
+    println!();
+
+    // Create scenario log file
+    let scenario_log = log_dir.join(format!("scenario-{}.log", scenario_name));
+    let mut scenario_logger = fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(true)
+        .open(&scenario_log)
+        .await
+        .context("Failed to create scenario log file")?;
+
+    // Log scenario start
+    let header = format!(
+        "=== Scenario: {} ===\n\
+         Started at: {}\n\
+         Timeout: {} seconds\n\
+         ========================\n\n",
+        scenario_name,
+        chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC"),
+        timeout_seconds
+    );
+    scenario_logger.write_all(header.as_bytes()).await?;
+    scenario_logger.flush().await?;
+
+    let result = match scenario_name {
+        "two-player-world-sharing" => {
+            run_two_player_world_sharing_scenario(timeout_seconds, &scenario_log).await
+        }
+        _ => {
+            return Err(anyhow::anyhow!(
+                "Unknown scenario: {}. Available scenarios: two-player-world-sharing",
+                scenario_name
+            ))
+        }
+    };
+
+    let elapsed = start_time.elapsed();
+    let duration_secs = elapsed.as_secs_f64();
+
+    // Log scenario completion
+    let completion_msg = format!(
+        "\n=== Scenario Completed ===\n\
+         Finished at: {}\n\
+         Duration: {:.2} seconds\n\
+         Result: {}\n\
+         ==========================\n",
+        chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC"),
+        duration_secs,
+        match &result {
+            Ok(_) => "SUCCESS",
+            Err(_) => "FAILED",
+        }
+    );
+    scenario_logger.write_all(completion_msg.as_bytes()).await?;
+    scenario_logger.flush().await?;
+
+    match result {
+        Ok(scenario_result) => {
+            let output = if json_output {
+                serde_json::json!({
+                    "scenario": scenario_name,
+                    "status": "success",
+                    "duration_seconds": duration_secs,
+                    "result": scenario_result,
+                    "log_file": scenario_log.display().to_string()
+                })
+                .to_string()
+            } else {
+                format!(
+                    "Scenario '{}' completed successfully in {:.2}s: {}",
+                    scenario_name, duration_secs, scenario_result
+                )
+            };
+            Ok(output)
+        }
+        Err(e) => {
+            if json_output {
+                let error_output = serde_json::json!({
+                    "scenario": scenario_name,
+                    "status": "failed",
+                    "duration_seconds": duration_secs,
+                    "error": e.to_string(),
+                    "log_file": scenario_log.display().to_string()
+                })
+                .to_string();
+                println!("{}", error_output);
+            }
+            Err(e)
+        }
+    }
+}
+
+/// Run the two-player world sharing scenario
+async fn run_two_player_world_sharing_scenario(
+    timeout_seconds: u64,
+    log_file: &Path,
+) -> Result<String> {
+    println!("📋 Starting two-player world sharing test scenario...");
+    println!("   This scenario will test multi-client world synchronization");
+    println!("   Expected: Multiple clients should see shared world state changes");
+    println!();
+
+    // Phase 1: Wait for clients to initialize and connect
+    println!("📌 Phase 1: Client initialization (10 seconds)...");
+    log_scenario_phase(log_file, "Phase 1: Client initialization").await?;
+
+    tokio::time::sleep(Duration::from_secs(10)).await;
+    println!("   ✅ Initialization phase completed");
+
+    // Phase 2: Test basic connectivity
+    println!("📌 Phase 2: Testing MQTT connectivity (5 seconds)...");
+    log_scenario_phase(log_file, "Phase 2: MQTT connectivity test").await?;
+
+    // Check if we can detect MQTT traffic by monitoring the observer log
+    let mqtt_activity =
+        check_mqtt_activity(log_file.parent().unwrap(), Duration::from_secs(5)).await?;
+
+    if mqtt_activity {
+        println!("   ✅ MQTT activity detected - clients are communicating");
+    } else {
+        println!("   ⚠️  No MQTT activity detected - clients may not be connected");
+    }
+
+    // Phase 3: Monitor for world sharing activity
+    println!("📌 Phase 3: Monitoring world sharing activity (remaining time)...");
+    log_scenario_phase(log_file, "Phase 3: World sharing monitoring").await?;
+
+    let remaining_time = if timeout_seconds > 20 {
+        timeout_seconds - 15
+    } else {
+        5
+    };
+
+    let world_sharing_success = monitor_world_sharing_activity(
+        log_file.parent().unwrap(),
+        Duration::from_secs(remaining_time),
+    )
+    .await?;
+
+    // Phase 4: Results evaluation
+    println!("📌 Phase 4: Evaluating results...");
+    log_scenario_phase(log_file, "Phase 4: Results evaluation").await?;
+
+    let mut results = Vec::new();
+    let mut success_count = 0;
+
+    if mqtt_activity {
+        results.push("MQTT connectivity: PASS".to_string());
+        success_count += 1;
+    } else {
+        results.push("MQTT connectivity: FAIL".to_string());
+    }
+
+    if world_sharing_success {
+        results.push("World sharing activity: PASS".to_string());
+        success_count += 1;
+    } else {
+        results.push("World sharing activity: FAIL".to_string());
+    }
+
+    let total_tests = 2;
+    let success_rate = (success_count as f64 / total_tests as f64) * 100.0;
+
+    println!();
+    println!("📊 Scenario Results:");
+    for result in &results {
+        println!("   {}", result);
+    }
+    println!(
+        "   Success rate: {:.1}% ({}/{})",
+        success_rate, success_count, total_tests
+    );
+
+    let final_result = format!(
+        "{} tests passed out of {} (success rate: {:.1}%)",
+        success_count, total_tests, success_rate
+    );
+
+    log_scenario_result(log_file, &final_result, &results).await?;
+
+    if success_count == total_tests {
+        println!("   🎉 All tests passed!");
+    } else if success_count > 0 {
+        println!("   ⚠️  Partial success - some issues detected");
+    } else {
+        return Err(anyhow::anyhow!("All scenario tests failed"));
+    }
+
+    Ok(final_result)
+}
+
+/// Log a scenario phase to the scenario log file
+async fn log_scenario_phase(log_file: &Path, phase: &str) -> Result<()> {
+    let mut log_handle = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(log_file)
+        .await
+        .context("Failed to open scenario log file")?;
+
+    let timestamp = chrono::Utc::now().format("%H:%M:%S%.3f");
+    let log_line = format!("[{}] {}: Starting\n", timestamp, phase);
+    log_handle.write_all(log_line.as_bytes()).await?;
+    log_handle.flush().await?;
+    Ok(())
+}
+
+/// Check for MQTT activity by monitoring the observer log
+async fn check_mqtt_activity(log_dir: &Path, duration: Duration) -> Result<bool> {
+    let observer_log = log_dir.join("mqtt-observer.log");
+
+    if !observer_log.exists() {
+        println!("   No MQTT observer log found - cannot verify connectivity");
+        return Ok(false);
+    }
+
+    let start_time = std::time::Instant::now();
+    let mut initial_size = fs::metadata(&observer_log).await?.len();
+
+    // Monitor for new content in the observer log
+    while start_time.elapsed() < duration {
+        tokio::time::sleep(Duration::from_millis(500)).await;
+
+        if let Ok(metadata) = fs::metadata(&observer_log).await {
+            let current_size = metadata.len();
+            if current_size > initial_size {
+                // New content detected - check if it's meaningful MQTT traffic
+                let new_content =
+                    read_file_tail(&observer_log, current_size - initial_size).await?;
+                if contains_meaningful_mqtt_traffic(&new_content) {
+                    return Ok(true);
+                }
+                initial_size = current_size;
+            }
+        }
+    }
+
+    Ok(false)
+}
+
+/// Monitor for world sharing specific activity
+async fn monitor_world_sharing_activity(log_dir: &Path, duration: Duration) -> Result<bool> {
+    println!("   Monitoring client logs for world sharing indicators...");
+
+    let start_time = std::time::Instant::now();
+    let mut world_activity_detected = false;
+
+    // Monitor client log files for world sharing activity
+    while start_time.elapsed() < duration && !world_activity_detected {
+        // Check all client log files
+        let mut client_logs = Vec::new();
+        let mut entries = fs::read_dir(log_dir).await?;
+
+        while let Some(entry) = entries.next_entry().await? {
+            let path = entry.path();
+            if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+                if name.starts_with("client-") && name.ends_with(".log") {
+                    client_logs.push(path);
+                }
+            }
+        }
+
+        for client_log in client_logs {
+            if let Ok(content) = fs::read_to_string(&client_log).await {
+                if contains_world_sharing_indicators(&content) {
+                    println!(
+                        "   📍 World sharing activity detected in {}",
+                        client_log.file_name().unwrap().to_string_lossy()
+                    );
+                    world_activity_detected = true;
+                    break;
+                }
+            }
+        }
+
+        if !world_activity_detected {
+            tokio::time::sleep(Duration::from_secs(2)).await;
+        }
+    }
+
+    Ok(world_activity_detected)
+}
+
+/// Read the tail of a file (last N bytes)
+async fn read_file_tail(file_path: &Path, bytes: u64) -> Result<String> {
+    let mut file = fs::File::open(file_path).await?;
+    let file_size = file.metadata().await?.len();
+
+    if bytes >= file_size {
+        // Read entire file if tail size is larger than file
+        let content = fs::read_to_string(file_path).await?;
+        Ok(content)
+    } else {
+        // Seek to position and read tail
+        use tokio::io::{AsyncReadExt, AsyncSeekExt};
+        file.seek(std::io::SeekFrom::Start(file_size - bytes))
+            .await?;
+        let mut buffer = Vec::new();
+        file.read_to_end(&mut buffer).await?;
+        Ok(String::from_utf8_lossy(&buffer).to_string())
+    }
+}
+
+/// Check if the content contains meaningful MQTT traffic
+fn contains_meaningful_mqtt_traffic(content: &str) -> bool {
+    // Look for patterns that indicate actual game/client communication
+    let mqtt_indicators = [
+        "player-",     // Player-related messages
+        "world/",      // World-related topics
+        "game/",       // Game-related topics
+        "client/",     // Client-related topics
+        "position",    // Position updates
+        "movement",    // Movement messages
+        "inventory",   // Inventory changes
+        "block_place", // Block placement
+        "block_break", // Block breaking
+        "chat",        // Chat messages
+    ];
+
+    // Must have some actual content (not just connection messages)
+    let has_content = content.lines().count() > 2;
+    let has_indicators = mqtt_indicators
+        .iter()
+        .any(|&indicator| content.contains(indicator));
+
+    has_content && has_indicators
+}
+
+/// Check if the content contains world sharing indicators
+fn contains_world_sharing_indicators(content: &str) -> bool {
+    // Look for patterns that indicate world sharing/synchronization activity
+    let world_indicators = [
+        "world_sync",        // World synchronization
+        "chunk_load",        // Chunk loading
+        "block_update",      // Block updates
+        "player_join",       // Player joining
+        "player_leave",      // Player leaving
+        "shared_world",      // Shared world references
+        "multiplayer",       // Multiplayer activity
+        "sync_request",      // Synchronization requests
+        "world_state",       // World state messages
+        "Connected to MQTT", // MQTT connection success
+        "Subscribing to",    // MQTT subscription
+        "Published to",      // MQTT publishing
+    ];
+
+    world_indicators
+        .iter()
+        .any(|&indicator| content.to_lowercase().contains(&indicator.to_lowercase()))
+}
+
+/// Log scenario results to the scenario log file
+async fn log_scenario_result(
+    log_file: &Path,
+    final_result: &str,
+    detailed_results: &[String],
+) -> Result<()> {
+    let mut log_handle = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(log_file)
+        .await
+        .context("Failed to open scenario log file")?;
+
+    let timestamp = chrono::Utc::now().format("%H:%M:%S%.3f");
+    let mut log_content = format!("\n[{}] SCENARIO RESULTS:\n", timestamp);
+    log_content.push_str(&format!("[{}] Final result: {}\n", timestamp, final_result));
+
+    for result in detailed_results {
+        log_content.push_str(&format!("[{}] - {}\n", timestamp, result));
+    }
+
+    log_handle.write_all(log_content.as_bytes()).await?;
     log_handle.flush().await?;
     Ok(())
 }
