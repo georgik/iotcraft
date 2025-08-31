@@ -61,6 +61,7 @@ web-sys = { version = "0.3", features = [
 js-sys = "0.3"
 wasm-bindgen-futures = "0.4"
 console_error_panic_hook = "0.1"
+
 # Configure both getrandom versions for WASM
 getrandom = { version = "0.2", features = ["js"] }
 # Add getrandom v0.3 directly to enable wasm_js feature
@@ -123,12 +124,31 @@ integration-tests = []                # Feature to enable integration tests
 [workspace]
 members = [".", "xtask"]
 
+# Binary configurations
+# Desktop-only main binary
+[[bin]]
+name = "iotcraft-dekstop-client"
+path = "src/main.rs"
+required-features = []
+
+# Desktop-only binaries - exclude from WASM builds
+[[bin]]
+name = "mcp_test_client"
+path = "src/bin/mcp_test_client.rs"
+required-features = []
+
+[[bin]]
+name = "mqtt_test"
+path = "src/bin/mqtt_test.rs"
+required-features = []
+
 # Custom commands (use via .cargo/config.toml for local aliases)
 # For now, use: cargo run --package xtask -- <command>
 
 # Test configuration
 [dev-dependencies]
 # Testing utilities
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 tokio-test = "0.4"
 
 # Integration test configuration

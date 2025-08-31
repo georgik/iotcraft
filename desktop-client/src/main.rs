@@ -1,5 +1,9 @@
+// Desktop-only main application - WASM uses lib.rs instead
+#[cfg(not(target_arch = "wasm32"))]
 use bevy::math::IVec2;
+#[cfg(not(target_arch = "wasm32"))]
 use bevy::prelude::*;
+#[cfg(not(target_arch = "wasm32"))]
 use bevy::window::{CursorGrabMode, WindowPosition};
 
 // Console imports - only available with console feature
@@ -8,56 +12,99 @@ use crate::console::{BlinkCube, BlinkState, ConsoleManager, ConsolePlugin, Conso
 
 #[cfg(not(target_arch = "wasm32"))]
 use clap::Parser;
+#[cfg(not(target_arch = "wasm32"))]
 use log::{info, warn};
+#[cfg(not(target_arch = "wasm32"))]
 use rumqttc::{Client, Event, MqttOptions, Outgoing, QoS};
+#[cfg(not(target_arch = "wasm32"))]
 use serde_json::json;
+#[cfg(not(target_arch = "wasm32"))]
 use std::time::Duration;
 
+#[cfg(not(target_arch = "wasm32"))]
 mod camera_controllers;
+#[cfg(not(target_arch = "wasm32"))]
 mod config;
+#[cfg(not(target_arch = "wasm32"))]
 mod console;
+#[cfg(not(target_arch = "wasm32"))]
 mod devices;
+#[cfg(not(target_arch = "wasm32"))]
 mod environment;
+#[cfg(not(target_arch = "wasm32"))]
 mod fonts;
+#[cfg(not(target_arch = "wasm32"))]
 mod interaction;
+#[cfg(not(target_arch = "wasm32"))]
 mod inventory;
+#[cfg(not(target_arch = "wasm32"))]
 mod localization;
+#[cfg(not(target_arch = "wasm32"))]
 mod mcp;
+#[cfg(not(target_arch = "wasm32"))]
 mod minimap;
+#[cfg(not(target_arch = "wasm32"))]
 mod mqtt;
+#[cfg(not(target_arch = "wasm32"))]
 mod script;
+#[cfg(not(target_arch = "wasm32"))]
 mod ui;
+#[cfg(not(target_arch = "wasm32"))]
 use mcp::mcp_types::CommandExecutedEvent;
 
+#[cfg(not(target_arch = "wasm32"))]
 mod multiplayer;
+#[cfg(not(target_arch = "wasm32"))]
 mod player_avatar;
+#[cfg(not(target_arch = "wasm32"))]
 mod player_controller;
+#[cfg(not(target_arch = "wasm32"))]
 mod profile;
+#[cfg(not(target_arch = "wasm32"))]
 mod rendering;
+#[cfg(not(target_arch = "wasm32"))]
 mod shared_materials;
+#[cfg(not(target_arch = "wasm32"))]
 mod world;
 
 // Re-export types for easier access
+#[cfg(not(target_arch = "wasm32"))]
 use camera_controllers::{CameraController, CameraControllerPlugin};
+#[cfg(not(target_arch = "wasm32"))]
 use config::MqttConfig;
+#[cfg(not(target_arch = "wasm32"))]
 use devices::*;
+#[cfg(not(target_arch = "wasm32"))]
 use environment::*;
+#[cfg(not(target_arch = "wasm32"))]
 use fonts::{FontPlugin, Fonts};
+#[cfg(not(target_arch = "wasm32"))]
 use interaction::InteractionPlugin as MyInteractionPlugin;
+#[cfg(not(target_arch = "wasm32"))]
 use inventory::{InventoryPlugin, PlayerInventory};
+#[cfg(not(target_arch = "wasm32"))]
 use localization::{LocalizationConfig, LocalizationPlugin};
+#[cfg(not(target_arch = "wasm32"))]
 use minimap::MinimapPlugin;
+#[cfg(not(target_arch = "wasm32"))]
 use mqtt::{MqttPlugin, *};
+#[cfg(not(target_arch = "wasm32"))]
 use multiplayer::{
     MultiplayerPlugin, SharedWorldPlugin, WorldDiscoveryPlugin, WorldPublisherPlugin,
 };
+#[cfg(not(target_arch = "wasm32"))]
 use player_avatar::PlayerAvatarPlugin;
+#[cfg(not(target_arch = "wasm32"))]
 use player_controller::PlayerControllerPlugin;
+#[cfg(not(target_arch = "wasm32"))]
 use shared_materials::SharedMaterialsPlugin;
+#[cfg(not(target_arch = "wasm32"))]
 use ui::{CrosshairPlugin, ErrorIndicatorPlugin, GameState, InventoryUiPlugin, MainMenuPlugin};
+#[cfg(not(target_arch = "wasm32"))]
 use world::WorldPlugin;
 
 // Helper function to extract client number from player ID for window positioning
+#[cfg(not(target_arch = "wasm32"))]
 fn extract_client_number(player_id: &str) -> Option<u32> {
     // Try to extract number from formats like "player-1", "player-2", "client-1", etc.
     if let Some(last_part) = player_id.split('-').last() {
@@ -91,6 +138,7 @@ fn extract_client_number(player_id: &str) -> Option<u32> {
 }
 
 // CLI arguments
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
 struct Args {
@@ -118,6 +166,7 @@ fn write_to_console(_writer: &mut Option<()>, message: String) {
     info!("Console: {}", message);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn execute_pending_commands(
     mut pending_commands: ResMut<crate::script::script_types::PendingCommands>,
     #[cfg(feature = "console")] mut print_console_line: Option<()>,
@@ -806,8 +855,15 @@ fn execute_pending_commands(
     }
 }
 
+// WASM stub - WASM targets use lib.rs for the main entry point
+#[cfg(target_arch = "wasm32")]
+fn main() {
+    // No-op: WASM builds use the lib.rs entry point instead
+    panic!("main() should not be called on WASM target - use lib.rs instead");
+}
+
 /// Tests for core game commands to prevent regressions
-#[cfg(test)]
+#[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
     use super::*;
     use clap::Parser;
@@ -841,7 +897,7 @@ mod tests {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(target_arch = "wasm32")))]
 mod wall_command_tests {
     use super::*;
 
@@ -943,6 +999,7 @@ mod wall_command_tests {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn main() {
     let args = Args::parse();
 

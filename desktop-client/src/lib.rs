@@ -100,3 +100,30 @@ pub use lib_gradual::*;
 
 #[cfg(target_arch = "wasm32")]
 pub use lib_debug::{debug_set_panic_hook, debug_start};
+
+// Cross-platform tests that work on both desktop and WASM
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_basic_functionality() {
+        // Basic test to verify testing works on both platforms
+        assert_eq!(2 + 2, 4);
+    }
+
+    #[test]
+    fn test_config_creation() {
+        // Test that we can create basic config structures on both platforms
+        let _config = crate::config::MqttConfig::default();
+        assert!(true);
+    }
+
+    #[test]
+    fn test_profile_creation() {
+        // Test that profile creation works on both platforms
+        let profile = crate::profile::PlayerProfile::new("test_player".to_string());
+        assert_eq!(profile.player_name, "test_player");
+        assert!(profile.player_id.starts_with("player-"));
+    }
+}

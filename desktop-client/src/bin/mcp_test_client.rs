@@ -1,3 +1,4 @@
+#[cfg(not(target_arch = "wasm32"))]
 use clap::{Parser, Subcommand};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};

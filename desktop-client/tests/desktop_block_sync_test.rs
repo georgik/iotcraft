@@ -1,3 +1,5 @@
+#![cfg(not(target_arch = "wasm32"))]
+
 /// Integration test for desktop client block synchronization
 ///
 /// This test verifies the complete flow:

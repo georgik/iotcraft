@@ -12,6 +12,18 @@ pub struct PlayerProfile {
     pub player_name: String,
 }
 
+impl PlayerProfile {
+    /// Create a new PlayerProfile with the given name
+    /// This method works on both desktop and WASM targets
+    pub fn new(name: String) -> Self {
+        let player_id = format!("player-{}", uuid_like());
+        Self {
+            player_id,
+            player_name: name,
+        }
+    }
+}
+
 impl Default for PlayerProfile {
     fn default() -> Self {
         let player_id = format!("player-{}", uuid_like());

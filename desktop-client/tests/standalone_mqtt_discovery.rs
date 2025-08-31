@@ -1,3 +1,5 @@
+#![cfg(not(target_arch = "wasm32"))]
+
 // Standalone MQTT World Discovery Test
 // This test runs without depending on the main library to avoid compilation issues
 

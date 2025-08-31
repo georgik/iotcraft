@@ -1,10 +1,17 @@
+#[cfg(not(target_arch = "wasm32"))]
 use log::{error, info, warn};
+
+#[cfg(not(target_arch = "wasm32"))]
 use rumqttc::{Client, Event, Incoming, MqttOptions, QoS};
+#[cfg(not(target_arch = "wasm32"))]
 use std::process;
+#[cfg(not(target_arch = "wasm32"))]
 use std::thread;
+#[cfg(not(target_arch = "wasm32"))]
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 /// Generate a unique MQTT client ID to avoid conflicts
+#[cfg(not(target_arch = "wasm32"))]
 fn generate_unique_client_id(prefix: &str) -> String {
     let timestamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -25,6 +32,7 @@ fn generate_unique_client_id(prefix: &str) -> String {
 /// 3. Display any retained messages that are received
 ///
 /// Usage: cargo run --bin mqtt_test
+#[cfg(not(target_arch = "wasm32"))]
 fn main() {
     env_logger::init();
 
@@ -169,4 +177,9 @@ fn main() {
     }
 
     info!("MQTT test utility finished");
+}
+
+#[cfg(target_arch = "wasm32")]
+fn main() {
+    // MQTT test not available on WASM
 }
