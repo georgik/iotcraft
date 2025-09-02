@@ -1,0 +1,237 @@
+// Test scenario for set_game_state MCP tool functionality
+// This scenario verifies that the set_game_state MCP tool can properly
+// transition between different game states (MainMenu, InGame, etc.)
+
+Scenario(
+    name: "test_set_game_state",
+    description: "Test the set_game_state MCP tool for UI state transitions",
+    version: "1.0",
+    
+    // Infrastructure setup - MQTT server for full functionality
+    infrastructure: InfrastructureConfig(
+        mqtt_server: MqttServerConfig(
+            required: true,
+            port: 1883,
+            config_file: None,
+            options: None,
+        ),
+        mqtt_observer: Some(MqttObserverConfig(
+            required: true,  // Enable to show in TUI
+            topics: Some(["mcp/*", "world/*", "ui/*"]),
+            client_id: Some("test_observer"),
+        )),
+        mcp_server: None,
+        services: None,
+    ),
+    
+    // Single test client
+    clients: [
+        ClientConfig(
+            id: "test_client",
+            player_id: "test_client", 
+            mcp_port: 3001,
+            client_type: "desktop",
+            name: Some("Test Client - Set Game State"),
+            config: None,
+        ),
+    ],
+    
+    // Test steps for game state transitions
+    steps: [
+        // Step 0: Ping MCP server to verify it's responding
+        Step(
+            name: "ping_mcp_server",
+            description: "Ping the MCP server to verify connectivity and responsiveness",
+            client: "test_client",
+            action: (
+                type: "mcp_call",
+                tool: "ping",
+                arguments: {
+                    "message": "test_ping",
+                },
+            ),
+            wait_before: 2000,   // Wait for client to start
+            wait_after: 1000,    // Brief wait after ping
+            timeout: 5000,       // 5 second timeout for ping
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: [],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 1: Set to MainMenu state
+        Step(
+            name: "set_main_menu_state",
+            description: "Set game state to MainMenu to ensure we start from a known state",
+            client: "test_client",
+            action: (
+                type: "mcp_call",
+                tool: "set_game_state",
+                arguments: {
+                    "state": "MainMenu",
+                },
+            ),
+            wait_before: 3000,   // Wait for client to fully start
+            wait_after: 2000,    // Wait to observe state transition
+            timeout: 10000,      // 10 second timeout
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["ping_mcp_server"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 2: Transition to InGame state
+        Step(
+            name: "set_ingame_state",
+            description: "Transition from MainMenu to InGame state",
+            client: "test_client",
+            action: (
+                type: "mcp_call",
+                tool: "set_game_state",
+                arguments: {
+                    "state": "InGame",
+                },
+            ),
+            wait_before: 1000,
+            wait_after: 2000,
+            timeout: 10000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["set_main_menu_state"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 3: Transition to Settings state
+        Step(
+            name: "set_settings_state",
+            description: "Transition to Settings state",
+            client: "test_client",
+            action: (
+                type: "mcp_call",
+                tool: "set_game_state",
+                arguments: {
+                    "state": "Settings",
+                },
+            ),
+            wait_before: 1000,
+            wait_after: 2000,
+            timeout: 10000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["set_ingame_state"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 4: Transition to WorldSelection state
+        Step(
+            name: "set_world_selection_state",
+            description: "Transition to WorldSelection state",
+            client: "test_client",
+            action: (
+                type: "mcp_call",
+                tool: "set_game_state",
+                arguments: {
+                    "state": "WorldSelection",
+                },
+            ),
+            wait_before: 1000,
+            wait_after: 2000,
+            timeout: 10000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["set_settings_state"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 5: Test invalid state to ensure error handling
+        Step(
+            name: "test_invalid_state",
+            description: "Test error handling with invalid state name",
+            client: "test_client",
+            action: (
+                type: "mcp_call",
+                tool: "set_game_state",
+                arguments: {
+                    "state": "InvalidState",
+                },
+            ),
+            wait_before: 1000,
+            wait_after: 1000,
+            timeout: 10000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "error",  // Expecting an error response
+            )),
+            depends_on: ["set_world_selection_state"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 6: Return to InGame state to test round-trip functionality
+        Step(
+            name: "return_to_ingame",
+            description: "Return to InGame state to test round-trip functionality",
+            client: "test_client",
+            action: (
+                type: "mcp_call",
+                tool: "set_game_state",
+                arguments: {
+                    "state": "InGame",
+                },
+            ),
+            wait_before: 1000,
+            wait_after: 2000,
+            timeout: 10000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["test_invalid_state"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+    ],
+    
+    // Test configuration
+    config: Some(ScenarioConfig(
+        timeout_ms: Some(90000),  // 90 second total timeout
+        logging: Some(LoggingConfig(
+            level: Some("info"),
+            log_mqtt: Some(true),
+            log_client_actions: Some(true),
+            filters: Some(["ui/*", "mcp/*", "set_game_state", "GameState", "NextState"]),
+        )),
+        environment: Some({
+            "RUST_LOG": "info,iotcraft_dekstop_client=debug",
+            "SCENARIO_NAME": "test_set_game_state",
+            "ENABLE_MCP": "true",
+        }),
+        settings: Some({
+            "auto_cleanup": true,
+            "preserve_logs": true,
+            "fail_fast": false,  // Continue with other tests even if one fails
+        }),
+    )),
+)

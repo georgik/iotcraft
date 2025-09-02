@@ -1,11 +1,11 @@
-// Simple test scenario in RON format
-// This demonstrates basic IoTCraft scenario orchestration with MCP integration
+// Simple test scenario for indefinite MQTT server and desktop client testing
+// This starts MQTT server and desktop client, then waits indefinitely for manual testing
 Scenario(
-    name: "simple_test (.ron)",
-    description: "Basic test scenario with one client placing a block (.ron)",
+    name: "simple_test_indefinite",
+    description: "Starts MQTT server and desktop client, waits indefinitely for manual testing",
     version: "1.0",
     
-    // Infrastructure setup - MQTT server and observer
+    // Infrastructure setup - MQTT server with observer for debugging
     infrastructure: InfrastructureConfig(
         mqtt_server: MqttServerConfig(
             required: true,
@@ -14,94 +14,68 @@ Scenario(
             options: None,
         ),
         mqtt_observer: Some(MqttObserverConfig(
-            required: false,
-            topics: None,
-            client_id: None,
+            required: true,  // Enable for debugging MQTT issues
+            topics: Some(["#"]),  // Monitor all topics
+            client_id: Some("debug_observer"),
         )),
         mcp_server: None,
         services: None,
     ),
     
-    // Client definitions - Alice will be our test client
+    // Single client for testing
     clients: [
         ClientConfig(
             id: "alice",
-            player_id: "alice",
+            player_id: "alice", 
             mcp_port: 3001,
             client_type: "desktop",
-            name: None,
+            name: Some("Alice - Test Client"),
             config: None,
         ),
     ],
     
-    // Test steps to execute in sequence
+    // Single step - just keep everything running indefinitely
     steps: [
-        // Step 1: Alice places a grass block at origin
+        // Single step: Wait indefinitely for manual testing
         Step(
-            name: "alice_places_block",
-            description: "Alice places a grass block",
-            client: "alice",
-            action: (
-                type: "mcp_call",
-                tool: "place_block",
-                arguments: {
-                    "block_type": "grass",
-                    "x": 0,
-                    "y": 1,
-                    "z": 0,
-                },
-            ),
-            wait_before: 1000,  // Wait 1 second before execution
-            wait_after: 500,    // Wait 0.5 seconds after execution
-            timeout: 5000,      // 5 second timeout
-            success_condition: Some((
-                type: "mcp_response",
-                expected: "success",
-            )),
-            depends_on: [],
-            timing: None,
-            conditions: None,
-            expectations: None,
-        ),
-        
-        // Step 2: Keep clients running for manual testing/observation
-        Step(
-            name: "keep_clients_running",
-            description: "Keep clients running until user decides to exit",
+            name: "wait_indefinitely",
+            description: "Keep MQTT server and desktop client running indefinitely for manual testing - press Ctrl+C to exit",
             client: "orchestrator",
             action: (
                 type: "wait_condition",
-                condition: "user_input",
-                expected_value: Some("exit"),
-                timeout: 300000,  // 5 minutes timeout
+                condition: "manual_exit",
+                expected_value: Some("never"),
+                timeout: 86400000,  // 24 hours timeout (essentially indefinite)
             ),
-            wait_before: 0,
+            wait_before: 3000,    // Wait 3 seconds for client to start
             wait_after: 0,
-            timeout: 300000,
+            timeout: 86400000,   // 24 hours
             success_condition: None,
-            depends_on: [],
+            depends_on: [],       // No dependencies - start immediately
             timing: None,
             conditions: None,
             expectations: None,
         ),
     ],
     
-    // Global scenario configuration
+    // Global scenario configuration for long-running test
     config: Some(ScenarioConfig(
-        timeout_ms: Some(360000),  // 6 minute global timeout
+        timeout_ms: Some(86400000),  // 24 hours global timeout
         logging: Some(LoggingConfig(
             level: Some("info"),
             log_mqtt: Some(true),
             log_client_actions: Some(true),
-            filters: Some(["world/*", "mcp/*", "orchestrator/*"]),
+            filters: Some(["world/*", "mcp/*", "mqtt/*", "multiplayer/*", "ui/*"]),
         )),
         environment: Some({
-            "RUST_LOG": "info",
-            "SCENARIO_NAME": "simple_test",
+            "RUST_LOG": "info,rumqttc=warn",  // Reduce MQTT client noise
+            "SCENARIO_NAME": "simple_test_indefinite",
+            "ENABLE_MCP": "true",
         }),
         settings: Some({
-            "auto_cleanup": true,
+            "auto_cleanup": false,  // Don't auto cleanup for manual testing
             "preserve_logs": true,
+            "manual_mode": true,
         }),
     )),
 )

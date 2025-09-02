@@ -109,14 +109,24 @@ struct App {
 enum LogPane {
     Orchestrator,
     MqttServer,
+    MqttObserver,
     Client(String),
+}
+
+#[cfg(feature = "tui")]
+#[derive(Debug, PartialEq)]
+enum FocusedPane {
+    LogSelector,
+    LogContent,
 }
 
 #[cfg(feature = "tui")]
 struct LoggingApp {
     logs: HashMap<String, Vec<String>>, // key: pane_name, value: log lines
     selected_pane: LogPane,
+    selected_pane_index: usize, // Track which pane is selected by index
     panes: Vec<LogPane>,
+    focused_pane: FocusedPane, // Track which UI pane has focus
     should_quit: Arc<AtomicBool>,
     scroll_positions: HashMap<String, usize>,
     auto_scroll: bool,
@@ -130,11 +140,41 @@ impl LoggingApp {
         let mut logs = HashMap::new();
         let mut scroll_positions = HashMap::new();
 
+        println!(
+            "[DEBUG] LoggingApp::new() - Creating panes for scenario: {}",
+            scenario.name
+        );
+
         // Add MQTT server pane if required
         if scenario.infrastructure.mqtt_server.required {
+            println!("[DEBUG] Adding MQTT Server pane (required=true)");
             panes.push(LogPane::MqttServer);
             logs.insert("MQTT Server".to_string(), Vec::new());
             scroll_positions.insert("MQTT Server".to_string(), 0);
+        } else {
+            println!("[DEBUG] NOT adding MQTT Server pane (required=false)");
+        }
+
+        // Add MQTT observer pane if required
+        let mqtt_observer_required = scenario
+            .infrastructure
+            .mqtt_observer
+            .as_ref()
+            .map(|obs| obs.required)
+            .unwrap_or(false);
+        println!(
+            "[DEBUG] MQTT Observer check: exists={}, required={}",
+            scenario.infrastructure.mqtt_observer.is_some(),
+            mqtt_observer_required
+        );
+
+        if mqtt_observer_required {
+            println!("[DEBUG] Adding MQTT Observer pane (required=true)");
+            panes.push(LogPane::MqttObserver);
+            logs.insert("MQTT Observer".to_string(), Vec::new());
+            scroll_positions.insert("MQTT Observer".to_string(), 0);
+        } else {
+            println!("[DEBUG] NOT adding MQTT Observer pane (required=false)");
         }
 
         // Add client panes
@@ -169,6 +209,19 @@ impl LoggingApp {
             );
         }
 
+        if scenario
+            .infrastructure
+            .mqtt_observer
+            .as_ref()
+            .map(|obs| obs.required)
+            .unwrap_or(false)
+        {
+            log_files.insert(
+                "MQTT Observer".to_string(),
+                log_dir.join(format!("mqtt_observer_{}.log", timestamp)),
+            );
+        }
+
         for client in &scenario.clients {
             log_files.insert(
                 client.id.clone(),
@@ -176,10 +229,17 @@ impl LoggingApp {
             );
         }
 
+        println!("[DEBUG] Final panes list: {} panes created", panes.len());
+        for (idx, pane) in panes.iter().enumerate() {
+            println!("[DEBUG] Pane {}: {:?}", idx, pane);
+        }
+
         Self {
             logs,
             selected_pane: LogPane::Orchestrator,
+            selected_pane_index: 0, // Start with first pane
             panes,
+            focused_pane: FocusedPane::LogSelector, // Start with selector focused
             should_quit: Arc::new(AtomicBool::new(false)),
             scroll_positions,
             auto_scroll: true,
@@ -238,6 +298,7 @@ impl LoggingApp {
         match &self.selected_pane {
             LogPane::Orchestrator => "Orchestrator".to_string(),
             LogPane::MqttServer => "MQTT Server".to_string(),
+            LogPane::MqttObserver => "MQTT Observer".to_string(),
             LogPane::Client(id) => id.clone(),
         }
     }
@@ -249,6 +310,7 @@ impl LoggingApp {
             .position(|p| match (p, &self.selected_pane) {
                 (LogPane::Orchestrator, LogPane::Orchestrator) => true,
                 (LogPane::MqttServer, LogPane::MqttServer) => true,
+                (LogPane::MqttObserver, LogPane::MqttObserver) => true,
                 (LogPane::Client(a), LogPane::Client(b)) => a == b,
                 _ => false,
             })
@@ -265,6 +327,7 @@ impl LoggingApp {
             .position(|p| match (p, &self.selected_pane) {
                 (LogPane::Orchestrator, LogPane::Orchestrator) => true,
                 (LogPane::MqttServer, LogPane::MqttServer) => true,
+                (LogPane::MqttObserver, LogPane::MqttObserver) => true,
                 (LogPane::Client(a), LogPane::Client(b)) => a == b,
                 _ => false,
             })
@@ -308,6 +371,7 @@ impl Clone for LogPane {
         match self {
             LogPane::Orchestrator => LogPane::Orchestrator,
             LogPane::MqttServer => LogPane::MqttServer,
+            LogPane::MqttObserver => LogPane::MqttObserver,
             LogPane::Client(id) => LogPane::Client(id.clone()),
         }
     }
@@ -1890,16 +1954,62 @@ async fn run_scenario_with_tui(scenario: Scenario) -> Result<(), Box<dyn std::er
                                 break;
                             }
                             KeyCode::Tab => {
-                                logging_app.next_pane();
+                                // Switch focus between left (selector) and right (content) panes
+                                match logging_app.focused_pane {
+                                    FocusedPane::LogSelector => {
+                                        logging_app.focused_pane = FocusedPane::LogContent;
+                                    }
+                                    FocusedPane::LogContent => {
+                                        logging_app.focused_pane = FocusedPane::LogSelector;
+                                    }
+                                }
                             }
                             KeyCode::BackTab => {
-                                logging_app.prev_pane();
+                                // Switch focus in reverse direction
+                                match logging_app.focused_pane {
+                                    FocusedPane::LogSelector => {
+                                        logging_app.focused_pane = FocusedPane::LogContent;
+                                    }
+                                    FocusedPane::LogContent => {
+                                        logging_app.focused_pane = FocusedPane::LogSelector;
+                                    }
+                                }
                             }
                             KeyCode::Up => {
-                                logging_app.scroll_up();
+                                match logging_app.focused_pane {
+                                    FocusedPane::LogSelector => {
+                                        // Navigate up in pane selector
+                                        if logging_app.selected_pane_index > 0 {
+                                            logging_app.selected_pane_index -= 1;
+                                            logging_app.selected_pane = logging_app.panes
+                                                [logging_app.selected_pane_index]
+                                                .clone();
+                                        }
+                                    }
+                                    FocusedPane::LogContent => {
+                                        // Scroll up in log content
+                                        logging_app.scroll_up();
+                                    }
+                                }
                             }
                             KeyCode::Down => {
-                                logging_app.scroll_down();
+                                match logging_app.focused_pane {
+                                    FocusedPane::LogSelector => {
+                                        // Navigate down in pane selector
+                                        if logging_app.selected_pane_index
+                                            < logging_app.panes.len() - 1
+                                        {
+                                            logging_app.selected_pane_index += 1;
+                                            logging_app.selected_pane = logging_app.panes
+                                                [logging_app.selected_pane_index]
+                                                .clone();
+                                        }
+                                    }
+                                    FocusedPane::LogContent => {
+                                        // Scroll down in log content
+                                        logging_app.scroll_down();
+                                    }
+                                }
                             }
                             _ => {}
                         }
@@ -1963,12 +2073,14 @@ fn draw_logging_ui(f: &mut Frame, app: &LoggingApp) {
             let name = match pane {
                 LogPane::Orchestrator => "🎭 Orchestrator".to_string(),
                 LogPane::MqttServer => "📡 MQTT Server".to_string(),
+                LogPane::MqttObserver => "👁️ MQTT Observer".to_string(),
                 LogPane::Client(id) => format!("👤 Client: {}", id),
             };
 
             let is_selected = match (&app.selected_pane, pane) {
                 (LogPane::Orchestrator, LogPane::Orchestrator) => true,
                 (LogPane::MqttServer, LogPane::MqttServer) => true,
+                (LogPane::MqttObserver, LogPane::MqttObserver) => true,
                 (LogPane::Client(a), LogPane::Client(b)) => a == b,
                 _ => false,
             };
@@ -1983,8 +2095,26 @@ fn draw_logging_ui(f: &mut Frame, app: &LoggingApp) {
         })
         .collect();
 
+    // Determine if the left pane (selector) is focused for visual indication
+    let selector_focused = app.focused_pane == FocusedPane::LogSelector;
+    let selector_title = if selector_focused {
+        "🔗 Log Panes [FOCUSED]"
+    } else {
+        "🔗 Log Panes"
+    };
+    let selector_border_style = if selector_focused {
+        Style::default().fg(Color::Cyan)
+    } else {
+        Style::default()
+    };
+
     let pane_selector = List::new(pane_list)
-        .block(Block::default().borders(Borders::ALL).title("🔗 Log Panes"))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(selector_title)
+                .border_style(selector_border_style),
+        )
         .highlight_style(Style::default().bg(Color::Blue).fg(Color::White));
 
     f.render_widget(pane_selector, chunks[0]);
@@ -2011,11 +2141,25 @@ fn draw_logging_ui(f: &mut Frame, app: &LoggingApp) {
         .map(|line| Line::from(line.as_str()))
         .collect();
 
+    // Determine if the right pane (content) is focused for visual indication
+    let content_focused = app.focused_pane == FocusedPane::LogContent;
+    let content_title = if content_focused {
+        format!("📋 Logs: {} [FOCUSED]", current_pane_name)
+    } else {
+        format!("📋 Logs: {}", current_pane_name)
+    };
+    let content_border_style = if content_focused {
+        Style::default().fg(Color::Cyan)
+    } else {
+        Style::default()
+    };
+
     let log_content = Paragraph::new(visible_logs)
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .title(format!("📋 Logs: {}", current_pane_name)),
+                .title(content_title)
+                .border_style(content_border_style),
         )
         .wrap(Wrap { trim: false })
         .scroll((0, 0));
@@ -2234,6 +2378,76 @@ async fn start_infrastructure_with_logging(
             LogSource::Orchestrator,
             &format!("  ✅ MQTT server ready on port {}", port),
         );
+    }
+
+    // Start MQTT observer if required
+    if let Some(ref mqtt_observer) = state.scenario.infrastructure.mqtt_observer {
+        if mqtt_observer.required {
+            log_collector.log_str(LogSource::Orchestrator, "  Starting MQTT observer");
+
+            let mqtt_port = state.scenario.infrastructure.mqtt_server.port;
+            let mut observer_process = TokioCommand::new("cargo")
+                .current_dir("../mqtt-client")
+                .args(&[
+                    "run",
+                    "--bin",
+                    "mqtt-observer",
+                    "--",
+                    "-h",
+                    "localhost",
+                    "-p",
+                    &mqtt_port.to_string(),
+                    "-t",
+                    "#", // Subscribe to all topics
+                    "-i",
+                    "mcplay_observer", // Unique client ID
+                ])
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped())
+                .spawn()
+                .map_err(|e| {
+                    let error_msg = format!(
+                        "Failed to start MQTT observer: {}. Make sure mqtt-client is available in ../mqtt-client.",
+                        e
+                    );
+                    log_collector.log_str(LogSource::Orchestrator, &format!("❌ {}", error_msg));
+                    error_msg
+                })?;
+
+            // Capture stdout and stderr from the MQTT observer process
+            if let Some(stdout) = observer_process.stdout.take() {
+                let log_collector = log_collector.clone();
+                tokio::spawn(async move {
+                    let mut reader = BufReader::new(stdout);
+                    let mut line = String::new();
+                    while reader.read_line(&mut line).await.is_ok() && !line.is_empty() {
+                        log_collector.log_str(LogSource::MqttObserver, line.trim());
+                        line.clear();
+                    }
+                });
+            }
+
+            if let Some(stderr) = observer_process.stderr.take() {
+                let log_collector = log_collector.clone();
+                tokio::spawn(async move {
+                    let mut reader = BufReader::new(stderr);
+                    let mut line = String::new();
+                    while reader.read_line(&mut line).await.is_ok() && !line.is_empty() {
+                        log_collector.log_str(
+                            LogSource::MqttObserver,
+                            &format!("[stderr] {}", line.trim()),
+                        );
+                        line.clear();
+                    }
+                });
+            }
+
+            state
+                .infrastructure_processes
+                .insert("mqtt_observer".to_string(), observer_process);
+
+            log_collector.log_str(LogSource::Orchestrator, "  ✅ MQTT observer started");
+        }
     }
 
     Ok(())

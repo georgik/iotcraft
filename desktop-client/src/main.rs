@@ -184,6 +184,7 @@ fn execute_pending_commands(
     mut inventory: ResMut<PlayerInventory>,
     mut camera_query: Query<(&mut Transform, &mut CameraController), With<Camera>>,
     mut create_world_events: EventWriter<CreateWorldEvent>,
+    mut next_game_state: Option<ResMut<NextState<GameState>>>,
 ) {
     for command in pending_commands.commands.drain(..) {
         info!("Executing queued command: {}", command);
@@ -857,7 +858,18 @@ fn execute_pending_commands(
                         description: description.clone(),
                     });
 
-                    let result_msg = format!("Created new world: {} ({})", world_name, description);
+                    // Set game state to InGame to transition UI from main menu
+                    if let Some(mut next_state) = next_game_state.as_mut() {
+                        next_state.set(crate::ui::main_menu::GameState::InGame);
+                        info!("Set game state to InGame for world creation transition");
+                    } else {
+                        warn!("NextState<GameState> resource not available for state transition");
+                    }
+
+                    let result_msg = format!(
+                        "Created new world: {} ({}) and transitioned to InGame",
+                        world_name, description
+                    );
                     #[cfg(feature = "console")]
                     write_to_console(result_msg.clone());
 
@@ -870,6 +882,81 @@ fn execute_pending_commands(
                     }
                 } else {
                     let error_msg = "Usage: create_world <world_name> <description>".to_string();
+                    #[cfg(feature = "console")]
+                    write_to_console(error_msg.clone());
+
+                    if let Some(req_id) = request_id {
+                        command_executed_events.write(CommandExecutedEvent {
+                            request_id: req_id,
+                            result: error_msg,
+                        });
+                    }
+                }
+            }
+            "set_game_state" => {
+                if parts.len() >= 2 {
+                    let state_str = parts[1];
+
+                    // Parse state string to GameState enum
+                    use crate::ui::main_menu::GameState;
+                    let new_state = match state_str {
+                        "MainMenu" => GameState::MainMenu,
+                        "WorldSelection" => GameState::WorldSelection,
+                        "InGame" => GameState::InGame,
+                        "Settings" => GameState::Settings,
+                        "GameplayMenu" => GameState::GameplayMenu,
+                        _ => {
+                            let error_msg = format!(
+                                "Invalid game state: {}. Valid states: MainMenu, WorldSelection, InGame, Settings, GameplayMenu",
+                                state_str
+                            );
+                            #[cfg(feature = "console")]
+                            write_to_console(error_msg.clone());
+
+                            if let Some(req_id) = request_id {
+                                command_executed_events.write(CommandExecutedEvent {
+                                    request_id: req_id,
+                                    result: error_msg,
+                                });
+                            }
+                            return;
+                        }
+                    };
+
+                    // Set the game state
+                    if let Some(mut next_state) = next_game_state.as_mut() {
+                        next_state.set(new_state);
+                        info!("Set game state to {}", state_str);
+
+                        let result_msg = format!("Game state set to {}", state_str);
+                        #[cfg(feature = "console")]
+                        write_to_console(result_msg.clone());
+
+                        // Emit command executed event if this was from MCP
+                        if let Some(req_id) = request_id {
+                            command_executed_events.write(CommandExecutedEvent {
+                                request_id: req_id,
+                                result: result_msg,
+                            });
+                        }
+                    } else {
+                        let error_msg =
+                            "NextState<GameState> resource not available for state transition"
+                                .to_string();
+                        warn!("{}", error_msg);
+
+                        #[cfg(feature = "console")]
+                        write_to_console(error_msg.clone());
+
+                        if let Some(req_id) = request_id {
+                            command_executed_events.write(CommandExecutedEvent {
+                                request_id: req_id,
+                                result: error_msg,
+                            });
+                        }
+                    }
+                } else {
+                    let error_msg = "Usage: set_game_state <state>".to_string();
                     #[cfg(feature = "console")]
                     write_to_console(error_msg.clone());
 
