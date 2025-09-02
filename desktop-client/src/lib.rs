@@ -84,6 +84,9 @@ pub mod rendering;
 pub mod mcp;
 
 #[cfg(not(target_arch = "wasm32"))]
+pub mod scenario_types;
+
+#[cfg(not(target_arch = "wasm32"))]
 pub mod mqtt;
 
 #[cfg(not(target_arch = "wasm32"))]

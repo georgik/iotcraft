@@ -12,6 +12,9 @@ use tokio::fs;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command as TokioCommand;
 
+mod infrastructure;
+mod mcplay;
+
 #[derive(Parser)]
 #[command(name = "xtask")]
 #[command(about = "Build automation for IoTCraft Desktop Client")]
@@ -30,6 +33,23 @@ enum Commands {
         /// Output directory
         #[arg(short, long, default_value = "dist")]
         output: String,
+    },
+    /// Run scenario using mcplay orchestrator
+    McPlay {
+        /// Path to scenario JSON file (defaults to two-player-world-sharing.json)
+        scenario: Option<String>,
+        /// Validate scenario file only
+        #[arg(long)]
+        validate: bool,
+        /// List all available scenarios
+        #[arg(long)]
+        list_scenarios: bool,
+        /// Override MQTT server port
+        #[arg(long)]
+        mqtt_port: Option<u16>,
+        /// Enable verbose output
+        #[arg(short, long)]
+        verbose: bool,
     },
     /// Serve the web version locally
     WebServe {
@@ -136,6 +156,16 @@ async fn main() -> Result<()> {
     match &cli.command {
         Commands::WebBuild { release, output } => {
             web_build(*release, output).await?;
+        }
+        Commands::McPlay {
+            scenario,
+            validate,
+            list_scenarios,
+            mqtt_port,
+            verbose,
+        } => {
+            mcplay::run_mcplay_command(scenario, *validate, *list_scenarios, *mqtt_port, *verbose)
+                .await?;
         }
         Commands::WebServe { port, dir } => {
             web_serve(*port, dir).await?;

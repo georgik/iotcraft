@@ -128,6 +128,180 @@ cargo run -- --player-id bob
 
 See [MULTI_CLIENT.md](MULTI_CLIENT.md) for detailed documentation and examples.
 
+## Scenario Testing with mcplay
+
+IoTCraft includes `mcplay`, a powerful scenario orchestration tool for testing complex multi-client interactions with an intuitive Text User Interface (TUI).
+
+### Quick Start with mcplay
+
+```bash
+# Launch TUI to browse and run scenarios interactively
+cargo run --bin mcplay
+
+# Or run a specific scenario directly
+cargo run --bin mcplay scenarios/orchestrator-test.ron
+```
+
+### TUI Features
+
+The mcplay TUI provides an interactive experience for managing scenarios:
+
+- **📋 Scenario Browser**: Navigate through all available scenarios with arrow keys
+- **✅ Visual Validation**: See which scenarios are valid with status indicators
+- **📖 Scenario Details**: Press `d` to view detailed scenario information
+- **🔍 Quick Validation**: Press `v` to validate scenarios without running them
+- **🔄 Live Refresh**: Press `r` to refresh the scenario list
+- **⚡ One-Click Execution**: Press `Enter` to run scenarios directly
+- **🎯 Smart Filtering**: Only shows valid scenarios for execution
+
+### Command Line Options
+
+```bash
+# Interactive TUI (default when no arguments provided)
+cargo run --bin mcplay
+
+# List all available scenarios
+cargo run --bin mcplay -- --list-scenarios
+
+# Validate a scenario file
+cargo run --bin mcplay -- --validate scenarios/my-scenario.ron
+
+# Run with verbose output
+cargo run --bin mcplay -- --verbose scenarios/test-scenario.ron
+
+# Override MQTT port
+cargo run --bin mcplay -- --mqtt-port 1884 scenarios/test-scenario.ron
+```
+
+### Scenario Format Support
+
+mcplay supports multiple scenario formats with auto-detection:
+- **RON** (`.ron`) - Recommended for complex scenarios with comments
+- **JSON** (`.json`) - Universal compatibility
+- **YAML** (`.yaml`, `.yml`) - Human-readable configuration
+
+### Infrastructure Management
+
+mcplay includes improved MQTT server startup logic:
+- **Smart Port Checking**: Validates port availability before starting services
+- **Enhanced Error Messages**: Clear feedback when ports are already in use
+- **Progress Feedback**: Real-time status updates during infrastructure startup
+- **Robust Timeout Handling**: Intelligent retries with exponential backoff
+
+### Unified Scenario Format
+
+mcplay now uses a unified scenario format that supports both simple mcplay scenarios and complex xtask orchestration scenarios:
+
+- **Backward Compatibility**: Existing mcplay scenarios continue to work unchanged
+- **Extended Capabilities**: Support for xtask-style actions like MQTT operations, parallel execution, and custom actions
+- **Flexible Client Configuration**: Supports both simple client definitions and extended configuration with spawn positions, inventories, and permissions
+- **Rich Action Types**: Includes MCP calls, MQTT publish/expect, client actions, parallel/sequence execution, and custom actions
+- **Enhanced Validation**: Comprehensive validation with detailed error messages and warnings
+- **Future-Proof Design**: Extensible architecture for adding new action types and configuration options
+
+### Available Scenarios
+
+mcplay automatically discovers scenarios in the `scenarios/` directory:
+- `orchestrator-test.ron` - Basic orchestrator-only testing
+- `simple_test.json` - Single-client block placement
+- `two_player_world_sharing.json` - Multi-client collaboration
+- And many more...
+
+See **[docs/SCENARIOS.md](docs/SCENARIOS.md)** for comprehensive scenario documentation and **[CHANGELOG_MCPLAY.md](CHANGELOG_MCPLAY.md)** for recent mcplay enhancements.
+
+## Model Context Protocol (MCP) Integration
+
+IoTCraft supports the Model Context Protocol, enabling AI agents like Claude, Cursor, and ChatGPT to interact directly with your virtual world and IoT devices.
+
+### Quick Start with MCP
+
+```bash
+# Start IoTCraft with MCP server enabled
+cargo run -- --mcp
+```
+
+This enables AI agents to:
+- **Build structures**: Place blocks, create walls, build complex structures
+- **Control IoT devices**: Spawn, move, and control virtual lamps and doors
+- **Navigate the world**: Move camera, teleport, set viewing angles
+- **Manage worlds**: Save, load, and get world status
+- **Access sensor data**: Read IoT device telemetry
+
+### Available MCP Tools
+
+**World Manipulation:**
+- `place_block` - Place individual blocks
+- `remove_block` - Remove blocks
+- `create_wall` - Build walls between coordinates
+
+**IoT Device Management:**
+- `spawn_device` - Create new IoT devices (lamps, doors)
+- `list_devices` - List all active devices
+- `control_device` - Send commands (ON/OFF, open/close)
+- `move_device` - Relocate devices
+
+**Navigation & Observation:**
+- `teleport_camera` - Move camera to coordinates
+- `set_camera_angle` - Adjust viewing angle
+- `get_world_status` - Get current world information
+- `get_sensor_data` - Access sensor readings
+
+**World Persistence:**
+- `save_world` - Save current world state
+- `load_world` - Load saved worlds
+
+### Example AI Interactions
+
+```
+"Build me a simple house with stone walls at coordinates (0,0,0) to (10,10,10)"
+"Set up a smart lighting system with 3 lamps and turn them on"
+"Show me what's in the world and move the camera for a better view"
+```
+
+### Documentation
+
+- **[docs/MCP_INTEGRATION.md](docs/MCP_INTEGRATION.md)** - Comprehensive setup and technical documentation
+- **[docs/MCP_TESTING.md](docs/MCP_TESTING.md)** - Complete testing guide for MCP functionality
+
+## Advanced Testing Scenarios
+
+### MCP Testing Infrastructure
+
+The project includes comprehensive MCP testing capabilities:
+
+```bash
+# Unit tests for MCP tool functions
+cargo test mcp
+
+# Integration tests (requires MCP server running)
+cargo test --test mcp_integration_tests
+
+# Comprehensive MCP test client
+cargo run --bin mcp_test_client -- run-tests
+
+# Interactive MCP testing
+cargo run --bin mcp_test_client -- interactive
+```
+
+### Multi-Client MCP Testing
+
+Combine multi-client testing with MCP for advanced scenarios:
+
+```bash
+# Run multiple clients with MCP enabled
+cargo xtask multi-client --count 2 --full-env -- --mcp
+
+# Test AI coordination across multiple clients
+# Each client can be controlled by different AI agents
+```
+
+### Testing Documentation
+
+- **[docs/MCP_TESTING.md](docs/MCP_TESTING.md)** - MCP-specific testing infrastructure
+- **[MULTI_CLIENT.md](MULTI_CLIENT.md)** - Multi-client testing scenarios
+- Built-in test fixtures with comprehensive edge case coverage
+- Automated test reporting and validation
+
 ## Prerequisites
 
 ### Desktop
@@ -168,8 +342,10 @@ To manually deploy to GitHub Pages:
 
 - 3D voxel world with physics
 - MQTT-based IoT device connectivity
-- Multiplayer support
+- Multiplayer support with real-time synchronization
+- **Model Context Protocol (MCP) integration** for AI agent interaction
 - Console system with scripting
 - Internationalization (i18n)
 - Asset management
 - Minimap and UI systems
+- Comprehensive testing infrastructure

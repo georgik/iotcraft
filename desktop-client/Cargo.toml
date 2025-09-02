@@ -22,6 +22,7 @@ tracing = "0.1"
 log = "0.4"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+ron = "0.8"
 chrono = { version = "0.4", features = ["serde"] }
 rand = "0.9"
 hex = "0.4"
@@ -40,6 +41,9 @@ async-channel = "2.5"
 flate2 = "1.0"
 # Performance optimization dependencies
 bytemuck = { version = "1.16", features = ["derive"] } # GPU data alignment
+crossterm = "0.29.0"
+# TUI dependencies (optional, used by mcplay binary)
+ratatui = { version = "0.29.0", optional = true }
 
 # Web-specific dependencies
 [target.'cfg(target_arch = "wasm32")'.dependencies]
@@ -71,7 +75,7 @@ getrandom_03 = { package = "getrandom", version = "0.3", features = ["wasm_js"] 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 rumqttc = "0.24.0"
 rumqttd = "0.19.0"
-tokio = { version = "1.47", features = ["rt-multi-thread", "macros", "fs", "net", "process"] }
+tokio = { version = "1.47", features = ["rt-multi-thread", "macros", "fs", "net", "process", "signal"] }
 axum = "0.8"
 tower = "0.5"
 tower-http = { version = "0.6", features = ["cors"] }
@@ -112,11 +116,13 @@ chrono = "0.4"
 
 # Workspace for xtask
 [features]
-default = ["console"]
+default = ["console", "tui"]
 # Console implementations (choose one)
 console-bevy = ["dep:bevy_console"]  # Legacy desktop-only console
 # Convenience feature aliases
 console = []                          # Default to Simple console (no extra deps)
+# TUI feature for mcplay
+tui = ["dep:ratatui"]
 # Test-specific features
 integration-tests = []                # Feature to enable integration tests
 
@@ -141,6 +147,11 @@ required-features = []
 name = "mqtt_test"
 path = "src/bin/mqtt_test.rs"
 required-features = []
+
+[[bin]]
+name = "mcplay"
+path = "src/bin/mcplay.rs"
+required-features = ["tui"]
 
 # Custom commands (use via .cargo/config.toml for local aliases)
 # For now, use: cargo run --package xtask -- <command>

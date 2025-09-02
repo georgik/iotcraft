@@ -1,0 +1,237 @@
+{
+  "name": "two_player_world_sharing",
+  "description": "Test scenario where Alice creates and publishes a world, Bob joins it, and one player places a block",
+  "version": "1.0",
+  "clients": [
+    {
+      "id": "alice",
+      "player_id": "alice",
+      "mcp_port": 3001,
+      "type": "desktop"
+    },
+    {
+      "id": "bob",
+      "player_id": "bob", 
+      "mcp_port": 3002,
+      "type": "desktop"
+    }
+  ],
+  "infrastructure": {
+    "mqtt_server": {
+      "required": true,
+      "port": 1883
+    },
+    "mqtt_observer": {
+      "required": true
+    }
+  },
+  "steps": [
+    {
+      "name": "alice_publishes_world",
+      "description": "Alice creates and publishes a new world called 'shared_test_world'",
+      "client": "alice",
+      "action": {
+        "type": "mcp_call",
+        "tool": "publish_world",
+        "arguments": {
+          "world_name": "shared_test_world",
+          "max_players": 4,
+          "is_public": true
+        }
+      },
+      "wait_before": 2000,
+      "wait_after": 1000,
+      "timeout": 10000,
+      "success_condition": {
+        "type": "mcp_response",
+        "expected": "success"
+      }
+    },
+    {
+      "name": "bob_discovers_worlds",
+      "description": "Bob lists available online worlds to discover Alice's world",
+      "client": "bob",
+      "action": {
+        "type": "wait_condition",
+        "condition": "world_published",
+        "expected_value": "shared_test_world",
+        "timeout": 5000
+      },
+      "wait_before": 1000,
+      "wait_after": 500,
+      "timeout": 8000,
+      "success_condition": {
+        "type": "world_state",
+        "check": "world_discoverable",
+        "expected": "shared_test_world"
+      },
+      "depends_on": ["alice_publishes_world"]
+    },
+    {
+      "name": "bob_joins_world",
+      "description": "Bob joins Alice's published world",
+      "client": "bob",
+      "action": {
+        "type": "mcp_call",
+        "tool": "join_world",
+        "arguments": {
+          "world_id": "shared_test_world"
+        }
+      },
+      "wait_before": 500,
+      "wait_after": 2000,
+      "timeout": 15000,
+      "success_condition": {
+        "type": "mcp_response",
+        "expected": "success"
+      },
+      "depends_on": ["bob_discovers_worlds"]
+    },
+    {
+      "name": "sync_world_joined",
+      "description": "Synchronization point - ensure both clients are in the same world",
+      "client": "orchestrator",
+      "action": {
+        "type": "wait_condition",
+        "condition": "client_count",
+        "expected_value": "2",
+        "world_id": "shared_test_world",
+        "timeout": 10000
+      },
+      "wait_before": 1000,
+      "wait_after": 1000,
+      "timeout": 12000,
+      "success_condition": {
+        "type": "client_count",
+        "world_id": "shared_test_world", 
+        "expected": 2
+      },
+      "depends_on": ["bob_joins_world"]
+    },
+    {
+      "name": "alice_moves_forward",
+      "description": "Alice moves forward 2 blocks to test movement synchronization",
+      "client": "alice",
+      "action": {
+        "type": "mcp_call",
+        "tool": "player_move",
+        "arguments": {
+          "x": 2.0,
+          "y": 0.0,
+          "z": 0.0
+        }
+      },
+      "wait_before": 500,
+      "wait_after": 1000,
+      "timeout": 5000,
+      "success_condition": {
+        "type": "mcp_response",
+        "expected": "success"
+      },
+      "depends_on": ["sync_world_joined"]
+    },
+    {
+      "name": "alice_places_block",
+      "description": "Alice places a dirt block to test world modification synchronization",
+      "client": "alice",
+      "action": {
+        "type": "mcp_call",
+        "tool": "place_block",
+        "arguments": {
+          "block_type": "dirt",
+          "x": 5,
+          "y": 1,
+          "z": 5
+        }
+      },
+      "wait_before": 500,
+      "wait_after": 1000,
+      "timeout": 5000,
+      "success_condition": {
+        "type": "mcp_response",
+        "expected": "success"
+      },
+      "depends_on": ["alice_moves_forward"]
+    },
+    {
+      "name": "bob_verifies_block",
+      "description": "Bob checks world status to verify Alice's block was synchronized",
+      "client": "bob",
+      "action": {
+        "type": "mcp_call",
+        "tool": "get_world_status",
+        "arguments": {}
+      },
+      "wait_before": 1000,
+      "wait_after": 500,
+      "timeout": 5000,
+      "success_condition": {
+        "type": "world_state",
+        "check": "block_exists",
+        "coordinates": [5, 1, 5],
+        "expected": "dirt"
+      },
+      "depends_on": ["alice_places_block"]
+    },
+    {
+      "name": "scenario_completion",
+      "description": "Final verification that scenario completed successfully",
+      "client": "orchestrator",
+      "action": {
+        "type": "validate_scenario",
+        "checks": [
+          "world_published",
+          "clients_synchronized", 
+          "block_synchronized"
+        ]
+      },
+      "wait_before": 1000,
+      "wait_after": 0,
+      "timeout": 5000,
+      "success_condition": {
+        "type": "all_checks_passed"
+      },
+      "depends_on": ["bob_verifies_block"]
+    }
+  ],
+  "synchronization": [
+    {
+      "name": "world_ready",
+      "description": "Wait for world to be published and discoverable",
+      "wait_for": ["alice_publishes_world", "bob_discovers_worlds"],
+      "timeout": 15000
+    },
+    {
+      "name": "clients_joined",
+      "description": "Wait for both clients to be in the shared world",
+      "wait_for": ["bob_joins_world", "sync_world_joined"],
+      "timeout": 20000
+    }
+  ],
+  "validation": {
+    "final_checks": [
+      {
+        "type": "world_state",
+        "description": "Verify world exists and has 2 players",
+        "world_id": "shared_test_world",
+        "expected_players": 2
+      },
+      {
+        "type": "block_state", 
+        "description": "Verify block was placed and synchronized",
+        "coordinates": [5, 1, 5],
+        "expected_block": "dirt"
+      },
+      {
+        "type": "mqtt_messages",
+        "description": "Verify MQTT synchronization occurred",
+        "expected_message_types": ["world_publish", "player_join", "block_place"]
+      }
+    ]
+  },
+  "cleanup": {
+    "unpublish_worlds": true,
+    "reset_client_state": true,
+    "clear_mqtt_topics": false
+  }
+}
