@@ -11,12 +11,16 @@ pub fn handle_esc_key(
     keyboard_input: Res<ButtonInput<KeyCode>>,
     console_manager: Option<ResMut<ConsoleManager>>,
     mut game_state: ResMut<NextState<GameState>>,
+    current_state: Res<State<GameState>>,
     windows: Query<&mut Window>,
 ) {
     // Only close console with ESC when it's currently open
+    // Don't handle escape if we're in main menu or settings to avoid conflicts
     if keyboard_input.just_pressed(KeyCode::Escape) {
         if let Some(mut console_manager) = console_manager {
-            if console_manager.console.is_visible() {
+            if console_manager.console.is_visible()
+                && *current_state.get() == GameState::ConsoleOpen
+            {
                 console_manager.console.toggle_visibility();
                 game_state.set(GameState::InGame);
 

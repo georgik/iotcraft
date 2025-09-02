@@ -91,6 +91,7 @@ fn handle_console_toggle(
     }
 
     // Handle ESC key for closing console when it's open
+    // Don't handle escape if we're in main menu or settings to avoid conflicts
     if keyboard_input.just_pressed(KeyCode::Escape) {
         if console_manager.console.is_visible() && *current_state.get() == GameState::ConsoleOpen {
             // Console is open, close it

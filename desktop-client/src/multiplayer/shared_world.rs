@@ -496,14 +496,22 @@ fn load_shared_world_data(
 }
 
 /// System that automatically enables multiplayer mode when MQTT is available and a world is loaded
+/// This only runs during InGame state to avoid interfering with menu navigation
 fn auto_enable_multiplayer_when_mqtt_available(
     mut multiplayer_mode: ResMut<MultiplayerMode>,
     multiplayer_status: Res<crate::multiplayer::MultiplayerConnectionStatus>,
     current_world: Option<Res<crate::world::CurrentWorld>>,
     player_profile: Res<crate::profile::PlayerProfile>,
+    game_state: Res<State<crate::ui::GameState>>,
 ) {
-    // Only auto-enable if we're currently in SinglePlayer mode
+    // Only auto-enable if we're currently in SinglePlayer mode AND in InGame state
+    // This prevents auto-enabling when user is navigating menus
     if let MultiplayerMode::SinglePlayer = &*multiplayer_mode {
+        // Only auto-enable during InGame state to avoid interfering with menu navigation
+        if *game_state.get() != crate::ui::GameState::InGame {
+            return;
+        }
+
         // Check if MQTT is available and we have a world loaded
         if multiplayer_status.connection_available && current_world.is_some() {
             let current_world = current_world.unwrap();
@@ -531,16 +539,15 @@ fn auto_enable_multiplayer_when_mqtt_available(
 
 /// System that automatically transitions to InGame state when multiplayer mode changes from MCP commands
 /// This ensures that when publish_world or join_world is called via MCP, the game properly enters gameplay
+/// BUT respects when a user explicitly chooses to stay in the main menu
 fn auto_transition_to_game_on_multiplayer_changes(
     multiplayer_mode: Res<MultiplayerMode>,
     current_state: Res<State<crate::ui::GameState>>,
     mut next_state: ResMut<NextState<crate::ui::GameState>>,
 ) {
-    // Only transition if we're currently in MainMenu or WorldSelection and multiplayer mode becomes active
-    if matches!(
-        *current_state.get(),
-        crate::ui::GameState::MainMenu | crate::ui::GameState::WorldSelection
-    ) {
+    // Only transition if we're currently in WorldSelection and multiplayer mode becomes active
+    // DO NOT transition from MainMenu, as that interferes with "quit to main menu" functionality
+    if matches!(*current_state.get(), crate::ui::GameState::WorldSelection) {
         match &*multiplayer_mode {
             MultiplayerMode::HostingWorld { .. } | MultiplayerMode::JoinedWorld { .. } => {
                 info!(
@@ -555,4 +562,5 @@ fn auto_transition_to_game_on_multiplayer_changes(
             }
         }
     }
+    // When in MainMenu state, respect the user's choice to stay there even with active multiplayer
 }

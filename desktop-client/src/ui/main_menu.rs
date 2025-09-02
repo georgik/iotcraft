@@ -16,38 +16,41 @@ pub struct MainMenuPlugin;
 
 impl Plugin for MainMenuPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(OnEnter(GameState::MainMenu), setup_main_menu)
-            .add_systems(OnExit(GameState::MainMenu), despawn_main_menu)
-            .add_systems(
-                OnEnter(GameState::WorldSelection),
-                setup_world_selection_menu,
-            )
-            .add_systems(
-                OnExit(GameState::WorldSelection),
-                despawn_world_selection_menu,
-            )
-            .add_systems(OnEnter(GameState::Settings), setup_settings_menu)
-            .add_systems(OnExit(GameState::Settings), despawn_settings_menu)
-            .add_systems(OnEnter(GameState::GameplayMenu), setup_gameplay_menu)
-            .add_systems(OnExit(GameState::GameplayMenu), despawn_gameplay_menu)
-            .add_systems(OnEnter(GameState::InGame), grab_cursor_on_game_start)
-            .add_systems(OnEnter(GameState::ConsoleOpen), release_cursor_for_console)
-            .add_systems(OnExit(GameState::ConsoleOpen), grab_cursor_after_console)
-            .add_systems(
-                Update,
-                (
-                    main_menu_interaction.run_if(in_state(GameState::MainMenu)),
-                    settings_menu_interaction.run_if(in_state(GameState::Settings)),
-                    language_button_interaction.run_if(in_state(GameState::Settings)),
-                    world_selection_interaction.run_if(in_state(GameState::WorldSelection)),
-                    delete_world_interaction.run_if(in_state(GameState::WorldSelection)),
-                    online_world_interaction.run_if(in_state(GameState::WorldSelection)),
-                    refresh_online_worlds_interaction.run_if(in_state(GameState::WorldSelection)),
-                    update_online_worlds_ui.run_if(in_state(GameState::WorldSelection)),
-                    gameplay_menu_interaction.run_if(in_state(GameState::GameplayMenu)),
-                    handle_escape_key,
-                ),
-            );
+        app.add_systems(
+            OnEnter(GameState::MainMenu),
+            (setup_main_menu, release_cursor_for_main_menu),
+        )
+        .add_systems(OnExit(GameState::MainMenu), despawn_main_menu)
+        .add_systems(
+            OnEnter(GameState::WorldSelection),
+            setup_world_selection_menu,
+        )
+        .add_systems(
+            OnExit(GameState::WorldSelection),
+            despawn_world_selection_menu,
+        )
+        .add_systems(OnEnter(GameState::Settings), setup_settings_menu)
+        .add_systems(OnExit(GameState::Settings), despawn_settings_menu)
+        .add_systems(OnEnter(GameState::GameplayMenu), setup_gameplay_menu)
+        .add_systems(OnExit(GameState::GameplayMenu), despawn_gameplay_menu)
+        .add_systems(OnEnter(GameState::InGame), grab_cursor_on_game_start)
+        .add_systems(OnEnter(GameState::ConsoleOpen), release_cursor_for_console)
+        .add_systems(OnExit(GameState::ConsoleOpen), grab_cursor_after_console)
+        .add_systems(
+            Update,
+            (
+                main_menu_interaction.run_if(in_state(GameState::MainMenu)),
+                settings_menu_interaction.run_if(in_state(GameState::Settings)),
+                language_button_interaction.run_if(in_state(GameState::Settings)),
+                world_selection_interaction.run_if(in_state(GameState::WorldSelection)),
+                delete_world_interaction.run_if(in_state(GameState::WorldSelection)),
+                online_world_interaction.run_if(in_state(GameState::WorldSelection)),
+                refresh_online_worlds_interaction.run_if(in_state(GameState::WorldSelection)),
+                update_online_worlds_ui.run_if(in_state(GameState::WorldSelection)),
+                gameplay_menu_interaction.run_if(in_state(GameState::GameplayMenu)),
+                handle_escape_key.run_if(not(in_state(GameState::MainMenu))),
+            ),
+        );
     }
 }
 
@@ -106,6 +109,15 @@ fn grab_cursor_after_console(
     if let Ok(mut controller) = camera_controller_query.single_mut() {
         controller.ignore_next_mouse_delta = true;
         info!("Set ignore_next_mouse_delta flag to prevent camera jump after console close");
+    }
+}
+
+/// System to release cursor when entering the main menu to allow UI interaction
+fn release_cursor_for_main_menu(mut cursor_options_query: Query<&mut bevy::window::CursorOptions>) {
+    if let Ok(mut cursor_options) = cursor_options_query.single_mut() {
+        info!("Releasing cursor for main menu - setting to None");
+        cursor_options.grab_mode = bevy::window::CursorGrabMode::None;
+        cursor_options.visible = true;
     }
 }
 
@@ -1220,6 +1232,7 @@ fn gameplay_menu_interaction(
     mut save_world_events: EventWriter<SaveWorldEvent>,
     mut publish_world_events: EventWriter<PublishWorldEvent>,
     current_world: Option<Res<crate::world::CurrentWorld>>,
+    mut multiplayer_mode: ResMut<crate::multiplayer::MultiplayerMode>,
 ) {
     for (interaction, mut color) in return_to_game_query.iter_mut() {
         match *interaction {
@@ -1271,6 +1284,9 @@ fn gameplay_menu_interaction(
                         world_name: current_world.name.clone(),
                     });
                 }
+                // Reset multiplayer mode to prevent auto-transition back to game
+                info!("Resetting multiplayer mode to SinglePlayer when quitting to main menu");
+                *multiplayer_mode = crate::multiplayer::MultiplayerMode::SinglePlayer;
                 game_state.set(GameState::MainMenu);
             }
             Interaction::Hovered => {
@@ -1287,6 +1303,9 @@ fn gameplay_menu_interaction(
             Interaction::Pressed => {
                 *color = Color::srgb(0.75, 0.35, 0.35).into();
                 info!("Quitting to main menu without saving");
+                // Reset multiplayer mode to prevent auto-transition back to game
+                info!("Resetting multiplayer mode to SinglePlayer when quitting to main menu");
+                *multiplayer_mode = crate::multiplayer::MultiplayerMode::SinglePlayer;
                 game_state.set(GameState::MainMenu);
             }
             Interaction::Hovered => {
