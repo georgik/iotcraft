@@ -74,7 +74,12 @@ getrandom_03 = { package = "getrandom", version = "0.3", features = ["wasm_js"] 
 # Desktop-specific dependencies (non-WASM)
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 rumqttc = "0.24.0"
-rumqttd = "0.19.0"
+# Use native-tls instead of rustls to avoid version conflicts
+rumqttd = { version = "0.19.0", default-features = false, features = ["use-native-tls", "websocket"] }
+# Force compatible rustls versions to avoid duplicate compilation (for rumqttc only)
+rustls = "0.22.4"  # Use the newer version (from rumqttc)
+tokio-rustls = "0.25.0"  # Use the newer version (from rumqttc)
+rustls-webpki = "0.102.8"  # Use the newer version (from rumqttc)
 tokio = { version = "1.47", features = ["rt-multi-thread", "macros", "fs", "net", "process", "signal"] }
 axum = "0.8"
 tower = "0.5"
