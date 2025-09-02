@@ -13,8 +13,12 @@ use std::time::{Duration, Instant};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpStream;
 use tokio::process::{Child, Command as TokioCommand};
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, broadcast};
 use tokio::time::sleep;
+
+// Add chrono for timestamps
+#[cfg(feature = "tui")]
+use chrono;
 
 #[cfg(feature = "tui")]
 use crossterm::{
@@ -33,9 +37,51 @@ use ratatui::{
 };
 #[cfg(feature = "tui")]
 use std::io;
+#[cfg(feature = "tui")]
+use std::sync::atomic::{AtomicBool, Ordering};
 
 // Import our scenario types
 use iotcraft_desktop_client::scenario_types::*;
+
+#[derive(Debug, Clone)]
+pub enum LogSource {
+    Orchestrator,
+    MqttServer,
+    MqttObserver,
+    Client(String),
+}
+
+#[derive(Debug, Clone)]
+pub struct LogMessage {
+    pub source: LogSource,
+    pub message: String,
+    pub timestamp: std::time::Instant,
+}
+
+#[derive(Clone)]
+pub struct LogCollector {
+    sender: broadcast::Sender<LogMessage>,
+}
+
+impl LogCollector {
+    pub fn new() -> (Self, broadcast::Receiver<LogMessage>) {
+        let (sender, receiver) = broadcast::channel(1000);
+        (Self { sender }, receiver)
+    }
+
+    pub fn log(&self, source: LogSource, message: String) {
+        let log_msg = LogMessage {
+            source,
+            message,
+            timestamp: std::time::Instant::now(),
+        };
+        let _ = self.sender.send(log_msg);
+    }
+
+    pub fn log_str(&self, source: LogSource, message: &str) {
+        self.log(source, message.to_string());
+    }
+}
 
 #[cfg(feature = "tui")]
 #[derive(Debug, Clone)]
@@ -56,6 +102,215 @@ struct App {
     show_details: bool,
     selected_scenario: Option<ScenarioInfo>,
     message: Option<String>,
+}
+
+#[cfg(feature = "tui")]
+#[derive(Debug)]
+enum LogPane {
+    Orchestrator,
+    MqttServer,
+    Client(String),
+}
+
+#[cfg(feature = "tui")]
+struct LoggingApp {
+    logs: HashMap<String, Vec<String>>, // key: pane_name, value: log lines
+    selected_pane: LogPane,
+    panes: Vec<LogPane>,
+    should_quit: Arc<AtomicBool>,
+    scroll_positions: HashMap<String, usize>,
+    auto_scroll: bool,
+    log_files: HashMap<String, PathBuf>, // key: pane_name, value: log file path
+}
+
+#[cfg(feature = "tui")]
+impl LoggingApp {
+    fn new(scenario: &Scenario) -> Self {
+        let mut panes = vec![LogPane::Orchestrator];
+        let mut logs = HashMap::new();
+        let mut scroll_positions = HashMap::new();
+
+        // Add MQTT server pane if required
+        if scenario.infrastructure.mqtt_server.required {
+            panes.push(LogPane::MqttServer);
+            logs.insert("MQTT Server".to_string(), Vec::new());
+            scroll_positions.insert("MQTT Server".to_string(), 0);
+        }
+
+        // Add client panes
+        for client in &scenario.clients {
+            panes.push(LogPane::Client(client.id.clone()));
+            logs.insert(client.id.clone(), Vec::new());
+            scroll_positions.insert(client.id.clone(), 0);
+        }
+
+        logs.insert("Orchestrator".to_string(), Vec::new());
+        scroll_positions.insert("Orchestrator".to_string(), 0);
+
+        // Create log files directory
+        let log_dir = PathBuf::from("logs");
+        if !log_dir.exists() {
+            let _ = std::fs::create_dir_all(&log_dir);
+        }
+
+        // Create log files for each pane
+        let mut log_files = HashMap::new();
+        let timestamp = chrono::Utc::now().format("%Y%m%d_%H%M%S");
+
+        log_files.insert(
+            "Orchestrator".to_string(),
+            log_dir.join(format!("orchestrator_{}.log", timestamp)),
+        );
+
+        if scenario.infrastructure.mqtt_server.required {
+            log_files.insert(
+                "MQTT Server".to_string(),
+                log_dir.join(format!("mqtt_server_{}.log", timestamp)),
+            );
+        }
+
+        for client in &scenario.clients {
+            log_files.insert(
+                client.id.clone(),
+                log_dir.join(format!("client_{}_{}.log", client.id, timestamp)),
+            );
+        }
+
+        Self {
+            logs,
+            selected_pane: LogPane::Orchestrator,
+            panes,
+            should_quit: Arc::new(AtomicBool::new(false)),
+            scroll_positions,
+            auto_scroll: true,
+            log_files,
+        }
+    }
+
+    fn add_log(&mut self, source: &LogSource, message: String) {
+        let pane_name = match source {
+            LogSource::Orchestrator => "Orchestrator".to_string(),
+            LogSource::MqttServer => "MQTT Server".to_string(),
+            LogSource::MqttObserver => "MQTT Observer".to_string(),
+            LogSource::Client(id) => id.clone(),
+        };
+
+        // Write to log file
+        if let Some(log_file_path) = self.log_files.get(&pane_name) {
+            let timestamp = chrono::Utc::now().format("%H:%M:%S%.3f");
+            let log_entry = format!("[{}] {}\n", timestamp, message);
+            let _ = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(log_file_path)
+                .and_then(|mut file| {
+                    use std::io::Write;
+                    file.write_all(log_entry.as_bytes())
+                });
+        }
+
+        if let Some(log_lines) = self.logs.get_mut(&pane_name) {
+            // Split message into lines and add each one
+            for line in message.lines() {
+                log_lines.push(line.to_string());
+
+                // Keep only last 1000 lines per pane to prevent memory issues
+                if log_lines.len() > 1000 {
+                    log_lines.remove(0);
+                    // Adjust scroll position if we're removing lines
+                    if let Some(scroll) = self.scroll_positions.get_mut(&pane_name) {
+                        if *scroll > 0 {
+                            *scroll = scroll.saturating_sub(1);
+                        }
+                    }
+                }
+            }
+
+            // Auto-scroll to bottom if enabled
+            if self.auto_scroll {
+                let max_scroll = log_lines.len().saturating_sub(1);
+                self.scroll_positions.insert(pane_name, max_scroll);
+            }
+        }
+    }
+
+    fn get_current_pane_name(&self) -> String {
+        match &self.selected_pane {
+            LogPane::Orchestrator => "Orchestrator".to_string(),
+            LogPane::MqttServer => "MQTT Server".to_string(),
+            LogPane::Client(id) => id.clone(),
+        }
+    }
+
+    fn next_pane(&mut self) {
+        let current_idx = self
+            .panes
+            .iter()
+            .position(|p| match (p, &self.selected_pane) {
+                (LogPane::Orchestrator, LogPane::Orchestrator) => true,
+                (LogPane::MqttServer, LogPane::MqttServer) => true,
+                (LogPane::Client(a), LogPane::Client(b)) => a == b,
+                _ => false,
+            })
+            .unwrap_or(0);
+
+        let next_idx = (current_idx + 1) % self.panes.len();
+        self.selected_pane = self.panes[next_idx].clone();
+    }
+
+    fn prev_pane(&mut self) {
+        let current_idx = self
+            .panes
+            .iter()
+            .position(|p| match (p, &self.selected_pane) {
+                (LogPane::Orchestrator, LogPane::Orchestrator) => true,
+                (LogPane::MqttServer, LogPane::MqttServer) => true,
+                (LogPane::Client(a), LogPane::Client(b)) => a == b,
+                _ => false,
+            })
+            .unwrap_or(0);
+
+        let prev_idx = if current_idx == 0 {
+            self.panes.len() - 1
+        } else {
+            current_idx - 1
+        };
+        self.selected_pane = self.panes[prev_idx].clone();
+    }
+
+    fn scroll_up(&mut self) {
+        let pane_name = self.get_current_pane_name();
+        if let Some(scroll) = self.scroll_positions.get_mut(&pane_name) {
+            *scroll = scroll.saturating_sub(5); // Scroll 5 lines at a time
+            self.auto_scroll = false;
+        }
+    }
+
+    fn scroll_down(&mut self) {
+        let pane_name = self.get_current_pane_name();
+        if let Some(scroll) = self.scroll_positions.get_mut(&pane_name) {
+            if let Some(logs) = self.logs.get(&pane_name) {
+                let max_scroll = logs.len().saturating_sub(1);
+                *scroll = (*scroll + 5).min(max_scroll); // Scroll 5 lines at a time
+
+                // If we're at the bottom, re-enable auto-scroll
+                if *scroll >= max_scroll {
+                    self.auto_scroll = true;
+                }
+            }
+        }
+    }
+}
+
+#[cfg(feature = "tui")]
+impl Clone for LogPane {
+    fn clone(&self) -> Self {
+        match self {
+            LogPane::Orchestrator => LogPane::Orchestrator,
+            LogPane::MqttServer => LogPane::MqttServer,
+            LogPane::Client(id) => LogPane::Client(id.clone()),
+        }
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -427,10 +682,17 @@ async fn start_infrastructure(
             );
         }
 
-        let mqtt_ready = wait_for_port_with_retries("localhost", port, 30, verbose).await;
+        let mqtt_ready = wait_for_port_with_retries_and_context(
+            "localhost",
+            port,
+            300,
+            verbose,
+            Some("cargo run --release (mqtt-server)"),
+        )
+        .await;
         if !mqtt_ready {
             return Err(format!(
-                "MQTT server failed to start on port {} within 30 second timeout",
+                "MQTT server failed to start on port {} within 5 minute timeout",
                 port
             )
             .into());
@@ -449,8 +711,13 @@ async fn start_infrastructure(
             }
 
             let mqtt_port = state.scenario.infrastructure.mqtt_server.port;
-            let observer_process = TokioCommand::new("mosquitto_sub")
+            let observer_process = TokioCommand::new("cargo")
+                .current_dir("../mqtt-client")
                 .args(&[
+                    "run",
+                    "--bin",
+                    "mqtt-observer",
+                    "--",
                     "-h",
                     "localhost",
                     "-p",
@@ -463,7 +730,7 @@ async fn start_infrastructure(
                 .stdout(std::process::Stdio::piped())
                 .stderr(std::process::Stdio::piped())
                 .spawn()
-                .map_err(|e| format!("Failed to start MQTT observer: {}. Make sure mosquitto-clients is installed.", e))?;
+                .map_err(|e| format!("Failed to start MQTT observer: {}. Make sure mqtt-client is available in ../mqtt-client.", e))?;
 
             state
                 .infrastructure_processes
@@ -507,7 +774,7 @@ async fn start_clients(
 
         // Add optional MQTT arguments if required
         if state.scenario.infrastructure.mqtt_server.required {
-            cmd.arg("--mqtt-broker").arg(format!(
+            cmd.arg("--mqtt-server").arg(format!(
                 "localhost:{}",
                 state.scenario.infrastructure.mqtt_server.port
             ));
@@ -563,7 +830,17 @@ async fn start_clients(
             );
         }
 
-        let mcp_ready = wait_for_port_with_retries("localhost", client.mcp_port, 30, verbose).await;
+        let mcp_ready = wait_for_port_with_retries_and_context(
+            "localhost",
+            client.mcp_port,
+            300,
+            verbose,
+            Some(&format!(
+                "cargo run --bin iotcraft-dekstop-client ({})",
+                client.id
+            )),
+        )
+        .await;
         if !mcp_ready {
             return Err(format!("Client {} MCP server failed to start", client.id).into());
         }
@@ -681,7 +958,7 @@ async fn execute_step(
     step: &Step,
     state: &mut OrchestratorState,
     verbose: bool,
-) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
+) -> Result<serde_json::Value, Box<dyn std::error::Error + Send + Sync>> {
     match &step.action {
         // mcplay-style actions
         Action::McpCall { tool, arguments } => {
@@ -821,11 +1098,9 @@ async fn execute_mcp_call(
     tool: &str,
     arguments: &serde_json::Value,
     state: &mut OrchestratorState,
-    verbose: bool,
-) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
-    if verbose {
-        println!("  📡 MCP call: {} with args: {}", tool, arguments);
-    }
+    _verbose: bool,
+) -> Result<serde_json::Value, Box<dyn std::error::Error + Send + Sync>> {
+    // Note: verbose logging is now handled by the logging system
 
     let stream = state
         .client_connections
@@ -871,7 +1146,7 @@ async fn execute_wait_condition(
     wait_timeout: u64,
     _state: &mut OrchestratorState,
     verbose: bool,
-) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
+) -> Result<serde_json::Value, Box<dyn std::error::Error + Send + Sync>> {
     if verbose {
         println!(
             "  ⏳ Waiting for condition: {} (timeout: {}ms)",
@@ -895,7 +1170,7 @@ async fn execute_console_command(
     command: &str,
     _state: &mut OrchestratorState,
     verbose: bool,
-) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
+) -> Result<serde_json::Value, Box<dyn std::error::Error + Send + Sync>> {
     if verbose {
         println!("  💻 Console command: {}", command);
     }
@@ -911,7 +1186,7 @@ async fn execute_validate_scenario(
     checks: &[String],
     _state: &mut OrchestratorState,
     verbose: bool,
-) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
+) -> Result<serde_json::Value, Box<dyn std::error::Error + Send + Sync>> {
     if verbose {
         println!("  ✅ Validating scenario with checks: {:?}", checks);
     }
@@ -944,39 +1219,78 @@ async fn wait_for_port(host: &str, port: u16, timeout_seconds: u64) -> bool {
     false
 }
 
-/// Wait for a port to become available with verbose progress feedback
+/// Wait for a port to become available with verbose progress feedback, respecting Ctrl+C cancellation
 async fn wait_for_port_with_retries(
     host: &str,
     port: u16,
     timeout_seconds: u64,
     verbose: bool,
 ) -> bool {
+    wait_for_port_with_retries_and_context(host, port, timeout_seconds, verbose, None).await
+}
+
+/// Wait for a port to become available with verbose progress feedback, respecting Ctrl+C cancellation, with context
+async fn wait_for_port_with_retries_and_context(
+    host: &str,
+    port: u16,
+    timeout_seconds: u64,
+    verbose: bool,
+    context: Option<&str>,
+) -> bool {
     let timeout_duration = Duration::from_secs(timeout_seconds);
     let start = Instant::now();
-    let mut attempt = 1;
+    let mut last_log_time = Instant::now();
+
+    // Create a cancellation signal detector
+    let mut sigint = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())
+        .expect("Failed to install SIGINT handler in wait_for_port_with_retries");
 
     while start.elapsed() < timeout_duration {
-        if let Ok(_) = TcpStream::connect(format!("{}:{}", host, port)).await {
-            if verbose {
+        // Check for connection with a timeout and cancellation
+        let connection_future = TcpStream::connect(format!("{}:{}", host, port));
+        let connection_timeout = sleep(Duration::from_millis(1000)); // Check every 1 second instead of 500ms
+        let sigint_future = sigint.recv();
+
+        tokio::select! {
+            connection_result = connection_future => {
+                if connection_result.is_ok() {
+                    if verbose {
+                        println!(
+                            "    ✅ Port {}:{} is now available",
+                            host, port
+                        );
+                    }
+                    return true;
+                }
+            }
+            _ = connection_timeout => {
+                // Timeout occurred, continue loop
+            }
+            _ = sigint_future => {
+                // Ctrl+C detected, exit the function immediately
+                if verbose {
+                    println!("    ⚠️ Port checking cancelled due to Ctrl+C");
+                }
+                return false;
+            }
+        }
+
+        // Log every 3 seconds instead of every attempt
+        if verbose && last_log_time.elapsed() >= Duration::from_secs(3) {
+            let elapsed = start.elapsed().as_secs();
+            if let Some(context) = context {
                 println!(
-                    "    ✅ Port {}:{} is now available (attempt {})",
-                    host, port, attempt
+                    "    ⏳ Still waiting for {} on port {}:{} ({}s elapsed)...",
+                    context, host, port, elapsed
+                );
+            } else {
+                println!(
+                    "    ⏳ Still waiting for port {}:{} ({}s elapsed)...",
+                    host, port, elapsed
                 );
             }
-            return true;
+            last_log_time = Instant::now();
         }
-
-        if verbose && attempt % 6 == 1 {
-            // Log every 3 seconds (6 attempts * 500ms)
-            let elapsed = start.elapsed().as_secs();
-            println!(
-                "    ⏳ Still waiting for port {}:{} ({}s elapsed)...",
-                host, port, elapsed
-            );
-        }
-
-        attempt += 1;
-        sleep(Duration::from_millis(500)).await;
     }
 
     if verbose {
@@ -1063,7 +1377,7 @@ async fn show_tui() -> Result<(), Box<dyn std::error::Error>> {
     // Setup terminal
     enable_raw_mode()?;
     let mut stdout = io::stdout();
-    execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
+    execute!(stdout, EnterAlternateScreen)?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
@@ -1088,11 +1402,7 @@ async fn show_tui() -> Result<(), Box<dyn std::error::Error>> {
 
     // Restore terminal
     disable_raw_mode()?;
-    execute!(
-        terminal.backend_mut(),
-        LeaveAlternateScreen,
-        DisableMouseCapture
-    )?;
+    execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
     terminal.show_cursor()?;
 
     result
@@ -1201,11 +1511,7 @@ async fn run_tui(
                                     if scenario.is_valid {
                                         // Exit TUI and run scenario
                                         disable_raw_mode()?;
-                                        execute!(
-                                            terminal.backend_mut(),
-                                            LeaveAlternateScreen,
-                                            DisableMouseCapture
-                                        )?;
+                                        execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
                                         terminal.show_cursor()?;
 
                                         return run_selected_scenario(&scenario.file_path).await;
@@ -1474,7 +1780,920 @@ async fn run_selected_scenario(path: &PathBuf) -> Result<(), Box<dyn std::error:
             .map_err(|e| format!("Failed to parse JSON scenario file: {}", e))?
     };
 
-    // Run the scenario with verbose output
-    run_scenario(scenario, true).await?;
+    // Run the scenario with TUI logging display
+    run_scenario_with_tui(scenario).await?;
     Ok(())
+}
+
+#[cfg(feature = "tui")]
+async fn run_scenario_with_tui(scenario: Scenario) -> Result<(), Box<dyn std::error::Error>> {
+    // Setup terminal for scenario execution
+    enable_raw_mode()?;
+    let mut stdout = io::stdout();
+    execute!(stdout, EnterAlternateScreen)?;
+    let backend = CrosstermBackend::new(stdout);
+    let mut terminal = Terminal::new(backend)?;
+
+    // Create logging app
+    let mut logging_app = LoggingApp::new(&scenario);
+    let (log_collector, _) = LogCollector::new();
+
+    // Add initial log message
+    logging_app.add_log(
+        &LogSource::Orchestrator,
+        format!("🚀 Starting scenario: {}", scenario.name),
+    );
+    logging_app.add_log(
+        &LogSource::Orchestrator,
+        format!("📖 Description: {}", scenario.description),
+    );
+    logging_app.add_log(
+        &LogSource::Orchestrator,
+        format!("👥 Clients: {}", scenario.clients.len()),
+    );
+    logging_app.add_log(
+        &LogSource::Orchestrator,
+        format!("📋 Steps: {}", scenario.steps.len()),
+    );
+    logging_app.add_log(&LogSource::Orchestrator, "".to_string());
+
+    // Clone the quit flag for the background task
+    let quit_flag = Arc::clone(&logging_app.should_quit);
+
+    // Spawn the scenario execution task
+    let scenario_task = tokio::spawn({
+        let log_collector = log_collector.clone();
+        let quit_flag = Arc::clone(&quit_flag);
+        async move {
+            let result = run_scenario_with_logging(scenario, log_collector, quit_flag).await;
+            result
+        }
+    });
+
+    // Spawn log receiver task
+    let log_task = tokio::spawn({
+        let quit_flag = Arc::clone(&logging_app.should_quit);
+        let mut log_receiver = log_collector.sender.subscribe(); // Create a new receiver
+        async move {
+            let mut logs = Vec::new();
+            while !quit_flag.load(Ordering::Relaxed) {
+                match tokio::time::timeout(Duration::from_millis(100), log_receiver.recv()).await {
+                    Ok(Ok(log_msg)) => {
+                        logs.push(log_msg);
+                    }
+                    Ok(Err(_)) => break, // Channel closed
+                    Err(_) => {}         // Timeout, continue
+                }
+            }
+            logs
+        }
+    });
+
+    // Create a dedicated log receiver for the main loop
+    let mut main_log_receiver = log_collector.sender.subscribe();
+
+    // Main TUI loop
+    let mut last_draw = std::time::Instant::now();
+    loop {
+        // Check if scenario is done
+        if scenario_task.is_finished() {
+            // Process any remaining logs
+            while let Ok(log_msg) = main_log_receiver.try_recv() {
+                logging_app.add_log(&log_msg.source, log_msg.message);
+            }
+
+            // Final render
+            terminal.draw(|f| draw_logging_ui(f, &logging_app))?;
+
+            // Wait a bit for user to see final state
+            tokio::time::sleep(Duration::from_secs(2)).await;
+            break;
+        }
+
+        // Process new log messages
+        while let Ok(log_msg) = main_log_receiver.try_recv() {
+            logging_app.add_log(&log_msg.source, log_msg.message);
+        }
+
+        // Handle input events
+        if event::poll(Duration::from_millis(50))? {
+            match event::read()? {
+                Event::Key(key) => {
+                    if key.kind == KeyEventKind::Press {
+                        match key.code {
+                            KeyCode::Char('q') | KeyCode::Esc | KeyCode::Char('c')
+                                if key
+                                    .modifiers
+                                    .contains(crossterm::event::KeyModifiers::CONTROL) =>
+                            {
+                                logging_app.should_quit.store(true, Ordering::Relaxed);
+                                break;
+                            }
+                            KeyCode::Tab => {
+                                logging_app.next_pane();
+                            }
+                            KeyCode::BackTab => {
+                                logging_app.prev_pane();
+                            }
+                            KeyCode::Up => {
+                                logging_app.scroll_up();
+                            }
+                            KeyCode::Down => {
+                                logging_app.scroll_down();
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                Event::Mouse(_) => {
+                    // Mouse events are handled by the terminal for text selection
+                    // No need to process them in our application
+                }
+                _ => {}
+            }
+        }
+
+        // Draw UI (throttled to ~20 FPS)
+        if last_draw.elapsed() >= Duration::from_millis(50) {
+            terminal.draw(|f| draw_logging_ui(f, &logging_app))?;
+            last_draw = std::time::Instant::now();
+        }
+    }
+
+    // Clean up terminal
+    disable_raw_mode()?;
+    execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
+    terminal.show_cursor()?;
+
+    // Show log files summary
+    show_log_summary(&logging_app);
+
+    // Simple completion message and exit
+    println!("\n📍 Scenario completed.");
+
+    // Get scenario result and exit immediately
+    let result = match scenario_task.await? {
+        Ok(_) => {
+            let _logs = log_task.await?;
+            Ok(())
+        }
+        Err(e) => {
+            let _logs = log_task.await?;
+            Err(e)
+        }
+    };
+
+    // Force exit to prevent hanging
+    std::process::exit(0);
+}
+
+#[cfg(feature = "tui")]
+fn draw_logging_ui(f: &mut Frame, app: &LoggingApp) {
+    let chunks = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(25), Constraint::Percentage(75)])
+        .split(f.area());
+
+    // Left panel: Pane selector
+    let pane_list: Vec<ListItem> = app
+        .panes
+        .iter()
+        .enumerate()
+        .map(|(_i, pane)| {
+            let name = match pane {
+                LogPane::Orchestrator => "🎭 Orchestrator".to_string(),
+                LogPane::MqttServer => "📡 MQTT Server".to_string(),
+                LogPane::Client(id) => format!("👤 Client: {}", id),
+            };
+
+            let is_selected = match (&app.selected_pane, pane) {
+                (LogPane::Orchestrator, LogPane::Orchestrator) => true,
+                (LogPane::MqttServer, LogPane::MqttServer) => true,
+                (LogPane::Client(a), LogPane::Client(b)) => a == b,
+                _ => false,
+            };
+
+            let style = if is_selected {
+                Style::default().bg(Color::Yellow).fg(Color::Black)
+            } else {
+                Style::default()
+            };
+
+            ListItem::new(name).style(style)
+        })
+        .collect();
+
+    let pane_selector = List::new(pane_list)
+        .block(Block::default().borders(Borders::ALL).title("🔗 Log Panes"))
+        .highlight_style(Style::default().bg(Color::Blue).fg(Color::White));
+
+    f.render_widget(pane_selector, chunks[0]);
+
+    // Right panel: Log content
+    let current_pane_name = app.get_current_pane_name();
+    let empty_vec = Vec::new();
+    let log_lines = app.logs.get(&current_pane_name).unwrap_or(&empty_vec);
+    let scroll_pos = app.scroll_positions.get(&current_pane_name).unwrap_or(&0);
+
+    let visible_height = chunks[1].height.saturating_sub(2) as usize; // Account for borders
+    let start_idx = if log_lines.len() <= visible_height {
+        0
+    } else {
+        scroll_pos
+            .saturating_sub(visible_height / 2)
+            .min(log_lines.len().saturating_sub(visible_height))
+    };
+
+    let visible_logs: Vec<Line> = log_lines
+        .iter()
+        .skip(start_idx)
+        .take(visible_height)
+        .map(|line| Line::from(line.as_str()))
+        .collect();
+
+    let log_content = Paragraph::new(visible_logs)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(format!("📋 Logs: {}", current_pane_name)),
+        )
+        .wrap(Wrap { trim: false })
+        .scroll((0, 0));
+
+    f.render_widget(log_content, chunks[1]);
+
+    // Show controls at bottom
+    let controls_area = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(0), Constraint::Length(3)])
+        .split(f.area())[1];
+
+    let controls = Paragraph::new(vec![Line::from(vec![
+        Span::styled(
+            "Tab/Shift+Tab",
+            Style::default().add_modifier(Modifier::BOLD),
+        ),
+        Span::raw(" Switch panes  "),
+        Span::styled("↑↓", Style::default().add_modifier(Modifier::BOLD)),
+        Span::raw(" Scroll  "),
+        Span::styled(
+            "q/Esc/Ctrl+C",
+            Style::default().add_modifier(Modifier::BOLD),
+        ),
+        Span::raw(" Quit  "),
+        Span::styled("Mouse", Style::default().add_modifier(Modifier::BOLD)),
+        Span::raw(" Select text"),
+    ])])
+    .block(Block::default().borders(Borders::ALL).title("🎮 Controls"))
+    .alignment(Alignment::Center);
+
+    f.render_widget(controls, controls_area);
+}
+
+async fn run_scenario_with_logging(
+    scenario: Scenario,
+    log_collector: LogCollector,
+    quit_flag: Arc<AtomicBool>,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    // Create shared state wrapped in Arc<Mutex> for signal handling
+    let state = Arc::new(Mutex::new(OrchestratorState::new(scenario)));
+
+    // Execute scenario with proper cleanup handling
+    let result = run_scenario_inner_with_logging(
+        Arc::clone(&state),
+        log_collector.clone(),
+        quit_flag.clone(),
+    )
+    .await;
+
+    // Always cleanup, even on error
+    {
+        let mut state = state.lock().await;
+        cleanup_with_logging(&mut state, log_collector.clone()).await?;
+    }
+
+    result
+}
+
+async fn run_scenario_inner_with_logging(
+    state: Arc<Mutex<OrchestratorState>>,
+    log_collector: LogCollector,
+    quit_flag: Arc<AtomicBool>,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    // Start infrastructure if any services are required
+    let needs_infrastructure = {
+        let state = state.lock().await;
+        state.scenario.infrastructure.mqtt_server.required
+            || state
+                .scenario
+                .infrastructure
+                .mcp_server
+                .as_ref()
+                .map(|mcp| mcp.required)
+                .unwrap_or(false)
+            || state
+                .scenario
+                .infrastructure
+                .mqtt_observer
+                .as_ref()
+                .map(|obs| obs.required)
+                .unwrap_or(false)
+    };
+
+    if needs_infrastructure {
+        let mut state = state.lock().await;
+        start_infrastructure_with_logging(&mut *state, log_collector.clone(), quit_flag.clone())
+            .await?;
+    }
+
+    // Start clients
+    {
+        let mut state = state.lock().await;
+        start_clients_with_logging(&mut *state, log_collector.clone(), quit_flag.clone()).await?;
+    }
+
+    // Execute steps
+    {
+        let mut state = state.lock().await;
+        execute_steps_with_logging(&mut *state, log_collector.clone()).await?;
+    }
+
+    // Generate report
+    {
+        let state = state.lock().await;
+        generate_report_with_logging(&*state, log_collector.clone());
+    }
+
+    Ok(())
+}
+
+async fn start_infrastructure_with_logging(
+    state: &mut OrchestratorState,
+    log_collector: LogCollector,
+    _quit_flag: Arc<AtomicBool>,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    log_collector.log_str(LogSource::Orchestrator, "🔧 Starting infrastructure...");
+
+    // Check if MQTT port is already in use before starting
+    if state.scenario.infrastructure.mqtt_server.required {
+        let port = state.scenario.infrastructure.mqtt_server.port;
+        log_collector.log_str(
+            LogSource::Orchestrator,
+            &format!("  Checking if MQTT port {} is available...", port),
+        );
+
+        // Check if port is already occupied
+        if is_port_occupied("localhost", port).await {
+            let error_msg = format!(
+                "MQTT port {} is already in use. Please stop any existing MQTT brokers or choose a different port.",
+                port
+            );
+            log_collector.log_str(LogSource::Orchestrator, &format!("❌ {}", error_msg));
+            return Err(error_msg.into());
+        }
+    }
+
+    // Start MQTT server directly if required (instead of delegating to xtask)
+    if state.scenario.infrastructure.mqtt_server.required {
+        let port = state.scenario.infrastructure.mqtt_server.port;
+        log_collector.log_str(
+            LogSource::Orchestrator,
+            &format!("  Starting MQTT server on port {}", port),
+        );
+
+        // Start MQTT server from ../mqtt-server directory
+        let mut mqtt_process = TokioCommand::new("cargo")
+            .current_dir("../mqtt-server")
+            .args(&["run", "--release", "--", "--port", &port.to_string()])
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .map_err(|e| {
+                let error_msg = format!("Failed to start MQTT server: {}", e);
+                log_collector.log_str(LogSource::Orchestrator, &format!("❌ {}", error_msg));
+                error_msg
+            })?;
+
+        // Capture stdout and stderr from the MQTT server process
+        if let Some(stdout) = mqtt_process.stdout.take() {
+            let log_collector = log_collector.clone();
+            tokio::spawn(async move {
+                let mut reader = BufReader::new(stdout);
+                let mut line = String::new();
+                while reader.read_line(&mut line).await.is_ok() && !line.is_empty() {
+                    log_collector.log_str(LogSource::MqttServer, line.trim());
+                    line.clear();
+                }
+            });
+        }
+
+        if let Some(stderr) = mqtt_process.stderr.take() {
+            let log_collector = log_collector.clone();
+            tokio::spawn(async move {
+                let mut reader = BufReader::new(stderr);
+                let mut line = String::new();
+                while reader.read_line(&mut line).await.is_ok() && !line.is_empty() {
+                    log_collector
+                        .log_str(LogSource::MqttServer, &format!("[stderr] {}", line.trim()));
+                    line.clear();
+                }
+            });
+        }
+
+        state
+            .infrastructure_processes
+            .insert("mqtt_server".to_string(), mqtt_process);
+
+        // Wait for MQTT server to be ready
+        log_collector.log_str(
+            LogSource::Orchestrator,
+            &format!(
+                "  Waiting for MQTT server to become ready on port {}...",
+                port
+            ),
+        );
+
+        let mqtt_ready = wait_for_port_with_retries_and_context_with_logging(
+            "localhost",
+            port,
+            300,
+            Some("cargo run --release (mqtt-server)"),
+            log_collector.clone(),
+        )
+        .await;
+        if !mqtt_ready {
+            let error_msg = format!(
+                "MQTT server failed to start on port {} within 5 minute timeout",
+                port
+            );
+            log_collector.log_str(LogSource::Orchestrator, &format!("❌ {}", error_msg));
+            return Err(error_msg.into());
+        }
+
+        log_collector.log_str(
+            LogSource::Orchestrator,
+            &format!("  ✅ MQTT server ready on port {}", port),
+        );
+    }
+
+    Ok(())
+}
+
+async fn start_clients_with_logging(
+    state: &mut OrchestratorState,
+    log_collector: LogCollector,
+    _quit_flag: Arc<AtomicBool>,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    if state.scenario.clients.is_empty() {
+        log_collector.log_str(
+            LogSource::Orchestrator,
+            "👥 No clients to start (orchestrator-only scenario)",
+        );
+        return Ok(());
+    }
+
+    log_collector.log_str(
+        LogSource::Orchestrator,
+        &format!("👥 Starting {} clients...", state.scenario.clients.len()),
+    );
+
+    // Start each client directly instead of relying on xtask
+    for client in &state.scenario.clients {
+        log_collector.log_str(
+            LogSource::Orchestrator,
+            &format!("  Starting client: {}", client.id),
+        );
+
+        // Build client command arguments
+        let mut cmd = TokioCommand::new("cargo");
+        cmd.arg("run")
+            .arg("--bin")
+            .arg("iotcraft-dekstop-client")
+            .args(&["--", "--mcp"])
+            .env("MCP_PORT", client.mcp_port.to_string())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped());
+
+        // Add optional MQTT arguments if required
+        if state.scenario.infrastructure.mqtt_server.required {
+            cmd.arg("--mqtt-server").arg(format!(
+                "localhost:{}",
+                state.scenario.infrastructure.mqtt_server.port
+            ));
+        }
+
+        // Start the client
+        let mut client_process = cmd.spawn().map_err(|e| {
+            let error_msg = format!("Failed to start client {}: {}", client.id, e);
+            log_collector.log_str(LogSource::Orchestrator, &format!("❌ {}", error_msg));
+            error_msg
+        })?;
+
+        // Capture stdout and stderr from the client process
+        if let Some(stdout) = client_process.stdout.take() {
+            let log_collector = log_collector.clone();
+            let client_id = client.id.clone();
+            tokio::spawn(async move {
+                let mut reader = BufReader::new(stdout);
+                let mut line = String::new();
+                while reader.read_line(&mut line).await.is_ok() && !line.is_empty() {
+                    log_collector.log_str(LogSource::Client(client_id.clone()), line.trim());
+                    line.clear();
+                }
+            });
+        }
+
+        if let Some(stderr) = client_process.stderr.take() {
+            let log_collector = log_collector.clone();
+            let client_id = client.id.clone();
+            tokio::spawn(async move {
+                let mut reader = BufReader::new(stderr);
+                let mut line = String::new();
+                while reader.read_line(&mut line).await.is_ok() && !line.is_empty() {
+                    log_collector.log_str(
+                        LogSource::Client(client_id.clone()),
+                        &format!("[stderr] {}", line.trim()),
+                    );
+                    line.clear();
+                }
+            });
+        }
+
+        // Check if the process is still running after a brief moment
+        tokio::time::sleep(Duration::from_millis(1000)).await;
+        match client_process.try_wait() {
+            Ok(Some(exit_status)) => {
+                let error_msg = format!(
+                    "Client {} exited immediately with status: {}",
+                    client.id, exit_status
+                );
+                log_collector.log_str(LogSource::Orchestrator, &format!("❌ {}", error_msg));
+                return Err(error_msg.into());
+            }
+            Ok(None) => {
+                log_collector.log_str(
+                    LogSource::Orchestrator,
+                    &format!("    Client {} process is running", client.id),
+                );
+            }
+            Err(e) => {
+                let error_msg =
+                    format!("Failed to check client {} process status: {}", client.id, e);
+                log_collector.log_str(LogSource::Orchestrator, &format!("❌ {}", error_msg));
+                return Err(error_msg.into());
+            }
+        }
+
+        state
+            .client_processes
+            .insert(client.id.clone(), client_process);
+
+        // Wait for MCP server to be ready
+        log_collector.log_str(
+            LogSource::Orchestrator,
+            &format!(
+                "  Waiting for client {} MCP server on port {}...",
+                client.id, client.mcp_port
+            ),
+        );
+
+        let mcp_ready = wait_for_port_with_retries_and_context_with_logging(
+            "localhost",
+            client.mcp_port,
+            300,
+            Some(&format!(
+                "cargo run --bin iotcraft-dekstop-client ({})",
+                client.id
+            )),
+            log_collector.clone(),
+        )
+        .await;
+        if !mcp_ready {
+            let error_msg = format!("Client {} MCP server failed to start", client.id);
+            log_collector.log_str(LogSource::Orchestrator, &format!("❌ {}", error_msg));
+            return Err(error_msg.into());
+        }
+
+        // Connect to MCP server
+        let stream = TcpStream::connect(format!("localhost:{}", client.mcp_port))
+            .await
+            .map_err(|e| {
+                let error_msg = format!(
+                    "Failed to connect to client {} MCP server: {}",
+                    client.id, e
+                );
+                log_collector.log_str(LogSource::Orchestrator, &format!("❌ {}", error_msg));
+                error_msg
+            })?;
+
+        state.client_connections.insert(client.id.clone(), stream);
+
+        // Wait for client to be fully initialized before proceeding
+        log_collector.log_str(
+            LogSource::Orchestrator,
+            &format!("  Waiting for client {} to initialize fully...", client.id),
+        );
+        tokio::time::sleep(Duration::from_millis(3000)).await; // Give client time to initialize UI and be ready for commands
+
+        log_collector.log_str(
+            LogSource::Orchestrator,
+            &format!("  ✅ Client {} ready", client.id),
+        );
+    }
+
+    Ok(())
+}
+
+async fn execute_steps_with_logging(
+    state: &mut OrchestratorState,
+    log_collector: LogCollector,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    log_collector.log_str(
+        LogSource::Orchestrator,
+        &format!("🎬 Executing {} steps...", state.scenario.steps.len()),
+    );
+    log_collector.log_str(LogSource::Orchestrator, "");
+
+    // Clone the steps to avoid borrow checker issues
+    let steps = state.scenario.steps.clone();
+
+    for (i, step) in steps.iter().enumerate() {
+        // Check dependencies
+        for dep in &step.depends_on {
+            if !state.completed_steps.contains(dep) {
+                let error_msg = format!(
+                    "Step '{}' depends on '{}' which hasn't completed",
+                    step.name, dep
+                );
+                log_collector.log_str(LogSource::Orchestrator, &format!("❌ {}", error_msg));
+                return Err(error_msg.into());
+            }
+        }
+
+        log_collector.log_str(
+            LogSource::Orchestrator,
+            &format!("📍 Step {}: {} ({})", i + 1, step.name, step.description),
+        );
+        log_collector.log_str(
+            LogSource::Orchestrator,
+            &format!("  Client: {}", step.client),
+        );
+        log_collector.log_str(
+            LogSource::Orchestrator,
+            &format!("  Action: {:?}", step.action),
+        );
+
+        // Wait before executing
+        if step.wait_before > 0 {
+            log_collector.log_str(
+                LogSource::Orchestrator,
+                &format!("  ⏳ Waiting {}ms before execution...", step.wait_before),
+            );
+            sleep(Duration::from_millis(step.wait_before)).await;
+        }
+
+        // Execute step
+        let step_start = Instant::now();
+        let result = execute_step(step, state, true).await; // Always verbose in TUI mode
+        let step_duration = step_start.elapsed();
+
+        match result {
+            Ok(response) => {
+                log_collector.log_str(
+                    LogSource::Orchestrator,
+                    &format!("  ✅ Completed in {:.2}s", step_duration.as_secs_f64()),
+                );
+                state.step_results.insert(
+                    step.name.clone(),
+                    StepResult {
+                        success: true,
+                        duration: step_duration,
+                        error: None,
+                        response: Some(response),
+                    },
+                );
+                state.completed_steps.push(step.name.clone());
+            }
+            Err(e) => {
+                let error_msg = format!(
+                    "Step '{}' failed after {:.2}s: {}",
+                    step.name,
+                    step_duration.as_secs_f64(),
+                    e
+                );
+                log_collector.log_str(LogSource::Orchestrator, &format!("  ❌ {}", error_msg));
+                state.step_results.insert(
+                    step.name.clone(),
+                    StepResult {
+                        success: false,
+                        duration: step_duration,
+                        error: Some(e.to_string()),
+                        response: None,
+                    },
+                );
+                return Err(error_msg.into());
+            }
+        }
+
+        // Wait after executing
+        if step.wait_after > 0 {
+            log_collector.log_str(
+                LogSource::Orchestrator,
+                &format!("  ⏳ Waiting {}ms after execution...", step.wait_after),
+            );
+            sleep(Duration::from_millis(step.wait_after)).await;
+        }
+
+        log_collector.log_str(LogSource::Orchestrator, "");
+    }
+
+    Ok(())
+}
+
+fn generate_report_with_logging(state: &OrchestratorState, log_collector: LogCollector) {
+    log_collector.log_str(LogSource::Orchestrator, "📊 Scenario Report");
+    log_collector.log_str(LogSource::Orchestrator, "==================");
+    log_collector.log_str(
+        LogSource::Orchestrator,
+        &format!("Scenario: {}", state.scenario.name),
+    );
+    log_collector.log_str(
+        LogSource::Orchestrator,
+        &format!(
+            "Total duration: {:.2}s",
+            state.start_time.elapsed().as_secs_f64()
+        ),
+    );
+    log_collector.log_str(
+        LogSource::Orchestrator,
+        &format!(
+            "Steps completed: {}/{}",
+            state.completed_steps.len(),
+            state.scenario.steps.len()
+        ),
+    );
+
+    let success_count = state.step_results.values().filter(|r| r.success).count();
+    let success_rate = if !state.step_results.is_empty() {
+        (success_count as f64 / state.step_results.len() as f64) * 100.0
+    } else {
+        0.0
+    };
+
+    log_collector.log_str(
+        LogSource::Orchestrator,
+        &format!("Success rate: {:.1}%", success_rate),
+    );
+    log_collector.log_str(LogSource::Orchestrator, "");
+    log_collector.log_str(LogSource::Orchestrator, "📋 Step Details");
+
+    for step in &state.scenario.steps {
+        if let Some(result) = state.step_results.get(&step.name) {
+            let status = if result.success { "✅" } else { "❌" };
+            log_collector.log_str(
+                LogSource::Orchestrator,
+                &format!(
+                    "{} {} ({:.2}s)",
+                    status,
+                    step.name,
+                    result.duration.as_secs_f64()
+                ),
+            );
+            if let Some(error) = &result.error {
+                log_collector.log_str(LogSource::Orchestrator, &format!("   Error: {}", error));
+            }
+        } else {
+            log_collector.log_str(
+                LogSource::Orchestrator,
+                &format!("⏸️  {} (not executed)", step.name),
+            );
+        }
+    }
+}
+
+async fn cleanup_with_logging(
+    state: &mut OrchestratorState,
+    log_collector: LogCollector,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    log_collector.log_str(LogSource::Orchestrator, "🧹 Cleaning up...");
+
+    // Terminate client processes
+    for (client_id, mut process) in state.client_processes.drain() {
+        log_collector.log_str(
+            LogSource::Orchestrator,
+            &format!("  Terminating client {}", client_id),
+        );
+        let _ = process.kill().await;
+    }
+
+    // Terminate infrastructure processes
+    for (service_name, mut process) in state.infrastructure_processes.drain() {
+        log_collector.log_str(
+            LogSource::Orchestrator,
+            &format!("  Terminating {}", service_name),
+        );
+        let _ = process.kill().await;
+    }
+
+    log_collector.log_str(LogSource::Orchestrator, "✅ Cleanup completed");
+    Ok(())
+}
+
+async fn wait_for_port_with_retries_and_context_with_logging(
+    host: &str,
+    port: u16,
+    timeout_seconds: u64,
+    context: Option<&str>,
+    log_collector: LogCollector,
+) -> bool {
+    let timeout_duration = Duration::from_secs(timeout_seconds);
+    let start = Instant::now();
+    let mut last_log_time = Instant::now();
+
+    while start.elapsed() < timeout_duration {
+        // Check for connection
+        if TcpStream::connect(format!("{}:{}", host, port))
+            .await
+            .is_ok()
+        {
+            log_collector.log_str(
+                LogSource::Orchestrator,
+                &format!("    ✅ Port {}:{} is now available", host, port),
+            );
+            return true;
+        }
+
+        // Log progress every 3 seconds
+        if last_log_time.elapsed() >= Duration::from_secs(3) {
+            let elapsed = start.elapsed().as_secs();
+            if let Some(context) = context {
+                log_collector.log_str(
+                    LogSource::Orchestrator,
+                    &format!(
+                        "    ⏳ Still waiting for {} on port {}:{} ({}s elapsed)...",
+                        context, host, port, elapsed
+                    ),
+                );
+            } else {
+                log_collector.log_str(
+                    LogSource::Orchestrator,
+                    &format!(
+                        "    ⏳ Still waiting for port {}:{} ({}s elapsed)...",
+                        host, port, elapsed
+                    ),
+                );
+            }
+            last_log_time = Instant::now();
+        }
+
+        sleep(Duration::from_millis(1000)).await;
+    }
+
+    log_collector.log_str(
+        LogSource::Orchestrator,
+        &format!(
+            "    ❌ Timeout: Port {}:{} did not become available after {}s",
+            host, port, timeout_seconds
+        ),
+    );
+    false
+}
+
+#[cfg(feature = "tui")]
+fn show_log_summary(app: &LoggingApp) {
+    println!("\n📁 Log Files Summary");
+    println!("====================");
+
+    for (pane_name, log_file_path) in &app.log_files {
+        if log_file_path.exists() {
+            match std::fs::metadata(log_file_path) {
+                Ok(metadata) => {
+                    let size_kb = metadata.len() / 1024;
+                    println!(
+                        "{}: {} ({} KB)",
+                        pane_name,
+                        log_file_path.display(),
+                        size_kb
+                    );
+                }
+                Err(_) => {
+                    println!("{}: {} (size unknown)", pane_name, log_file_path.display());
+                }
+            }
+        } else {
+            println!(
+                "{}: {} (file not created)",
+                pane_name,
+                log_file_path.display()
+            );
+        }
+    }
+
+    println!("\n💡 You can copy these log file paths to provide to AI for analysis:");
+    for (pane_name, log_file_path) in &app.log_files {
+        if log_file_path.exists() {
+            println!("   {} log: {}", pane_name, log_file_path.display());
+        }
+    }
+    println!();
 }

@@ -102,6 +102,12 @@ impl CommandParser {
             "get_multiplayer_status" => self.handle_get_multiplayer_status_command(args, world),
             #[cfg(not(target_arch = "wasm32"))]
             "wait_for_condition" => self.handle_wait_for_condition_command(args, world),
+            #[cfg(not(target_arch = "wasm32"))]
+            "create_world" => self.handle_create_world_command(args, world),
+            #[cfg(not(target_arch = "wasm32"))]
+            "load_world" => self.handle_load_world_command(args, world),
+            #[cfg(not(target_arch = "wasm32"))]
+            "set_game_state" => self.handle_set_game_state_command(args, world),
             // WASM-only simplified commands (for desktop-only functionality)
             #[cfg(target_arch = "wasm32")]
             "spawn"
@@ -120,6 +126,9 @@ impl CommandParser {
             | "list_online_worlds"
             | "get_multiplayer_status"
             | "wait_for_condition"
+            | "create_world"
+            | "load_world"
+            | "set_game_state"
             | "place"
             | "remove"
             | "wall"
@@ -160,6 +169,11 @@ impl CommandParser {
             "  move <device_id> <x> <y> <z> - Move a device",
             "  list - List all connected devices",
             "  test_error <message> - Test error indicator",
+            "",
+            "World management commands:",
+            "  create_world <world_name> [description] - Create a new world and switch to it",
+            "  load_world <world_name> - Load an existing world and switch to it",
+            "  set_game_state <state> - Set game state (MainMenu|InGame)",
             "",
             "Multiplayer world sharing commands:",
             "  publish_world [name] [max_players] [is_public] - Publish current world for sharing",
@@ -875,6 +889,106 @@ impl CommandParser {
                 "Invalid condition: {}. Valid conditions: world_published, world_joined, player_connected, block_placed",
                 condition
             )),
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn handle_create_world_command(&self, args: &[&str], world: &mut World) -> ConsoleResult {
+        if args.is_empty() {
+            return ConsoleResult::InvalidArgs(
+                "Usage: create_world <world_name> [description]".to_string(),
+            );
+        }
+
+        let world_name = args[0].to_string();
+        let description = if args.len() > 1 {
+            args[1..].join(" ")
+        } else {
+            "A new world created via MCP".to_string()
+        };
+
+        // Emit CreateWorldEvent to trigger world creation
+        use crate::ui::main_menu::GameState;
+        use crate::world::CreateWorldEvent;
+        use bevy::ecs::event::Events;
+
+        if let Some(mut create_events) = world.get_resource_mut::<Events<CreateWorldEvent>>() {
+            create_events.write(CreateWorldEvent {
+                world_name: world_name.clone(),
+                description: description.clone(),
+            });
+
+            // Set game state to InGame to transition UI
+            if let Some(mut next_state) = world.get_resource_mut::<NextState<GameState>>() {
+                next_state.set(GameState::InGame);
+            }
+
+            ConsoleResult::Success(format!(
+                "Created world '{}' with description '{}' and set game state to InGame",
+                world_name, description
+            ))
+        } else {
+            ConsoleResult::Error("Create world events not available".to_string())
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn handle_load_world_command(&self, args: &[&str], world: &mut World) -> ConsoleResult {
+        if args.is_empty() {
+            return ConsoleResult::InvalidArgs("Usage: load_world <world_name>".to_string());
+        }
+
+        let world_name = args[0].to_string();
+
+        // Emit LoadWorldEvent to trigger world loading
+        use crate::ui::main_menu::GameState;
+        use crate::world::LoadWorldEvent;
+        use bevy::ecs::event::Events;
+
+        if let Some(mut load_events) = world.get_resource_mut::<Events<LoadWorldEvent>>() {
+            load_events.write(LoadWorldEvent {
+                world_name: world_name.clone(),
+            });
+
+            // Set game state to InGame to transition UI
+            if let Some(mut next_state) = world.get_resource_mut::<NextState<GameState>>() {
+                next_state.set(GameState::InGame);
+            }
+
+            ConsoleResult::Success(format!(
+                "Loaded world '{}' and set game state to InGame",
+                world_name
+            ))
+        } else {
+            ConsoleResult::Error("Load world events not available".to_string())
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn handle_set_game_state_command(&self, args: &[&str], world: &mut World) -> ConsoleResult {
+        if args.is_empty() {
+            return ConsoleResult::InvalidArgs("Usage: set_game_state <state>".to_string());
+        }
+
+        let state_str = args[0];
+        use crate::ui::main_menu::GameState;
+
+        let new_state = match state_str {
+            "MainMenu" => GameState::MainMenu,
+            "InGame" => GameState::InGame,
+            _ => {
+                return ConsoleResult::InvalidArgs(format!(
+                    "Invalid game state: {}. Valid states: MainMenu, InGame",
+                    state_str
+                ));
+            }
+        };
+
+        if let Some(mut next_state) = world.get_resource_mut::<NextState<GameState>>() {
+            next_state.set(new_state);
+            ConsoleResult::Success(format!("Set game state to {}", state_str))
+        } else {
+            ConsoleResult::Error("Game state resource not available".to_string())
         }
     }
 }

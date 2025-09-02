@@ -10,7 +10,7 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 # Core dependencies that work on both desktop and web
-#bevy = { version = "0.16.1", features = ["webp"] }
+# Using Bevy 0.17-dev from git for latest features
 bevy = { git = "https://github.com/bevyengine/bevy.git", rev = "335e39f", features = ["webp"] }
 
 
@@ -94,8 +94,11 @@ tempfile = "3.8" # For testing async file operations
 opt-level = 3
 
 # Enable a small amount of optimization for our own code if needed
+# Split compilation units for faster incremental builds
 [profile.dev]
 opt-level = 1
+incremental = true
+codegen-units = 256
 
 # Optimize for size in WASM builds (important for web loading times)
 [profile.release]
@@ -151,7 +154,7 @@ required-features = []
 [[bin]]
 name = "mcplay"
 path = "src/bin/mcplay.rs"
-required-features = ["tui"]
+required-features = []
 
 # Custom commands (use via .cargo/config.toml for local aliases)
 # For now, use: cargo run --package xtask -- <command>

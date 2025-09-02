@@ -1,0 +1,386 @@
+// Environment Setup Scenario
+// This scenario demonstrates using IoTCraft to set up a complete 
+// environment with various block types, structures, and IoT devices
+Scenario(
+    name: "environment_setup",
+    description: "Sets up a complete IoTCraft environment with structures and IoT devices",
+    version: "1.1",
+    
+    // Infrastructure configuration with MQTT for device communication
+    infrastructure: InfrastructureConfig(
+        mqtt_server: MqttServerConfig(
+            required: true,
+            port: 1883,
+            config_file: None,
+            options: None,
+        ),
+        mqtt_observer: Some(MqttObserverConfig(
+            required: true,  // We need the observer for IoT communication
+            topics: Some(["devices/#", "world/#"]),
+            client_id: Some("scenario_observer"),
+        )),
+        mcp_server: Some(McpServerConfig(
+            required: true,
+            port: 3001,
+        )),
+        services: None,
+    ),
+    
+    // Two clients: main builder and observer
+    clients: [
+        ClientConfig(
+            id: "builder",
+            player_id: "builder",
+            mcp_port: 3001,
+            client_type: "desktop",
+            name: Some("Environment Builder"),
+            config: Some(ExtendedClientConfig(
+                spawn_position: Some(Position(
+                    x: 0.0,
+                    y: 5.0,
+                    z: 0.0,
+                )),
+                initial_inventory: Some([
+                    InventoryItem(
+                        item_type: "stone",
+                        quantity: 64,
+                        metadata: None,
+                    ),
+                    InventoryItem(
+                        item_type: "grass",
+                        quantity: 64,
+                        metadata: None,
+                    ),
+                    InventoryItem(
+                        item_type: "glass",
+                        quantity: 32,
+                        metadata: None,
+                    ),
+                ]),
+                permissions: Some([
+                    "world.build",
+                    "device.create",
+                    "device.control",
+                ]),
+                settings: None,
+            )),
+        ),
+    ],
+    
+    // Steps to create the environment
+    steps: [
+        // Step 1: Create flat ground platform
+        Step(
+            name: "create_ground",
+            description: "Create a large flat ground platform",
+            client: "builder",
+            action: (
+                type: "mcp_call",
+                tool: "create_wall",
+                arguments: {
+                    "block_type": "grass",
+                    "x1": -20,
+                    "y1": 0,
+                    "z1": -20,
+                    "x2": 20,
+                    "y2": 0,
+                    "z2": 20,
+                },
+            ),
+            wait_before: 1000,
+            wait_after: 500,
+            timeout: 10000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: [],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 2: Create central tower
+        Step(
+            name: "build_central_tower",
+            description: "Build a central tower structure",
+            client: "builder",
+            action: (
+                type: "mcp_call",
+                tool: "create_wall",
+                arguments: {
+                    "block_type": "stone",
+                    "x1": -3,
+                    "y1": 1,
+                    "z1": -3,
+                    "x2": 3,
+                    "y2": 15,
+                    "z2": 3,
+                },
+            ),
+            wait_before: 500,
+            wait_after: 1000,
+            timeout: 15000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["create_ground"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 3: Add windows to the tower
+        Step(
+            name: "add_windows",
+            description: "Add glass windows to the tower",
+            client: "builder",
+            action: (
+                type: "sequence",
+                actions: [
+                    // North window
+                    (
+                        type: "mcp_call",
+                        tool: "create_wall",
+                        arguments: {
+                            "block_type": "glass",
+                            "x1": -2,
+                            "y1": 5,
+                            "z1": -3,
+                            "x2": 2,
+                            "y2": 8,
+                            "z2": -3,
+                        },
+                    ),
+                    // South window
+                    (
+                        type: "mcp_call",
+                        tool: "create_wall",
+                        arguments: {
+                            "block_type": "glass",
+                            "x1": -2,
+                            "y1": 5,
+                            "z1": 3,
+                            "x2": 2,
+                            "y2": 8,
+                            "z2": 3,
+                        },
+                    ),
+                    // East window
+                    (
+                        type: "mcp_call",
+                        tool: "create_wall",
+                        arguments: {
+                            "block_type": "glass",
+                            "x1": 3,
+                            "y1": 5,
+                            "z1": -2,
+                            "x2": 3,
+                            "y2": 8,
+                            "z2": 2,
+                        },
+                    ),
+                    // West window
+                    (
+                        type: "mcp_call",
+                        tool: "create_wall",
+                        arguments: {
+                            "block_type": "glass",
+                            "x1": -3,
+                            "y1": 5,
+                            "z1": -2,
+                            "x2": -3,
+                            "y2": 8,
+                            "z2": 2,
+                        },
+                    ),
+                ],
+            ),
+            wait_before: 500,
+            wait_after: 1000,
+            timeout: 20000,
+            success_condition: None,
+            depends_on: ["build_central_tower"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 4: Add IoT devices - smart lamps around the tower
+        Step(
+            name: "add_iot_devices",
+            description: "Add smart IoT lamps around the tower",
+            client: "builder",
+            action: (
+                type: "sequence",
+                actions: [
+                    // North lamp
+                    (
+                        type: "mcp_call",
+                        tool: "spawn_device",
+                        arguments: {
+                            "device_type": "lamp",
+                            "device_id": "north_lamp",
+                            "x": 0,
+                            "y": 10,
+                            "z": -5,
+                            "properties": {
+                                "color": "blue",
+                                "intensity": 0.8,
+                            },
+                        },
+                    ),
+                    // South lamp
+                    (
+                        type: "mcp_call",
+                        tool: "spawn_device",
+                        arguments: {
+                            "device_type": "lamp",
+                            "device_id": "south_lamp",
+                            "x": 0,
+                            "y": 10,
+                            "z": 5,
+                            "properties": {
+                                "color": "red",
+                                "intensity": 0.8,
+                            },
+                        },
+                    ),
+                    // East lamp
+                    (
+                        type: "mcp_call",
+                        tool: "spawn_device",
+                        arguments: {
+                            "device_type": "lamp",
+                            "device_id": "east_lamp",
+                            "x": 5,
+                            "y": 10,
+                            "z": 0,
+                            "properties": {
+                                "color": "green",
+                                "intensity": 0.8,
+                            },
+                        },
+                    ),
+                    // West lamp
+                    (
+                        type: "mcp_call",
+                        tool: "spawn_device",
+                        arguments: {
+                            "device_type": "lamp",
+                            "device_id": "west_lamp",
+                            "x": -5,
+                            "y": 10,
+                            "z": 0,
+                            "properties": {
+                                "color": "yellow",
+                                "intensity": 0.8,
+                            },
+                        },
+                    ),
+                ],
+            ),
+            wait_before: 1000,
+            wait_after: 1000,
+            timeout: 30000,
+            success_condition: None,
+            depends_on: ["add_windows"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 5: Turn on all the lamps
+        Step(
+            name: "activate_lamps",
+            description: "Turn on all the smart lamps",
+            client: "builder",
+            action: (
+                type: "parallel",
+                actions: [
+                    (
+                        type: "mcp_call",
+                        tool: "control_device",
+                        arguments: {
+                            "device_id": "north_lamp",
+                            "command": "ON",
+                        },
+                    ),
+                    (
+                        type: "mcp_call",
+                        tool: "control_device",
+                        arguments: {
+                            "device_id": "south_lamp",
+                            "command": "ON",
+                        },
+                    ),
+                    (
+                        type: "mcp_call",
+                        tool: "control_device",
+                        arguments: {
+                            "device_id": "east_lamp",
+                            "command": "ON",
+                        },
+                    ),
+                    (
+                        type: "mcp_call",
+                        tool: "control_device",
+                        arguments: {
+                            "device_id": "west_lamp",
+                            "command": "ON",
+                        },
+                    ),
+                ],
+            ),
+            wait_before: 2000,
+            wait_after: 1000,
+            timeout: 10000,
+            success_condition: None,
+            depends_on: ["add_iot_devices"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Final step: Keep environment running for exploration
+        Step(
+            name: "keep_environment_running",
+            description: "Keep the environment running for exploration",
+            client: "orchestrator",
+            action: (
+                type: "wait_condition",
+                condition: "user_input",
+                expected_value: Some("exit"),
+                timeout: 600000,  // 10 minutes timeout
+            ),
+            wait_before: 5000,  // Give 5 seconds to appreciate the setup
+            wait_after: 0,
+            timeout: 600000,
+            success_condition: None,
+            depends_on: ["activate_lamps"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+    ],
+    
+    // Global configuration
+    config: Some(ScenarioConfig(
+        timeout_ms: Some(900000),  // 15 minutes global timeout
+        logging: Some(LoggingConfig(
+            level: Some("info"),
+            log_mqtt: Some(true),
+            log_client_actions: Some(true),
+            filters: Some(["world/*", "devices/*"]),
+        )),
+        environment: Some({
+            "RUST_LOG": "info",
+            "SCENARIO_NAME": "environment_setup",
+        }),
+        settings: Some({
+            "auto_cleanup": false,  // Don't auto cleanup to keep the environment after completion
+            "preserve_logs": true,
+        }),
+    )),
+)

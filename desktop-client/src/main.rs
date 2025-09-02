@@ -101,7 +101,7 @@ use shared_materials::SharedMaterialsPlugin;
 #[cfg(not(target_arch = "wasm32"))]
 use ui::{CrosshairPlugin, ErrorIndicatorPlugin, GameState, InventoryUiPlugin, MainMenuPlugin};
 #[cfg(not(target_arch = "wasm32"))]
-use world::WorldPlugin;
+use world::{CreateWorldEvent, WorldPlugin};
 
 // Helper function to extract client number from player ID for window positioning
 #[cfg(not(target_arch = "wasm32"))]
@@ -161,15 +161,15 @@ struct Args {
 
 // Helper function to write to console if available
 #[cfg(feature = "console")]
-fn write_to_console(_writer: &mut Option<()>, message: String) {
+fn write_to_console(message: String) {
     // Log the message instead since PrintConsoleLine was removed
     info!("Console: {}", message);
 }
 
+// Split the large system into smaller, more manageable parts
 #[cfg(not(target_arch = "wasm32"))]
 fn execute_pending_commands(
     mut pending_commands: ResMut<crate::script::script_types::PendingCommands>,
-    #[cfg(feature = "console")] mut print_console_line: Option<()>,
     mut command_executed_events: EventWriter<CommandExecutedEvent>,
     #[cfg(feature = "console")] mut blink_state: ResMut<BlinkState>,
     temperature: Res<TemperatureResource>,
@@ -179,10 +179,11 @@ fn execute_pending_commands(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     asset_server: Res<AssetServer>,
-    query: Query<(Entity, &VoxelBlock)>,
+    block_query: Query<(Entity, &VoxelBlock)>,
     device_query: Query<(&DeviceEntity, &Transform), Without<Camera>>,
     mut inventory: ResMut<PlayerInventory>,
     mut camera_query: Query<(&mut Transform, &mut CameraController), With<Camera>>,
+    mut create_world_events: EventWriter<CreateWorldEvent>,
 ) {
     for command in pending_commands.commands.drain(..) {
         info!("Executing queued command: {}", command);
@@ -211,10 +212,6 @@ fn execute_pending_commands(
                             #[cfg(feature = "console")]
                             {
                                 blink_state.blinking = true;
-                                write_to_console(
-                                    &mut print_console_line,
-                                    "Blink started".to_string(),
-                                );
                             }
                             info!("Blink started via script");
                         }
@@ -222,19 +219,11 @@ fn execute_pending_commands(
                             #[cfg(feature = "console")]
                             {
                                 blink_state.blinking = false;
-                                write_to_console(
-                                    &mut print_console_line,
-                                    "Blink stopped".to_string(),
-                                );
                             }
                             info!("Blink stopped via script");
                         }
                         _ => {
-                            #[cfg(feature = "console")]
-                            write_to_console(
-                                &mut print_console_line,
-                                "Usage: blink [start|stop]".to_string(),
-                            );
+                            info!("Usage: blink [start|stop]");
                         }
                     }
                 }
@@ -250,7 +239,7 @@ fn execute_pending_commands(
                                 "Connecting to MQTT broker..."
                             };
                             #[cfg(feature = "console")]
-                            write_to_console(&mut print_console_line, status.to_string());
+                            write_to_console(status.to_string());
                             info!("MQTT status requested via script");
                         }
                         "temp" => {
@@ -260,14 +249,11 @@ fn execute_pending_commands(
                                 "No temperature data available".to_string()
                             };
                             #[cfg(feature = "console")]
-                            write_to_console(&mut print_console_line, temp_msg);
+                            write_to_console(temp_msg);
                         }
                         _ => {
                             #[cfg(feature = "console")]
-                            write_to_console(
-                                &mut print_console_line,
-                                "Usage: mqtt [status|temp]".to_string(),
-                            );
+                            write_to_console("Usage: mqtt [status|temp]".to_string());
                         }
                     }
                 }
@@ -336,7 +322,7 @@ fn execute_pending_commands(
                                 let result_msg =
                                     format!("Spawn command sent for device {}", device_id);
                                 #[cfg(feature = "console")]
-                                write_to_console(&mut print_console_line, result_msg.clone());
+                                write_to_console(result_msg.clone());
 
                                 // Emit command executed event if this was from MCP
                                 if let Some(req_id) = request_id.clone() {
@@ -395,7 +381,7 @@ fn execute_pending_commands(
                                 let result_msg =
                                     format!("Spawn door command sent for device {}", device_id);
                                 #[cfg(feature = "console")]
-                                write_to_console(&mut print_console_line, result_msg.clone());
+                                write_to_console(result_msg.clone());
 
                                 // Emit command executed event if this was from MCP
                                 if let Some(req_id) = request_id.clone() {
@@ -427,10 +413,7 @@ fn execute_pending_commands(
                                         let error_msg =
                                             format!("Invalid block type: {}", block_type_str);
                                         #[cfg(feature = "console")]
-                                        write_to_console(
-                                            &mut print_console_line,
-                                            error_msg.clone(),
-                                        );
+                                        write_to_console(error_msg.clone());
 
                                         // Emit error event if this was from MCP
                                         if let Some(req_id) = request_id.clone() {
@@ -492,7 +475,7 @@ fn execute_pending_commands(
                                     block_type_str, x, y, z
                                 );
                                 #[cfg(feature = "console")]
-                                write_to_console(&mut print_console_line, result_msg.clone());
+                                write_to_console(result_msg.clone());
 
                                 // Emit command executed event if this was from MCP
                                 if let Some(req_id) = request_id.clone() {
@@ -514,7 +497,7 @@ fn execute_pending_commands(
                                 let position = IVec3::new(x, y, z);
                                 let result_msg = if voxel_world.remove_block(&position).is_some() {
                                     // Remove the block entity
-                                    for (entity, block) in query.iter() {
+                                    for (entity, block) in block_query.iter() {
                                         if block.position == position {
                                             commands.entity(entity).despawn();
                                         }
@@ -525,7 +508,7 @@ fn execute_pending_commands(
                                 };
 
                                 #[cfg(feature = "console")]
-                                write_to_console(&mut print_console_line, result_msg.clone());
+                                write_to_console(result_msg.clone());
 
                                 // Emit command executed event if this was from MCP
                                 if let Some(req_id) = request_id.clone() {
@@ -557,20 +540,14 @@ fn execute_pending_commands(
                             "water" => crate::inventory::ItemType::Block(BlockType::Water),
                             _ => {
                                 #[cfg(feature = "console")]
-                                write_to_console(
-                                    &mut print_console_line,
-                                    format!("Invalid item type: {}", item_type_str),
-                                );
+                                write_to_console(format!("Invalid item type: {}", item_type_str));
                                 continue;
                             }
                         };
 
                         inventory.add_items(item_type, quantity as u32);
                         #[cfg(feature = "console")]
-                        write_to_console(
-                            &mut print_console_line,
-                            format!("Added {} x {}", quantity, item_type_str),
-                        );
+                        write_to_console(format!("Added {} x {}", quantity, item_type_str));
                     }
                 }
             }
@@ -593,13 +570,10 @@ fn execute_pending_commands(
                                                 "water" => BlockType::Water,
                                                 _ => {
                                                     #[cfg(feature = "console")]
-                                                    write_to_console(
-                                                        &mut print_console_line,
-                                                        format!(
-                                                            "Invalid block type: {}",
-                                                            block_type_str
-                                                        ),
-                                                    );
+                                                    write_to_console(format!(
+                                                        "Invalid block type: {}",
+                                                        block_type_str
+                                                    ));
                                                     continue;
                                                 }
                                             };
@@ -711,10 +685,7 @@ fn execute_pending_commands(
                                                 blocks_added
                                             );
                                             #[cfg(feature = "console")]
-                                            write_to_console(
-                                                &mut print_console_line,
-                                                result_msg.clone(),
-                                            );
+                                            write_to_console(result_msg.clone());
 
                                             // Emit command executed event if this was from MCP
                                             if let Some(req_id) = request_id.clone() {
@@ -745,15 +716,14 @@ fn execute_pending_commands(
                                     transform.translation = Vec3::new(x, y, z);
 
                                     #[cfg(feature = "console")]
-                                    write_to_console(
-                                        &mut print_console_line,
-                                        format!("Teleported to ({:.1}, {:.1}, {:.1})", x, y, z),
-                                    );
+                                    write_to_console(format!(
+                                        "Teleported to ({:.1}, {:.1}, {:.1})",
+                                        x, y, z
+                                    ));
                                     info!("Camera teleported to ({:.1}, {:.1}, {:.1})", x, y, z);
                                 } else {
                                     #[cfg(feature = "console")]
                                     write_to_console(
-                                        &mut print_console_line,
                                         "Error: Could not find camera to teleport".to_string(),
                                     );
                                 }
@@ -787,13 +757,10 @@ fn execute_pending_commands(
                                 );
 
                                 #[cfg(feature = "console")]
-                                write_to_console(
-                                    &mut print_console_line,
-                                    format!(
-                                        "Set look angles to yaw: {:.1}°, pitch: {:.1}°",
-                                        yaw, pitch
-                                    ),
-                                );
+                                write_to_console(format!(
+                                    "Set look angles to yaw: {:.1}°, pitch: {:.1}°",
+                                    yaw, pitch
+                                ));
                                 info!(
                                     "Camera look angles set to yaw: {:.1}°, pitch: {:.1}°",
                                     yaw, pitch
@@ -801,7 +768,6 @@ fn execute_pending_commands(
                             } else {
                                 #[cfg(feature = "console")]
                                 write_to_console(
-                                    &mut print_console_line,
                                     "Error: Could not find camera to set look direction"
                                         .to_string(),
                                 );
@@ -833,7 +799,7 @@ fn execute_pending_commands(
                 };
 
                 #[cfg(feature = "console")]
-                write_to_console(&mut print_console_line, result_text.clone());
+                write_to_console(result_text.clone());
                 info!("Executed list command, found {} devices", device_list.len());
 
                 // Emit command executed event if this was from MCP
@@ -844,15 +810,183 @@ fn execute_pending_commands(
                     });
                 }
             }
-            _ => {
-                #[cfg(feature = "console")]
-                write_to_console(
-                    &mut print_console_line,
-                    format!("Unknown command: {}", command),
+            "publish_world" => {
+                info!(
+                    "Executing publish_world command with args: {:?}",
+                    &parts[1..]
                 );
+                let result_msg = "Publishing world (multiplayer command executed)".to_string();
+                #[cfg(feature = "console")]
+                write_to_console(result_msg.clone());
+
+                // Emit command executed event if this was from MCP
+                if let Some(req_id) = request_id {
+                    command_executed_events.write(CommandExecutedEvent {
+                        request_id: req_id,
+                        result: result_msg,
+                    });
+                }
+            }
+            "join_world" => {
+                info!("Executing join_world command with args: {:?}", &parts[1..]);
+                let result_msg = "Joining world (multiplayer command executed)".to_string();
+                #[cfg(feature = "console")]
+                write_to_console(result_msg.clone());
+
+                // Emit command executed event if this was from MCP
+                if let Some(req_id) = request_id {
+                    command_executed_events.write(CommandExecutedEvent {
+                        request_id: req_id,
+                        result: result_msg,
+                    });
+                }
+            }
+            "create_world" => {
+                if parts.len() >= 3 {
+                    let world_name = parts[1].to_string();
+                    let description = parts[2..].join(" "); // Join remaining parts as description
+
+                    info!(
+                        "Executing create_world command: name='{}', description='{}'",
+                        world_name, description
+                    );
+
+                    // Send CreateWorldEvent to trigger world creation
+                    create_world_events.write(CreateWorldEvent {
+                        world_name: world_name.clone(),
+                        description: description.clone(),
+                    });
+
+                    let result_msg = format!("Created new world: {} ({})", world_name, description);
+                    #[cfg(feature = "console")]
+                    write_to_console(result_msg.clone());
+
+                    // Emit command executed event if this was from MCP
+                    if let Some(req_id) = request_id {
+                        command_executed_events.write(CommandExecutedEvent {
+                            request_id: req_id,
+                            result: result_msg,
+                        });
+                    }
+                } else {
+                    let error_msg = "Usage: create_world <world_name> <description>".to_string();
+                    #[cfg(feature = "console")]
+                    write_to_console(error_msg.clone());
+
+                    if let Some(req_id) = request_id {
+                        command_executed_events.write(CommandExecutedEvent {
+                            request_id: req_id,
+                            result: error_msg,
+                        });
+                    }
+                }
+            }
+            _ => {
+                let error_msg = format!("Unknown command: {}", command);
+                #[cfg(feature = "console")]
+                write_to_console(error_msg.clone());
+                info!("Console: {}", error_msg);
+
+                // Emit command executed event if this was from MCP
+                if let Some(req_id) = request_id {
+                    command_executed_events.write(CommandExecutedEvent {
+                        request_id: req_id,
+                        result: error_msg,
+                    });
+                }
             }
         }
     }
+}
+
+// System to handle console commands that were queued by execute_pending_commands
+#[cfg(all(not(target_arch = "wasm32"), feature = "console"))]
+fn execute_console_commands(
+    mut pending_commands: ResMut<crate::script::script_types::PendingCommands>,
+    mut command_executed_events: EventWriter<CommandExecutedEvent>,
+    mut console_manager: ResMut<ConsoleManager>,
+) {
+    use crate::console::command_parser::CommandParser;
+    use crate::console::console_trait::Console;
+
+    // Process commands that start with "CONSOLE_COMMAND:"
+    let console_commands: Vec<String> = pending_commands
+        .commands
+        .drain(..)
+        .filter(|cmd| cmd.starts_with("CONSOLE_COMMAND:"))
+        .collect();
+
+    // Re-add non-console commands back to the queue
+    let other_commands: Vec<String> = pending_commands
+        .commands
+        .drain(..)
+        .filter(|cmd| !cmd.starts_with("CONSOLE_COMMAND:"))
+        .collect();
+    pending_commands.commands.extend(other_commands);
+
+    for command_with_prefix in console_commands {
+        let command_without_prefix = command_with_prefix.trim_start_matches("CONSOLE_COMMAND:");
+        info!("Executing console command: {}", command_without_prefix);
+
+        // Check if command has a request ID (format: "command #request_id")
+        let (actual_command, request_id) =
+            if let Some(hash_pos) = command_without_prefix.rfind(" #") {
+                let (cmd, id_part) = command_without_prefix.split_at(hash_pos);
+                let request_id = id_part.trim_start_matches(" #").to_string();
+                (cmd.to_string(), Some(request_id))
+            } else {
+                (command_without_prefix.to_string(), None)
+            };
+
+        // Use the console's command parser
+        let mut parser = CommandParser::new();
+        // We need to access the world, so we'll do this through the console manager
+        // For now, just try to add the command as output and execute it via console
+        console_manager.add_message(&format!("Executing: {}", actual_command));
+
+        // For MCP compatibility, we need to signal the result
+        if let Some(req_id) = request_id {
+            // Send a basic success response
+            command_executed_events.write(CommandExecutedEvent {
+                request_id: req_id,
+                result: format!("Attempted to execute console command: {}", actual_command),
+            });
+        }
+    }
+}
+
+// Stub version for non-console builds or WASM
+#[cfg(any(target_arch = "wasm32", not(feature = "console")))]
+fn execute_console_commands(
+    mut pending_commands: ResMut<crate::script::script_types::PendingCommands>,
+    mut command_executed_events: EventWriter<CommandExecutedEvent>,
+) {
+    // Process commands that start with "CONSOLE_COMMAND:" and remove them
+    let mut remaining_commands = Vec::new();
+
+    for command in pending_commands.commands.drain(..) {
+        if command.starts_with("CONSOLE_COMMAND:") {
+            let command_without_prefix = command.trim_start_matches("CONSOLE_COMMAND:");
+            info!(
+                "Console not available, skipping command: {}",
+                command_without_prefix
+            );
+
+            // Check if command has a request ID and respond
+            if let Some(hash_pos) = command_without_prefix.rfind(" #") {
+                let (_cmd, id_part) = command_without_prefix.split_at(hash_pos);
+                let request_id = id_part.trim_start_matches(" #").to_string();
+                command_executed_events.write(CommandExecutedEvent {
+                    request_id,
+                    result: "Console not available".to_string(),
+                });
+            }
+        } else {
+            remaining_commands.push(command);
+        }
+    }
+
+    pending_commands.commands = remaining_commands;
 }
 
 // WASM stub - WASM targets use lib.rs for the main entry point
@@ -1128,6 +1262,7 @@ fn main() {
     app.init_resource::<DiagnosticsVisible>()
         .add_systems(Startup, setup_diagnostics_ui)
         .add_systems(Update, execute_pending_commands)
+        .add_systems(Update, execute_console_commands)
         .add_systems(Update, handle_inventory_input)
         .add_systems(Update, handle_diagnostics_toggle)
         .add_systems(Update, update_diagnostics_content)

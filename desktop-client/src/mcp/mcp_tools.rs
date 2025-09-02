@@ -435,5 +435,52 @@ pub fn create_default_tools() -> Vec<McpTool> {
                 "required": ["condition"]
             }),
         },
+        McpTool {
+            name: "create_world".to_string(),
+            description: "Create a new world and set the game state to InGame to transition from menu to gameplay".to_string(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "world_name": {
+                        "type": "string",
+                        "description": "Name for the new world"
+                    },
+                    "description": {
+                        "type": "string",
+                        "description": "Description for the new world (default: 'A new world created via MCP')"
+                    }
+                },
+                "required": ["world_name"]
+            }),
+        },
+        McpTool {
+            name: "load_world".to_string(),
+            description: "Load an existing world by name and set the game state to InGame".to_string(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "world_name": {
+                        "type": "string",
+                        "description": "Name of the world to load"
+                    }
+                },
+                "required": ["world_name"]
+            }),
+        },
+        McpTool {
+            name: "set_game_state".to_string(),
+            description: "Set the current game state for UI transitions (MainMenu, WorldSelection, InGame, etc.)".to_string(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "state": {
+                        "type": "string",
+                        "enum": ["MainMenu", "WorldSelection", "InGame", "Settings", "GameplayMenu"],
+                        "description": "The game state to transition to"
+                    }
+                },
+                "required": ["state"]
+            }),
+        },
     ]
 }

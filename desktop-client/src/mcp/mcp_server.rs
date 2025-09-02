@@ -377,6 +377,8 @@ pub fn should_queue_as_command(tool_name: &str) -> bool {
             | "set_camera_angle"
             | "save_world"
             | "load_world"
+            | "create_world"
+            | "set_game_state"
             | "publish_world"
             | "unpublish_world"
             | "join_world"
@@ -519,6 +521,22 @@ pub fn convert_tool_call_to_command(tool_name: &str, arguments: &Value) -> Optio
                     condition, timeout, expected
                 ))
             }
+        }
+        "create_world" => {
+            let world_name = arguments.get("world_name")?.as_str()?;
+            let description = arguments
+                .get("description")
+                .and_then(|v| v.as_str())
+                .unwrap_or("A new world created via MCP");
+            Some(format!("create_world {} {}", world_name, description))
+        }
+        "load_world_by_name" => {
+            let world_name = arguments.get("world_name")?.as_str()?;
+            Some(format!("load_world {}", world_name))
+        }
+        "set_game_state" => {
+            let state = arguments.get("state")?.as_str()?;
+            Some(format!("set_game_state {}", state))
         }
         _ => None,
     }

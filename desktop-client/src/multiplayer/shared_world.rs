@@ -178,6 +178,7 @@ impl Plugin for SharedWorldPlugin {
                     handle_block_change_events,
                     handle_world_state_received_events,
                     auto_enable_multiplayer_when_mqtt_available,
+                    auto_transition_to_game_on_multiplayer_changes,
                 ),
             );
     }
@@ -524,6 +525,34 @@ fn auto_enable_multiplayer_when_mqtt_available(
                 "✅ Multiplayer mode automatically set to: {:?}",
                 *multiplayer_mode
             );
+        }
+    }
+}
+
+/// System that automatically transitions to InGame state when multiplayer mode changes from MCP commands
+/// This ensures that when publish_world or join_world is called via MCP, the game properly enters gameplay
+fn auto_transition_to_game_on_multiplayer_changes(
+    multiplayer_mode: Res<MultiplayerMode>,
+    current_state: Res<State<crate::ui::GameState>>,
+    mut next_state: ResMut<NextState<crate::ui::GameState>>,
+) {
+    // Only transition if we're currently in MainMenu or WorldSelection and multiplayer mode becomes active
+    if matches!(
+        *current_state.get(),
+        crate::ui::GameState::MainMenu | crate::ui::GameState::WorldSelection
+    ) {
+        match &*multiplayer_mode {
+            MultiplayerMode::HostingWorld { .. } | MultiplayerMode::JoinedWorld { .. } => {
+                info!(
+                    "🎮 Multiplayer mode became active ({:?}) while in {:?} - transitioning to InGame",
+                    &*multiplayer_mode,
+                    *current_state.get()
+                );
+                next_state.set(crate::ui::GameState::InGame);
+            }
+            MultiplayerMode::SinglePlayer => {
+                // Don't transition for SinglePlayer mode - this is normal when unpublishing
+            }
         }
     }
 }
