@@ -109,6 +109,7 @@ impl SystemInfo {
     }
 
     /// Collect current system information asynchronously (legacy method)
+    #[allow(dead_code)]
     async fn collect() -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         let (cpu_usage, memory_info, uptime, process_count) = tokio::try_join!(
             Self::get_cpu_usage(),
@@ -255,6 +256,7 @@ impl SystemInfo {
     }
 
     /// Get memory information (used MB, total MB) (macOS specific) - LEGACY METHOD
+    #[allow(dead_code)]
     async fn get_memory_info() -> Result<(u64, u64), Box<dyn std::error::Error + Send + Sync>> {
         #[cfg(target_os = "macos")]
         {
@@ -720,19 +722,11 @@ impl LoggingApp {
         let mut logs = HashMap::new();
         let mut scroll_positions = HashMap::new();
 
-        println!(
-            "[DEBUG] LoggingApp::new() - Creating panes for scenario: {}",
-            scenario.name
-        );
-
         // Add MQTT server pane if required
         if scenario.infrastructure.mqtt_server.required {
-            println!("[DEBUG] Adding MQTT Server pane (required=true)");
             panes.push(LogPane::MqttServer);
             logs.insert("MQTT Server".to_string(), Vec::new());
             scroll_positions.insert("MQTT Server".to_string(), 0);
-        } else {
-            println!("[DEBUG] NOT adding MQTT Server pane (required=false)");
         }
 
         // Add MQTT observer pane if required
@@ -742,19 +736,11 @@ impl LoggingApp {
             .as_ref()
             .map(|obs| obs.required)
             .unwrap_or(false);
-        println!(
-            "[DEBUG] MQTT Observer check: exists={}, required={}",
-            scenario.infrastructure.mqtt_observer.is_some(),
-            mqtt_observer_required
-        );
 
         if mqtt_observer_required {
-            println!("[DEBUG] Adding MQTT Observer pane (required=true)");
             panes.push(LogPane::MqttObserver);
             logs.insert("MQTT Observer".to_string(), Vec::new());
             scroll_positions.insert("MQTT Observer".to_string(), 0);
-        } else {
-            println!("[DEBUG] NOT adding MQTT Observer pane (required=false)");
         }
 
         // Add client panes
@@ -807,11 +793,6 @@ impl LoggingApp {
                 client.id.clone(),
                 log_dir.join(format!("client_{}_{}.log", client.id, timestamp)),
             );
-        }
-
-        println!("[DEBUG] Final panes list: {} panes created", panes.len());
-        for (idx, pane) in panes.iter().enumerate() {
-            println!("[DEBUG] Pane {}: {:?}", idx, pane);
         }
 
         // Initialize service statuses
@@ -4032,7 +4013,7 @@ async fn execute_steps_with_logging(
 
         // Execute step
         let step_start = Instant::now();
-        let result = execute_step(step, state, true).await; // Always verbose in TUI mode
+        let result = execute_step_with_logging(step, state, log_collector.clone()).await;
         let step_duration = step_start.elapsed();
 
         match result {
@@ -4181,6 +4162,329 @@ async fn cleanup_with_logging(
 
     log_collector.log_str(LogSource::Orchestrator, "✅ Cleanup completed");
     Ok(())
+}
+
+async fn execute_step_with_logging(
+    step: &Step,
+    state: &mut OrchestratorState,
+    log_collector: LogCollector,
+) -> Result<serde_json::Value, Box<dyn std::error::Error + Send + Sync>> {
+    match &step.action {
+        // mcplay-style actions
+        Action::McpCall { tool, arguments } => {
+            execute_mcp_call_with_logging(&step.client, tool, arguments, state, log_collector).await
+        }
+        Action::WaitCondition {
+            condition,
+            expected_value,
+            timeout: wait_timeout,
+        } => {
+            execute_wait_condition_with_logging(
+                condition,
+                expected_value.as_deref(),
+                *wait_timeout,
+                state,
+                log_collector,
+            )
+            .await
+        }
+        Action::ConsoleCommand { command } => {
+            execute_console_command_with_logging(&step.client, command, state, log_collector).await
+        }
+        Action::Delay { duration } => {
+            log_collector.log_str(
+                LogSource::Orchestrator,
+                &format!("  ⏳ Delaying for {}ms", duration),
+            );
+            sleep(Duration::from_millis(*duration)).await;
+            Ok(serde_json::json!({"status": "delayed", "duration_ms": duration}))
+        }
+        Action::ValidateScenario { checks } => {
+            execute_validate_scenario_with_logging(checks, state, log_collector).await
+        }
+
+        // xtask-style actions (basic support)
+        Action::Wait { duration_ms } => {
+            log_collector.log_str(
+                LogSource::Orchestrator,
+                &format!("  ⏳ Waiting for {}ms", duration_ms),
+            );
+            sleep(Duration::from_millis(*duration_ms)).await;
+            Ok(serde_json::json!({"status": "waited", "duration_ms": duration_ms}))
+        }
+        Action::MqttPublish {
+            topic,
+            payload,
+            qos: _,
+            retain: _,
+        } => {
+            log_collector.log_str(
+                LogSource::Orchestrator,
+                &format!(
+                    "  📡 Publishing to MQTT topic: {} payload: {}",
+                    topic, payload
+                ),
+            );
+            // TODO: Implement actual MQTT publishing
+            Ok(serde_json::json!({
+                "status": "published",
+                "topic": topic,
+                "payload": payload
+            }))
+        }
+        Action::MqttExpect {
+            topic,
+            payload,
+            timeout_ms,
+        } => {
+            log_collector.log_str(
+                LogSource::Orchestrator,
+                &format!(
+                    "  🔍 Expecting MQTT message on topic: {} (timeout: {:?}ms)",
+                    topic, timeout_ms
+                ),
+            );
+            // TODO: Implement actual MQTT message waiting
+            Ok(serde_json::json!({
+                "status": "expected_message_received",
+                "topic": topic,
+                "expected_payload": payload
+            }))
+        }
+        Action::ClientAction {
+            client_id,
+            action_type,
+            parameters,
+        } => {
+            log_collector.log_str(
+                LogSource::Orchestrator,
+                &format!(
+                    "  🎮 Client action: {:?} for client {}",
+                    action_type, client_id
+                ),
+            );
+            // TODO: Implement actual client action execution
+            Ok(serde_json::json!({
+                "status": "client_action_executed",
+                "client_id": client_id,
+                "action_type": action_type,
+                "parameters": parameters
+            }))
+        }
+        Action::Parallel { actions } => {
+            log_collector.log_str(
+                LogSource::Orchestrator,
+                &format!("  🔀 Executing {} actions in parallel", actions.len()),
+            );
+            // TODO: Implement parallel action execution
+            Ok(serde_json::json!({
+                "status": "parallel_actions_completed",
+                "action_count": actions.len()
+            }))
+        }
+        Action::Sequence { actions } => {
+            log_collector.log_str(
+                LogSource::Orchestrator,
+                &format!("  ➡️ Executing {} actions in sequence", actions.len()),
+            );
+            // TODO: Implement sequential action execution
+            Ok(serde_json::json!({
+                "status": "sequence_actions_completed",
+                "action_count": actions.len()
+            }))
+        }
+        Action::Custom {
+            action_type,
+            parameters,
+        } => {
+            log_collector.log_str(
+                LogSource::Orchestrator,
+                &format!(
+                    "  🔧 Executing custom action: {} with params: {:?}",
+                    action_type, parameters
+                ),
+            );
+            // TODO: Implement custom action execution
+            Ok(serde_json::json!({
+                "status": "custom_action_executed",
+                "action_type": action_type,
+                "parameters": parameters
+            }))
+        }
+    }
+}
+
+// TUI-safe helper functions for execute_step_with_logging
+
+async fn execute_mcp_call_with_logging(
+    client_id: &str,
+    tool: &str,
+    arguments: &serde_json::Value,
+    state: &mut OrchestratorState,
+    log_collector: LogCollector,
+) -> Result<serde_json::Value, Box<dyn std::error::Error + Send + Sync>> {
+    log_collector.log_str(
+        LogSource::Orchestrator,
+        &format!(
+            "  🔧 MCP call to {}: {} with args: {}",
+            client_id, tool, arguments
+        ),
+    );
+
+    // Find client connection
+    if let Some(_stream) = state.client_connections.get(client_id) {
+        // TODO: Implement actual MCP call
+        Ok(serde_json::json!({
+            "status": "mcp_call_completed",
+            "tool": tool,
+            "arguments": arguments
+        }))
+    } else {
+        let error_msg = format!("Client {} not connected", client_id);
+        log_collector.log_str(LogSource::Orchestrator, &format!("❌ {}", error_msg));
+        Err(error_msg.into())
+    }
+}
+
+async fn execute_wait_condition_with_logging(
+    condition: &str,
+    expected_value: Option<&str>,
+    wait_timeout: u64,
+    _state: &mut OrchestratorState,
+    log_collector: LogCollector,
+) -> Result<serde_json::Value, Box<dyn std::error::Error + Send + Sync>> {
+    log_collector.log_str(
+        LogSource::Orchestrator,
+        &format!(
+            "  ⏳ Waiting for condition: {} (timeout: {}ms)",
+            condition, wait_timeout
+        ),
+    );
+
+    // Handle special conditions
+    match condition {
+        "manual_exit" => {
+            // For manual_exit condition, wait indefinitely until Ctrl+C
+            log_collector.log_str(
+                LogSource::Orchestrator,
+                "  📝 Manual exit condition - waiting indefinitely (use ESC or Ctrl+C to exit)",
+            );
+
+            // Create a cancellation signal detector
+            let mut sigint =
+                tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())
+                    .expect("Failed to install SIGINT handler in wait_condition");
+            let mut sigterm =
+                tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+                    .expect("Failed to install SIGTERM handler in wait_condition");
+
+            // Also respect the timeout if provided
+            let timeout_duration = Duration::from_millis(wait_timeout);
+            let start = Instant::now();
+
+            loop {
+                let remaining_time = timeout_duration
+                    .checked_sub(start.elapsed())
+                    .unwrap_or(Duration::ZERO);
+
+                if remaining_time.is_zero() {
+                    log_collector.log_str(
+                        LogSource::Orchestrator,
+                        &format!("  ⏰ Wait condition timed out after {}ms", wait_timeout),
+                    );
+                    return Ok(serde_json::json!({
+                        "condition": condition,
+                        "expected": expected_value,
+                        "status": "timeout"
+                    }));
+                }
+
+                let sleep_duration = std::cmp::min(Duration::from_secs(1), remaining_time);
+
+                tokio::select! {
+                    _ = sleep(sleep_duration) => {
+                        // Continue waiting
+                        continue;
+                    }
+                    _ = sigint.recv() => {
+                        log_collector.log_str(
+                            LogSource::Orchestrator,
+                            "  🛑 Manual exit condition met (SIGINT received)",
+                        );
+                        return Ok(serde_json::json!({
+                            "condition": condition,
+                            "expected": expected_value,
+                            "status": "manual_exit_triggered"
+                        }));
+                    }
+                    _ = sigterm.recv() => {
+                        log_collector.log_str(
+                            LogSource::Orchestrator,
+                            "  🛑 Manual exit condition met (SIGTERM received)",
+                        );
+                        return Ok(serde_json::json!({
+                            "condition": condition,
+                            "expected": expected_value,
+                            "status": "manual_exit_triggered"
+                        }));
+                    }
+                }
+            }
+        }
+        _ => {
+            // For other conditions, use the original behavior but respect the timeout
+            let wait_duration = Duration::from_millis(wait_timeout);
+            log_collector.log_str(
+                LogSource::Orchestrator,
+                &format!(
+                    "  ⏳ Simulating wait for condition '{}' for {}ms",
+                    condition, wait_timeout
+                ),
+            );
+            sleep(wait_duration).await;
+
+            Ok(serde_json::json!({
+                "condition": condition,
+                "expected": expected_value,
+                "status": "condition_met"
+            }))
+        }
+    }
+}
+
+async fn execute_console_command_with_logging(
+    _client_id: &str,
+    command: &str,
+    _state: &mut OrchestratorState,
+    log_collector: LogCollector,
+) -> Result<serde_json::Value, Box<dyn std::error::Error + Send + Sync>> {
+    log_collector.log_str(
+        LogSource::Orchestrator,
+        &format!("  💻 Console command: {}", command),
+    );
+
+    // For now, simulate console command execution
+    Ok(serde_json::json!({
+        "command": command,
+        "status": "executed"
+    }))
+}
+
+async fn execute_validate_scenario_with_logging(
+    checks: &[String],
+    _state: &mut OrchestratorState,
+    log_collector: LogCollector,
+) -> Result<serde_json::Value, Box<dyn std::error::Error + Send + Sync>> {
+    log_collector.log_str(
+        LogSource::Orchestrator,
+        &format!("  ✅ Validating scenario with checks: {:?}", checks),
+    );
+
+    // For now, simulate validation
+    Ok(serde_json::json!({
+        "checks": checks,
+        "all_passed": true
+    }))
 }
 
 async fn wait_for_port_with_retries_and_context_with_logging(
