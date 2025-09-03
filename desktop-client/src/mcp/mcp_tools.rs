@@ -156,6 +156,18 @@ pub fn execute_mcp_tool(
             }],
             is_error: Some(false),
         }),
+        "ping" => Ok(McpToolResult {
+            content: vec![McpContent::Text {
+                text: "pong".to_string(),
+            }],
+            is_error: Some(false),
+        }),
+        "ping" => Ok(McpToolResult {
+            content: vec![McpContent::Text {
+                text: "pong".to_string(),
+            }],
+            is_error: Some(false),
+        }),
         _ => Err(McpError {
             code: -32601,
             message: format!("Tool '{}' not found", tool_name),
@@ -167,6 +179,15 @@ pub fn execute_mcp_tool(
 /// Create the default set of IoTCraft MCP tools (minimal for testing)
 pub fn create_default_tools() -> Vec<McpTool> {
     vec![
+        McpTool {
+            name: "ping".to_string(),
+            description: "Test connectivity with the server - returns a simple pong response".to_string(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {},
+                "required": []
+            }),
+        },
         McpTool {
             name: "list_devices".to_string(),
             description: "List all IoT devices in the world with their positions and types"

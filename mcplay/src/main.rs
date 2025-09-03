@@ -108,31 +108,6 @@ impl SystemInfo {
         })
     }
 
-    /// Collect current system information asynchronously (legacy method)
-    #[allow(dead_code)]
-    async fn collect() -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
-        let (cpu_usage, memory_info, uptime, process_count) = tokio::try_join!(
-            Self::get_cpu_usage(),
-            Self::get_memory_info(),
-            Self::get_uptime(),
-            Self::get_process_count()
-        )?;
-
-        Ok(Self {
-            cpu_usage,
-            memory_used_mb: memory_info.0,
-            memory_total_mb: memory_info.1,
-            memory_usage_percent: if memory_info.1 > 0 {
-                (memory_info.0 as f64 / memory_info.1 as f64) * 100.0
-            } else {
-                0.0
-            },
-            uptime_seconds: uptime,
-            process_count,
-            total_ram_mb: memory_info.1,
-        })
-    }
-
     /// Get CPU usage percentage (macOS specific)
     async fn get_cpu_usage() -> Result<f64, Box<dyn std::error::Error + Send + Sync>> {
         #[cfg(target_os = "macos")]
@@ -252,94 +227,6 @@ impl SystemInfo {
         #[cfg(not(target_os = "macos"))]
         {
             Ok(0)
-        }
-    }
-
-    /// Get memory information (used MB, total MB) (macOS specific) - LEGACY METHOD
-    #[allow(dead_code)]
-    async fn get_memory_info() -> Result<(u64, u64), Box<dyn std::error::Error + Send + Sync>> {
-        #[cfg(target_os = "macos")]
-        {
-            // First get the total physical RAM using sysctl
-            let total_ram = {
-                let output = tokio::process::Command::new("sysctl")
-                    .args(&["-n", "hw.memsize"])
-                    .output()
-                    .await?;
-                let output_str = String::from_utf8(output.stdout)?;
-                output_str.trim().parse::<u64>().unwrap_or(0) / (1024 * 1024) // Convert bytes to MB
-            };
-
-            // Now get memory usage from vm_stat
-            let output = tokio::process::Command::new("vm_stat").output().await?;
-
-            let output_str = String::from_utf8(output.stdout)?;
-            let mut page_size = 4096u64; // Default page size on macOS
-            let mut _free_pages = 0u64;
-            let mut active_pages = 0u64;
-            let mut _inactive_pages = 0u64;
-            let mut wired_pages = 0u64;
-            let mut compressed_pages = 0u64;
-
-            // Get the actual page size
-            if let Some(first_line) = output_str.lines().next() {
-                if first_line.contains("page size of") {
-                    let parts: Vec<&str> = first_line.split_whitespace().collect();
-                    for (i, part) in parts.iter().enumerate() {
-                        if *part == "of" && i + 1 < parts.len() {
-                            if let Ok(size) = parts[i + 1].parse::<u64>() {
-                                page_size = size;
-                                break;
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Parse memory statistics
-            for line in output_str.lines() {
-                let parts: Vec<&str> = line.split_whitespace().collect();
-                if parts.len() >= 2 {
-                    // The format is: "Pages free:                               10445."
-                    if let Ok(pages) = parts
-                        .last()
-                        .map_or("", |v| v)
-                        .trim_end_matches('.')
-                        .parse::<u64>()
-                    {
-                        if line.contains("Pages free:") {
-                            _free_pages = pages;
-                        } else if line.contains("Pages active:") {
-                            active_pages = pages;
-                        } else if line.contains("Pages inactive:") {
-                            _inactive_pages = pages;
-                        } else if line.contains("Pages wired down:") {
-                            wired_pages = pages;
-                        } else if line.contains("Pages speculative:") {
-                            // Speculative pages count as inactive/free-ish
-                            _inactive_pages += pages;
-                        } else if line.contains("Pages purgeable:") {
-                            // Purgeable pages can be reclaimed, treat as part of available memory
-                            _inactive_pages += pages;
-                        } else if line.contains("compressed:") {
-                            compressed_pages = pages;
-                        }
-                    }
-                }
-            }
-
-            // Calculate used memory from pages
-            // Used = active + wired + compressed (pages actually in use, not including free/inactive)
-            let used_pages = active_pages + wired_pages + compressed_pages;
-            let used_mb = (used_pages * page_size) / (1024 * 1024);
-
-            // Use the actual total physical RAM, not calculated from pages
-            Ok((used_mb, total_ram))
-        }
-        #[cfg(not(target_os = "macos"))]
-        {
-            // Fallback for other platforms
-            Ok((0, 0))
         }
     }
 
@@ -557,6 +444,7 @@ enum FocusedPane {
 enum UiMode {
     LogViewing,
     McpMessageSending,
+    McpInteractionDetails, // New mode for showing MCP request/response details
 }
 
 #[cfg(feature = "tui")]
@@ -707,12 +595,27 @@ struct LoggingApp {
 }
 
 #[cfg(feature = "tui")]
+#[derive(Debug, Clone)]
+enum McpInteractionState {
+    SelectingMessage,
+    SendingRequest,
+    ShowingResponse { success: bool },
+}
+
+#[cfg(feature = "tui")]
 struct McpInteractiveApp {
     available_messages: Vec<McpMessage>,
     selected_message_index: usize,
     client_id: String, // The client we're sending messages to
     list_state: ListState,
-    _message_result: Option<String>,
+    // Enhanced interaction tracking
+    interaction_state: McpInteractionState,
+    selected_message: Option<McpMessage>, // The message being sent/was sent
+    request_sent_at: Option<std::time::Instant>, // When the request was sent
+    response_received_at: Option<std::time::Instant>, // When response was received
+    response_data: Option<serde_json::Value>, // The actual response
+    error_message: Option<String>,        // Error if request failed
+    details_scroll_pos: u16,              // Scroll position for MCP interaction details
 }
 
 #[cfg(feature = "tui")]
@@ -2842,6 +2745,12 @@ async fn run_scenario_with_tui(
                                         logging_app.focused_pane = FocusedPane::LogSelector;
                                         logging_app.mcp_app = None;
                                     }
+                                    UiMode::McpInteractionDetails => {
+                                        // In MCP interaction details mode, ESC returns to log viewing mode
+                                        logging_app.ui_mode = UiMode::LogViewing;
+                                        logging_app.focused_pane = FocusedPane::LogSelector;
+                                        logging_app.mcp_app = None;
+                                    }
                                 }
                             }
                             KeyCode::Tab => {
@@ -2863,6 +2772,9 @@ async fn run_scenario_with_tui(
                                     }
                                     UiMode::McpMessageSending => {
                                         // In MCP mode, Tab doesn't switch focus (only one focusable pane)
+                                    }
+                                    UiMode::McpInteractionDetails => {
+                                        // In MCP interaction details mode, Tab doesn't switch focus
                                     }
                                 }
                             }
@@ -2886,57 +2798,82 @@ async fn run_scenario_with_tui(
                                     UiMode::McpMessageSending => {
                                         // In MCP mode, BackTab doesn't switch focus (only one focusable pane)
                                     }
+                                    UiMode::McpInteractionDetails => {
+                                        // In MCP interaction details mode, BackTab doesn't switch focus
+                                    }
                                 }
                             }
                             KeyCode::Up => {
-                                match logging_app.focused_pane {
-                                    FocusedPane::LogSelector => {
-                                        // Navigate up in pane selector
-                                        if logging_app.selected_pane_index > 0 {
-                                            logging_app.selected_pane_index -= 1;
-                                            logging_app.selected_pane = logging_app.panes
-                                                [logging_app.selected_pane_index]
-                                                .clone();
+                                match logging_app.ui_mode {
+                                    UiMode::McpInteractionDetails => {
+                                        // Scroll up in MCP interaction details
+                                        if let Some(ref mut mcp_app) = logging_app.mcp_app {
+                                            if mcp_app.details_scroll_pos > 0 {
+                                                mcp_app.details_scroll_pos -= 1;
+                                            }
                                         }
                                     }
-                                    FocusedPane::LogContent => {
-                                        // Scroll up in log content
-                                        logging_app.scroll_up();
-                                    }
-                                    FocusedPane::McpMessageSelector => {
-                                        // Handle MCP message selector navigation up
-                                        if let Some(ref mut mcp_app) = logging_app.mcp_app {
-                                            if mcp_app.selected_message_index > 0 {
-                                                mcp_app.selected_message_index -= 1;
+                                    _ => {
+                                        match logging_app.focused_pane {
+                                            FocusedPane::LogSelector => {
+                                                // Navigate up in pane selector
+                                                if logging_app.selected_pane_index > 0 {
+                                                    logging_app.selected_pane_index -= 1;
+                                                    logging_app.selected_pane = logging_app.panes
+                                                        [logging_app.selected_pane_index]
+                                                        .clone();
+                                                }
+                                            }
+                                            FocusedPane::LogContent => {
+                                                // Scroll up in log content
+                                                logging_app.scroll_up();
+                                            }
+                                            FocusedPane::McpMessageSelector => {
+                                                // Handle MCP message selector navigation up
+                                                if let Some(ref mut mcp_app) = logging_app.mcp_app {
+                                                    if mcp_app.selected_message_index > 0 {
+                                                        mcp_app.selected_message_index -= 1;
+                                                    }
+                                                }
                                             }
                                         }
                                     }
                                 }
                             }
                             KeyCode::Down => {
-                                match logging_app.focused_pane {
-                                    FocusedPane::LogSelector => {
-                                        // Navigate down in pane selector
-                                        if logging_app.selected_pane_index
-                                            < logging_app.panes.len() - 1
-                                        {
-                                            logging_app.selected_pane_index += 1;
-                                            logging_app.selected_pane = logging_app.panes
-                                                [logging_app.selected_pane_index]
-                                                .clone();
+                                match logging_app.ui_mode {
+                                    UiMode::McpInteractionDetails => {
+                                        // Scroll down in MCP interaction details
+                                        if let Some(ref mut mcp_app) = logging_app.mcp_app {
+                                            mcp_app.details_scroll_pos += 1;
                                         }
                                     }
-                                    FocusedPane::LogContent => {
-                                        // Scroll down in log content
-                                        logging_app.scroll_down();
-                                    }
-                                    FocusedPane::McpMessageSelector => {
-                                        // Handle MCP message selector navigation
-                                        if let Some(ref mut mcp_app) = logging_app.mcp_app {
-                                            if mcp_app.selected_message_index
-                                                < mcp_app.available_messages.len() - 1
-                                            {
-                                                mcp_app.selected_message_index += 1;
+                                    _ => {
+                                        match logging_app.focused_pane {
+                                            FocusedPane::LogSelector => {
+                                                // Navigate down in pane selector
+                                                if logging_app.selected_pane_index
+                                                    < logging_app.panes.len() - 1
+                                                {
+                                                    logging_app.selected_pane_index += 1;
+                                                    logging_app.selected_pane = logging_app.panes
+                                                        [logging_app.selected_pane_index]
+                                                        .clone();
+                                                }
+                                            }
+                                            FocusedPane::LogContent => {
+                                                // Scroll down in log content
+                                                logging_app.scroll_down();
+                                            }
+                                            FocusedPane::McpMessageSelector => {
+                                                // Handle MCP message selector navigation
+                                                if let Some(ref mut mcp_app) = logging_app.mcp_app {
+                                                    if mcp_app.selected_message_index
+                                                        < mcp_app.available_messages.len() - 1
+                                                    {
+                                                        mcp_app.selected_message_index += 1;
+                                                    }
+                                                }
                                             }
                                         }
                                     }
@@ -2957,7 +2894,14 @@ async fn run_scenario_with_tui(
                                                     selected_message_index: 0,
                                                     client_id: client_id.clone(),
                                                     list_state: ListState::default(),
-                                                    _message_result: None,
+                                                    interaction_state:
+                                                        McpInteractionState::SelectingMessage,
+                                                    selected_message: None,
+                                                    request_sent_at: None,
+                                                    response_received_at: None,
+                                                    response_data: None,
+                                                    error_message: None,
+                                                    details_scroll_pos: 0,
                                                 };
                                                 mcp_app.list_state.select(Some(0));
                                                 logging_app.mcp_app = Some(mcp_app);
@@ -2968,8 +2912,8 @@ async fn run_scenario_with_tui(
                                         }
                                     }
                                     UiMode::McpMessageSending => {
-                                        // Send the selected MCP message
-                                        if let Some(ref mcp_app) = logging_app.mcp_app {
+                                        // Send the selected MCP message and transition to interaction details
+                                        if let Some(ref mut mcp_app) = logging_app.mcp_app {
                                             if mcp_app.selected_message_index
                                                 < mcp_app.available_messages.len()
                                             {
@@ -2978,32 +2922,18 @@ async fn run_scenario_with_tui(
                                                     .clone();
                                                 let client_id = mcp_app.client_id.clone();
 
-                                                // Log the message being sent with prominent visual feedback
-                                                logging_app.add_log(
-                                                    &LogSource::Client(client_id.clone()),
-                                                    "====================================="
-                                                        .to_string(),
-                                                );
-                                                logging_app.add_log(
-                                                    &LogSource::Client(client_id.clone()),
-                                                    format!(
-                                                        "🚀 SENDING MCP MESSAGE: {}",
-                                                        message.name
-                                                    ),
-                                                );
-                                                logging_app.add_log(
-                                                    &LogSource::Client(client_id.clone()),
-                                                    format!("   Method: {}", message.method),
-                                                );
-                                                logging_app.add_log(
-                                                    &LogSource::Client(client_id.clone()),
-                                                    format!("   Params: {}", message.params),
-                                                );
-                                                logging_app.add_log(
-                                                    &LogSource::Client(client_id.clone()),
-                                                    "====================================="
-                                                        .to_string(),
-                                                );
+                                                // Update MCP app state to show we're sending
+                                                mcp_app.interaction_state =
+                                                    McpInteractionState::SendingRequest;
+                                                mcp_app.selected_message = Some(message.clone());
+                                                mcp_app.request_sent_at =
+                                                    Some(std::time::Instant::now());
+                                                mcp_app.response_received_at = None;
+                                                mcp_app.response_data = None;
+                                                mcp_app.error_message = None;
+
+                                                // Transition to interaction details view immediately
+                                                logging_app.ui_mode = UiMode::McpInteractionDetails;
 
                                                 // Try to actually send the MCP message
                                                 match send_mcp_message_to_client(
@@ -3014,40 +2944,52 @@ async fn run_scenario_with_tui(
                                                 .await
                                                 {
                                                     Ok(response) => {
+                                                        // Update MCP app with successful response
+                                                        if let Some(ref mut mcp_app) =
+                                                            logging_app.mcp_app
+                                                        {
+                                                            mcp_app.interaction_state = McpInteractionState::ShowingResponse { success: true };
+                                                            mcp_app.response_received_at =
+                                                                Some(std::time::Instant::now());
+                                                            mcp_app.response_data =
+                                                                Some(response.clone());
+                                                        }
+                                                        // Also log to client pane for record keeping
                                                         logging_app.add_log(
                                                             &LogSource::Client(client_id.clone()),
                                                             format!(
-                                                                "✅ MCP response: {}",
-                                                                response
+                                                                "✅ MCP {}: {}",
+                                                                message.name, response
                                                             ),
                                                         );
                                                     }
                                                     Err(e) => {
+                                                        // Update MCP app with error response
+                                                        if let Some(ref mut mcp_app) =
+                                                            logging_app.mcp_app
+                                                        {
+                                                            mcp_app.interaction_state = McpInteractionState::ShowingResponse { success: false };
+                                                            mcp_app.response_received_at =
+                                                                Some(std::time::Instant::now());
+                                                            mcp_app.error_message =
+                                                                Some(e.to_string());
+                                                        }
+                                                        // Also log to client pane for record keeping
                                                         logging_app.add_log(
                                                             &LogSource::Client(client_id.clone()),
-                                                            format!("❌ MCP error: {}", e),
+                                                            format!(
+                                                                "❌ MCP {}: {}",
+                                                                message.name, e
+                                                            ),
                                                         );
                                                     }
                                                 }
-
-                                                // Switch to the client's log pane to show the message
-                                                let client_pane =
-                                                    LogPane::Client(client_id.clone());
-                                                if let Some(index) = logging_app
-                                                    .panes
-                                                    .iter()
-                                                    .position(|p| p == &client_pane)
-                                                {
-                                                    logging_app.selected_pane_index = index;
-                                                    logging_app.selected_pane = client_pane;
-                                                }
                                             }
                                         }
-
-                                        // Return to log viewing mode with client pane selected
-                                        logging_app.ui_mode = UiMode::LogViewing;
-                                        logging_app.focused_pane = FocusedPane::LogContent; // Focus on content to show the logs
-                                        logging_app.mcp_app = None;
+                                    }
+                                    UiMode::McpInteractionDetails => {
+                                        // In interaction details mode, Enter does nothing
+                                        // User must press ESC to go back
                                     }
                                 }
                             }
@@ -3106,6 +3048,7 @@ fn draw_logging_ui(f: &mut Frame, app: &LoggingApp) {
     match app.ui_mode {
         UiMode::LogViewing => draw_log_viewing_ui(f, app),
         UiMode::McpMessageSending => draw_mcp_message_ui(f, app),
+        UiMode::McpInteractionDetails => draw_mcp_interaction_details_ui(f, app),
     }
 }
 
@@ -3408,6 +3351,319 @@ fn draw_mcp_message_ui(f: &mut Frame, app: &LoggingApp) {
     .alignment(Alignment::Center);
 
     f.render_widget(controls, controls_area);
+}
+
+#[cfg(feature = "tui")]
+fn draw_mcp_interaction_details_ui(f: &mut Frame, app: &LoggingApp) {
+    if let Some(ref mcp_app) = app.mcp_app {
+        // Create a centered modal-like overlay
+        let area = f.area();
+        let popup_area = centered_rect(80, 80, area);
+
+        // Clear the background
+        let clear_block = Block::default().style(Style::default().bg(Color::Black));
+        f.render_widget(clear_block, area);
+
+        // Split the popup area for title, content, and controls
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(3), // Title
+                Constraint::Min(0),    // Content
+                Constraint::Length(3), // Controls
+            ])
+            .split(popup_area);
+
+        // Title
+        let title_text = format!("📡 MCP Interaction with {}", mcp_app.client_id);
+        let title = Paragraph::new(title_text)
+            .style(
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            )
+            .alignment(Alignment::Center)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_style(Style::default().fg(Color::Cyan)),
+            );
+        f.render_widget(title, chunks[0]);
+
+        // Content based on interaction state
+        let content_lines = match &mcp_app.interaction_state {
+            McpInteractionState::SelectingMessage => {
+                vec![Line::from(Span::styled(
+                    "🤔 This shouldn't be visible...",
+                    Style::default().fg(Color::Red),
+                ))]
+            }
+            McpInteractionState::SendingRequest => {
+                let mut lines = vec![];
+                if let Some(ref message) = mcp_app.selected_message {
+                    lines.push(Line::from(vec![
+                        Span::styled(
+                            "🚀 Sending: ",
+                            Style::default()
+                                .fg(Color::Yellow)
+                                .add_modifier(Modifier::BOLD),
+                        ),
+                        Span::styled(
+                            &message.name,
+                            Style::default()
+                                .fg(Color::White)
+                                .add_modifier(Modifier::BOLD),
+                        ),
+                    ]));
+                    lines.push(Line::from(""));
+                    lines.push(Line::from(vec![
+                        Span::styled("Method: ", Style::default().add_modifier(Modifier::BOLD)),
+                        Span::raw(&message.method),
+                    ]));
+                    lines.push(Line::from(""));
+                    lines.push(Line::from(Span::styled(
+                        "Parameters:",
+                        Style::default().add_modifier(Modifier::BOLD),
+                    )));
+                    // Pretty-print parameters JSON with syntax highlighting
+                    let formatted_params = serde_json::to_string_pretty(&message.params)
+                        .unwrap_or_else(|_| message.params.to_string());
+                    let highlighted_params = format_json_with_syntax_highlighting(formatted_params);
+                    lines.extend(highlighted_params);
+                    lines.push(Line::from(""));
+                    if let Some(sent_at) = mcp_app.request_sent_at {
+                        let elapsed = sent_at.elapsed().as_millis();
+                        lines.push(Line::from(vec![
+                            Span::styled(
+                                "⏱️  Waiting for response... ",
+                                Style::default().fg(Color::Yellow),
+                            ),
+                            Span::styled(
+                                format!("({}ms)", elapsed),
+                                Style::default().fg(Color::Gray),
+                            ),
+                        ]));
+                    }
+                }
+                lines
+            }
+            McpInteractionState::ShowingResponse { success } => {
+                let mut lines = vec![];
+                if let Some(ref message) = mcp_app.selected_message {
+                    lines.push(Line::from(vec![
+                        Span::styled(
+                            "📤 Sent: ",
+                            Style::default()
+                                .fg(Color::Green)
+                                .add_modifier(Modifier::BOLD),
+                        ),
+                        Span::styled(
+                            &message.name,
+                            Style::default()
+                                .fg(Color::White)
+                                .add_modifier(Modifier::BOLD),
+                        ),
+                    ]));
+
+                    if let Some(sent_at) = mcp_app.request_sent_at {
+                        if let Some(received_at) = mcp_app.response_received_at {
+                            let duration = received_at.duration_since(sent_at).as_millis();
+                            lines.push(Line::from(vec![
+                                Span::styled(
+                                    "⏱️  Response time: ",
+                                    Style::default().fg(Color::Gray),
+                                ),
+                                Span::styled(
+                                    format!("{}ms", duration),
+                                    Style::default().fg(Color::Cyan),
+                                ),
+                            ]));
+                        }
+                    }
+
+                    lines.push(Line::from(""));
+
+                    if *success {
+                        lines.push(Line::from(Span::styled(
+                            "✅ Response:",
+                            Style::default()
+                                .fg(Color::Green)
+                                .add_modifier(Modifier::BOLD),
+                        )));
+                        if let Some(ref response) = mcp_app.response_data {
+                            // Pretty-print JSON with syntax highlighting
+                            let formatted_json = serde_json::to_string_pretty(response)
+                                .unwrap_or_else(|_| response.to_string());
+                            let highlighted_json =
+                                format_json_with_syntax_highlighting(formatted_json);
+                            lines.extend(highlighted_json);
+                        }
+                    } else {
+                        lines.push(Line::from(Span::styled(
+                            "❌ Error:",
+                            Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+                        )));
+                        if let Some(ref error) = mcp_app.error_message {
+                            // Try to parse error as JSON for better formatting
+                            if let Ok(json_error) = serde_json::from_str::<serde_json::Value>(error)
+                            {
+                                let formatted_json = serde_json::to_string_pretty(&json_error)
+                                    .unwrap_or_else(|_| error.clone());
+                                let highlighted_json =
+                                    format_json_with_syntax_highlighting(formatted_json);
+                                lines.extend(highlighted_json);
+                            } else {
+                                // Plain error message
+                                for line in error.lines() {
+                                    lines.push(Line::from(Span::styled(
+                                        line,
+                                        Style::default().fg(Color::Red),
+                                    )));
+                                }
+                            }
+                        }
+                    }
+                }
+                lines
+            }
+        };
+
+        let scroll_pos = mcp_app.details_scroll_pos;
+        let content = Paragraph::new(content_lines)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title("📋 Details")
+                    .border_style(Style::default().fg(Color::White)),
+            )
+            .wrap(Wrap { trim: true })
+            .scroll((scroll_pos, 0));
+        f.render_widget(content, chunks[1]);
+
+        // Controls
+        let controls = Paragraph::new(vec![Line::from(vec![
+            Span::styled("↑↓", Style::default().add_modifier(Modifier::BOLD)),
+            Span::raw(" Scroll  "),
+            Span::styled("Esc", Style::default().add_modifier(Modifier::BOLD)),
+            Span::raw(" Return to Log View"),
+        ])])
+        .block(Block::default().borders(Borders::ALL).title("🎮 Controls"))
+        .alignment(Alignment::Center);
+        f.render_widget(controls, chunks[2]);
+    }
+}
+
+/// Helper function to create a centered rectangle
+#[cfg(feature = "tui")]
+fn centered_rect(
+    percent_x: u16,
+    percent_y: u16,
+    r: ratatui::prelude::Rect,
+) -> ratatui::prelude::Rect {
+    let popup_layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Percentage((100 - percent_y) / 2),
+            Constraint::Percentage(percent_y),
+            Constraint::Percentage((100 - percent_y) / 2),
+        ])
+        .split(r);
+
+    Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Percentage((100 - percent_x) / 2),
+            Constraint::Percentage(percent_x),
+            Constraint::Percentage((100 - percent_x) / 2),
+        ])
+        .split(popup_layout[1])[1]
+}
+
+#[cfg(feature = "tui")]
+fn format_json_with_syntax_highlighting(json_str: String) -> Vec<Line<'static>> {
+    json_str
+        .lines()
+        .map(|line| {
+            let mut spans = Vec::new();
+            let chars = line.chars().collect::<Vec<char>>();
+            let mut i = 0;
+
+            while i < chars.len() {
+                let ch = chars[i];
+                match ch {
+                    '"' => {
+                        // Handle string literals
+                        let start = i;
+                        i += 1;
+
+                        // Read until closing quote, handling escapes
+                        while i < chars.len() {
+                            if chars[i] == '"' && (i == 0 || chars[i - 1] != '\\') {
+                                i += 1;
+                                break;
+                            }
+                            i += 1;
+                        }
+
+                        let string_content: String = chars[start..i].iter().collect();
+
+                        // Determine if this is a key (followed by :) or a value
+                        let remaining_chars = &chars[i..];
+                        let remaining_str: String = remaining_chars.iter().collect();
+                        let is_key = remaining_str.trim_start().starts_with(':');
+
+                        let style = if is_key {
+                            Style::default().fg(Color::Cyan)
+                        } else {
+                            Style::default().fg(Color::Green)
+                        };
+
+                        spans.push(Span::styled(string_content, style));
+                    }
+                    '{' | '}' | '[' | ']' | ',' | ':' => {
+                        // Handle punctuation
+                        spans.push(Span::styled(
+                            ch.to_string(),
+                            Style::default().fg(Color::Yellow),
+                        ));
+                        i += 1;
+                    }
+                    ' ' | '\t' => {
+                        // Handle whitespace - preserve it exactly as is
+                        spans.push(Span::raw(ch.to_string()));
+                        i += 1;
+                    }
+                    _ => {
+                        // Handle numbers, booleans, null, and other tokens
+                        let start = i;
+
+                        // Read the complete token
+                        while i < chars.len()
+                            && !matches!(chars[i], ',' | '}' | ']' | ' ' | '\t' | '\n' | '{' | '[')
+                        {
+                            i += 1;
+                        }
+
+                        let token: String = chars[start..i].iter().collect();
+
+                        let style = if token.parse::<f64>().is_ok() {
+                            Style::default().fg(Color::Magenta)
+                        } else if matches!(token.as_str(), "true" | "false") {
+                            Style::default().fg(Color::Blue)
+                        } else if token == "null" {
+                            Style::default().fg(Color::Red)
+                        } else {
+                            Style::default()
+                        };
+
+                        spans.push(Span::styled(token, style));
+                    }
+                }
+            }
+
+            Line::from(spans)
+        })
+        .collect()
 }
 
 async fn run_scenario_with_logging(

@@ -313,6 +313,19 @@ fn process_mcp_requests(
                     &mut pending_executions,
                 );
             }
+            "ping" => {
+                // Handle ping immediately - no queuing needed
+                let response = json!({
+                    "content": [{
+                        "type": "text",
+                        "text": "pong"
+                    }],
+                    "isError": false
+                });
+                if request.response_sender.send(response).is_err() {
+                    error!("Failed to send ping response");
+                }
+            }
             "resources/list" => {
                 let response = handle_resources_list_request();
                 if request.response_sender.send(response).is_err() {
