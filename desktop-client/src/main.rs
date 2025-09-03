@@ -1312,7 +1312,11 @@ fn main() {
 
     // Add MCP plugin only if --mcp flag is provided
     if args.mcp {
-        info!("Starting in MCP server mode");
+        let mcp_port = std::env::var("MCP_PORT")
+            .unwrap_or_else(|_| "8080".to_string())
+            .parse::<u16>()
+            .unwrap_or(8080);
+        info!("Starting in MCP server mode on port {}", mcp_port);
         app.add_plugins(mcp::McpPlugin);
     }
 

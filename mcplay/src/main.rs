@@ -49,6 +49,7 @@ struct SystemInfo {
     memory_usage_percent: f64,
     uptime_seconds: u64,
     process_count: usize,
+    total_ram_mb: u64, // Cached total RAM, initialized once
 }
 
 #[cfg(feature = "tui")]
@@ -61,10 +62,53 @@ impl SystemInfo {
             memory_usage_percent: 0.0,
             uptime_seconds: 0,
             process_count: 0,
+            total_ram_mb: 0, // Will be initialized in new_with_total_ram
         }
     }
 
-    /// Collect current system information asynchronously
+    /// Create SystemInfo with pre-fetched total RAM
+    async fn new_with_total_ram() -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+        let total_ram_mb = Self::get_total_ram().await.unwrap_or(0);
+        Ok(Self {
+            cpu_usage: 0.0,
+            memory_used_mb: 0,
+            memory_total_mb: total_ram_mb,
+            memory_usage_percent: 0.0,
+            uptime_seconds: 0,
+            process_count: 0,
+            total_ram_mb,
+        })
+    }
+
+    /// Collect current system information asynchronously (using cached total RAM)
+    async fn collect_with_cached_ram(
+        &self,
+    ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+        let (cpu_usage, memory_used_mb, uptime, process_count) = tokio::try_join!(
+            Self::get_cpu_usage(),
+            Self::get_memory_usage(self.total_ram_mb),
+            Self::get_uptime(),
+            Self::get_process_count()
+        )?;
+
+        let memory_usage_percent = if self.total_ram_mb > 0 {
+            (memory_used_mb as f64 / self.total_ram_mb as f64) * 100.0
+        } else {
+            0.0
+        };
+
+        Ok(Self {
+            cpu_usage,
+            memory_used_mb,
+            memory_total_mb: self.total_ram_mb,
+            memory_usage_percent,
+            uptime_seconds: uptime,
+            process_count,
+            total_ram_mb: self.total_ram_mb,
+        })
+    }
+
+    /// Collect current system information asynchronously (legacy method)
     async fn collect() -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         let (cpu_usage, memory_info, uptime, process_count) = tokio::try_join!(
             Self::get_cpu_usage(),
@@ -84,6 +128,7 @@ impl SystemInfo {
             },
             uptime_seconds: uptime,
             process_count,
+            total_ram_mb: memory_info.1,
         })
     }
 
@@ -131,10 +176,99 @@ impl SystemInfo {
         }
     }
 
-    /// Get memory information (used MB, total MB) (macOS specific)
+    /// Get total physical RAM in MB (called once at startup)
+    async fn get_total_ram() -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
+        #[cfg(target_os = "macos")]
+        {
+            let output = tokio::process::Command::new("sysctl")
+                .args(&["-n", "hw.memsize"])
+                .output()
+                .await?;
+            let output_str = String::from_utf8(output.stdout)?;
+            let total_bytes = output_str.trim().parse::<u64>().unwrap_or(0);
+            Ok(total_bytes / (1024 * 1024)) // Convert bytes to MB
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            Ok(0)
+        }
+    }
+
+    /// Get current memory usage in MB (called periodically)
+    async fn get_memory_usage(
+        total_ram_mb: u64,
+    ) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
+        #[cfg(target_os = "macos")]
+        {
+            let output = tokio::process::Command::new("vm_stat").output().await?;
+            let output_str = String::from_utf8(output.stdout)?;
+            let mut page_size = 4096u64; // Default page size on macOS
+            let mut active_pages = 0u64;
+            let mut wired_pages = 0u64;
+            let mut compressed_pages = 0u64;
+
+            // Get the actual page size
+            if let Some(first_line) = output_str.lines().next() {
+                if first_line.contains("page size of") {
+                    let parts: Vec<&str> = first_line.split_whitespace().collect();
+                    for (i, part) in parts.iter().enumerate() {
+                        if *part == "of" && i + 1 < parts.len() {
+                            if let Ok(size) = parts[i + 1].parse::<u64>() {
+                                page_size = size;
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Parse only the memory stats we need for "used" calculation
+            for line in output_str.lines() {
+                let parts: Vec<&str> = line.split_whitespace().collect();
+                if parts.len() >= 2 {
+                    if let Ok(pages) = parts
+                        .last()
+                        .map_or("", |v| v)
+                        .trim_end_matches('.')
+                        .parse::<u64>()
+                    {
+                        if line.contains("Pages active:") {
+                            active_pages = pages;
+                        } else if line.contains("Pages wired down:") {
+                            wired_pages = pages;
+                        } else if line.contains("compressed:") {
+                            compressed_pages = pages;
+                        }
+                    }
+                }
+            }
+
+            // Calculate used memory = active + wired + compressed (actual memory in use)
+            let used_pages = active_pages + wired_pages + compressed_pages;
+            let used_mb = (used_pages * page_size) / (1024 * 1024);
+            Ok(used_mb)
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            Ok(0)
+        }
+    }
+
+    /// Get memory information (used MB, total MB) (macOS specific) - LEGACY METHOD
     async fn get_memory_info() -> Result<(u64, u64), Box<dyn std::error::Error + Send + Sync>> {
         #[cfg(target_os = "macos")]
         {
+            // First get the total physical RAM using sysctl
+            let total_ram = {
+                let output = tokio::process::Command::new("sysctl")
+                    .args(&["-n", "hw.memsize"])
+                    .output()
+                    .await?;
+                let output_str = String::from_utf8(output.stdout)?;
+                output_str.trim().parse::<u64>().unwrap_or(0) / (1024 * 1024) // Convert bytes to MB
+            };
+
+            // Now get memory usage from vm_stat
             let output = tokio::process::Command::new("vm_stat").output().await?;
 
             let output_str = String::from_utf8(output.stdout)?;
@@ -164,35 +298,41 @@ impl SystemInfo {
             for line in output_str.lines() {
                 let parts: Vec<&str> = line.split_whitespace().collect();
                 if parts.len() >= 2 {
-                    if let Ok(pages) = parts[1].trim_end_matches('.').parse::<u64>() {
-                        match parts[0] {
-                            "Pages" if parts.len() > 2 && parts[2] == "free:" => free_pages = pages,
-                            "Pages" if parts.len() > 2 && parts[2] == "active:" => {
-                                active_pages = pages
-                            }
-                            "Pages" if parts.len() > 2 && parts[2] == "inactive:" => {
-                                inactive_pages = pages
-                            }
-                            "Pages" if parts.len() > 2 && parts[2] == "wired" => {
-                                wired_pages = pages
-                            }
-                            "Pages" if parts.len() > 3 && parts[3] == "compressed:" => {
-                                compressed_pages = pages
-                            }
-                            _ => {}
+                    // The format is: "Pages free:                               10445."
+                    if let Ok(pages) = parts
+                        .last()
+                        .map_or("", |v| v)
+                        .trim_end_matches('.')
+                        .parse::<u64>()
+                    {
+                        if line.contains("Pages free:") {
+                            free_pages = pages;
+                        } else if line.contains("Pages active:") {
+                            active_pages = pages;
+                        } else if line.contains("Pages inactive:") {
+                            inactive_pages = pages;
+                        } else if line.contains("Pages wired down:") {
+                            wired_pages = pages;
+                        } else if line.contains("Pages speculative:") {
+                            // Speculative pages count as inactive/free-ish
+                            inactive_pages += pages;
+                        } else if line.contains("Pages purgeable:") {
+                            // Purgeable pages can be reclaimed, treat as part of available memory
+                            inactive_pages += pages;
+                        } else if line.contains("compressed:") {
+                            compressed_pages = pages;
                         }
                     }
                 }
             }
 
-            let total_pages =
-                free_pages + active_pages + inactive_pages + wired_pages + compressed_pages;
-            let used_pages = total_pages - free_pages;
-
-            let total_mb = (total_pages * page_size) / (1024 * 1024);
+            // Calculate used memory from pages
+            // Used = active + wired + compressed (pages actually in use, not including free/inactive)
+            let used_pages = active_pages + wired_pages + compressed_pages;
             let used_mb = (used_pages * page_size) / (1024 * 1024);
 
-            Ok((used_mb, total_mb))
+            // Use the actual total physical RAM, not calculated from pages
+            Ok((used_mb, total_ram))
         }
         #[cfg(not(target_os = "macos"))]
         {
@@ -554,6 +694,7 @@ struct LoggingApp {
     ui_mode: UiMode,                     // Track current UI mode
     mcp_app: Option<McpInteractiveApp>,  // MCP message interface
     scenario: Scenario,                  // Store scenario for client connections
+    scenario_file_path: Option<PathBuf>, // Store the scenario file path
     system_info: SystemInfo,             // Current system information
     last_system_update: std::time::Instant, // When system info was last updated
     service_statuses: HashMap<String, ServiceStatus>, // Track service status
@@ -574,7 +715,7 @@ struct McpInteractiveApp {
 
 #[cfg(feature = "tui")]
 impl LoggingApp {
-    fn new(scenario: &Scenario) -> Self {
+    async fn new(scenario: &Scenario, scenario_file_path: Option<PathBuf>) -> Self {
         let mut panes = vec![LogPane::Orchestrator];
         let mut logs = HashMap::new();
         let mut scroll_positions = HashMap::new();
@@ -762,10 +903,13 @@ impl LoggingApp {
             scroll_positions,
             auto_scroll: true,
             log_files,
-            ui_mode: UiMode::LogViewing,    // Start in log viewing mode
-            mcp_app: None,                  // No MCP app initially
-            scenario: scenario.clone(),     // Store scenario for client connections
-            system_info: SystemInfo::new(), // Initialize with empty system info
+            ui_mode: UiMode::LogViewing, // Start in log viewing mode
+            mcp_app: None,               // No MCP app initially
+            scenario: scenario.clone(),  // Store scenario for client connections
+            scenario_file_path,          // Store the scenario file path
+            system_info: SystemInfo::new_with_total_ram()
+                .await
+                .unwrap_or_else(|_| SystemInfo::new()), // Initialize with total RAM
             last_system_update: std::time::Instant::now(), // Track when system info was last updated
             service_statuses,
             health_probes,
@@ -833,44 +977,6 @@ impl LoggingApp {
             LogPane::MqttObserver => "MQTT Observer".to_string(),
             LogPane::Client(id) => id.clone(),
         }
-    }
-
-    fn next_pane(&mut self) {
-        let current_idx = self
-            .panes
-            .iter()
-            .position(|p| match (p, &self.selected_pane) {
-                (LogPane::Orchestrator, LogPane::Orchestrator) => true,
-                (LogPane::MqttServer, LogPane::MqttServer) => true,
-                (LogPane::MqttObserver, LogPane::MqttObserver) => true,
-                (LogPane::Client(a), LogPane::Client(b)) => a == b,
-                _ => false,
-            })
-            .unwrap_or(0);
-
-        let next_idx = (current_idx + 1) % self.panes.len();
-        self.selected_pane = self.panes[next_idx].clone();
-    }
-
-    fn prev_pane(&mut self) {
-        let current_idx = self
-            .panes
-            .iter()
-            .position(|p| match (p, &self.selected_pane) {
-                (LogPane::Orchestrator, LogPane::Orchestrator) => true,
-                (LogPane::MqttServer, LogPane::MqttServer) => true,
-                (LogPane::MqttObserver, LogPane::MqttObserver) => true,
-                (LogPane::Client(a), LogPane::Client(b)) => a == b,
-                _ => false,
-            })
-            .unwrap_or(0);
-
-        let prev_idx = if current_idx == 0 {
-            self.panes.len() - 1
-        } else {
-            current_idx - 1
-        };
-        self.selected_pane = self.panes[prev_idx].clone();
     }
 
     fn scroll_up(&mut self) {
@@ -1049,6 +1155,7 @@ struct StepResult {
 
 struct OrchestratorState {
     scenario: Scenario,
+    scenario_file_path: Option<PathBuf>,
     client_processes: HashMap<String, Child>,
     client_connections: HashMap<String, TcpStream>,
     infrastructure_processes: HashMap<String, Child>,
@@ -1058,9 +1165,10 @@ struct OrchestratorState {
 }
 
 impl OrchestratorState {
-    fn new(scenario: Scenario) -> Self {
+    fn new(scenario: Scenario, scenario_file_path: Option<PathBuf>) -> Self {
         Self {
             scenario,
+            scenario_file_path,
             client_processes: HashMap::new(),
             client_connections: HashMap::new(),
             infrastructure_processes: HashMap::new(),
@@ -1166,7 +1274,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Run the scenario
     let verbose = matches.get_flag("verbose");
-    run_scenario(scenario, verbose).await?;
+    run_scenario(scenario, Some(scenario_path), verbose).await?;
 
     Ok(())
 }
@@ -1244,9 +1352,16 @@ fn validate_scenario(scenario: &Scenario) -> Result<(), Box<dyn std::error::Erro
     Ok(())
 }
 
-async fn run_scenario(scenario: Scenario, verbose: bool) -> Result<(), Box<dyn std::error::Error>> {
+async fn run_scenario(
+    scenario: Scenario,
+    scenario_file_path: Option<PathBuf>,
+    verbose: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
     // Create shared state wrapped in Arc<Mutex> for signal handling
-    let state = Arc::new(Mutex::new(OrchestratorState::new(scenario)));
+    let state = Arc::new(Mutex::new(OrchestratorState::new(
+        scenario,
+        scenario_file_path,
+    )));
     let state_clone = Arc::clone(&state);
 
     // Setup signal handler for graceful shutdown
@@ -1862,15 +1977,92 @@ async fn execute_wait_condition(
         );
     }
 
-    // For now, simulate waiting - this would be replaced with actual condition checking
-    let wait_duration = Duration::from_millis(std::cmp::min(wait_timeout, 2000));
-    sleep(wait_duration).await;
+    // Handle special conditions
+    match condition {
+        "manual_exit" => {
+            // For manual_exit condition, wait indefinitely until Ctrl+C
+            if verbose {
+                println!(
+                    "  📝 Manual exit condition - waiting indefinitely (press Ctrl+C to exit)"
+                );
+            }
 
-    Ok(serde_json::json!({
-        "condition": condition,
-        "expected": expected_value,
-        "status": "condition_met"
-    }))
+            // Create a cancellation signal detector
+            let mut sigint =
+                tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())
+                    .expect("Failed to install SIGINT handler in wait_condition");
+            let mut sigterm =
+                tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+                    .expect("Failed to install SIGTERM handler in wait_condition");
+
+            // Also respect the timeout if provided
+            let timeout_duration = Duration::from_millis(wait_timeout);
+            let start = Instant::now();
+
+            loop {
+                let remaining_time = timeout_duration
+                    .checked_sub(start.elapsed())
+                    .unwrap_or(Duration::ZERO);
+
+                if remaining_time.is_zero() {
+                    if verbose {
+                        println!("  ⏰ Wait condition timed out after {}ms", wait_timeout);
+                    }
+                    return Ok(serde_json::json!({
+                        "condition": condition,
+                        "expected": expected_value,
+                        "status": "timeout"
+                    }));
+                }
+
+                let sleep_duration = std::cmp::min(Duration::from_secs(1), remaining_time);
+
+                tokio::select! {
+                    _ = sleep(sleep_duration) => {
+                        // Continue waiting
+                        continue;
+                    }
+                    _ = sigint.recv() => {
+                        if verbose {
+                            println!("  🛑 Manual exit condition met (SIGINT received)");
+                        }
+                        return Ok(serde_json::json!({
+                            "condition": condition,
+                            "expected": expected_value,
+                            "status": "manual_exit_triggered"
+                        }));
+                    }
+                    _ = sigterm.recv() => {
+                        if verbose {
+                            println!("  🛑 Manual exit condition met (SIGTERM received)");
+                        }
+                        return Ok(serde_json::json!({
+                            "condition": condition,
+                            "expected": expected_value,
+                            "status": "manual_exit_triggered"
+                        }));
+                    }
+                }
+            }
+        }
+        _ => {
+            // For other conditions, use the original behavior but respect the timeout
+            let wait_duration = Duration::from_millis(wait_timeout);
+            if verbose {
+                println!(
+                    "  ⏳ Simulating wait for condition '{}' for {}ms",
+                    condition, wait_timeout
+                );
+            }
+            sleep(wait_duration).await;
+
+            Ok(serde_json::json!({
+                "condition": condition,
+                "expected": expected_value,
+                "status": "condition_met"
+            }))
+        }
+    }
 }
 
 async fn execute_console_command(
@@ -1911,30 +2103,6 @@ async fn is_port_occupied(host: &str, port: u16) -> bool {
     TcpStream::connect(format!("{}:{}", host, port))
         .await
         .is_ok()
-}
-
-/// Wait for a port to become available (something starts listening on it)
-async fn wait_for_port(host: &str, port: u16, timeout_seconds: u64) -> bool {
-    let timeout_duration = Duration::from_secs(timeout_seconds);
-    let start = Instant::now();
-
-    while start.elapsed() < timeout_duration {
-        if let Ok(_) = TcpStream::connect(format!("{}:{}", host, port)).await {
-            return true;
-        }
-        sleep(Duration::from_millis(500)).await;
-    }
-    false
-}
-
-/// Wait for a port to become available with verbose progress feedback, respecting Ctrl+C cancellation
-async fn wait_for_port_with_retries(
-    host: &str,
-    port: u16,
-    timeout_seconds: u64,
-    verbose: bool,
-) -> bool {
-    wait_for_port_with_retries_and_context(host, port, timeout_seconds, verbose, None).await
 }
 
 /// Wait for a port to become available with verbose progress feedback, respecting Ctrl+C cancellation, with context
@@ -2014,6 +2182,9 @@ fn generate_report(state: &OrchestratorState) {
     println!("📊 Scenario Report");
     println!("==================");
     println!("Scenario: {}", state.scenario.name);
+    if let Some(file_path) = &state.scenario_file_path {
+        println!("Scenario file: {}", file_path.display());
+    }
     println!(
         "Total duration: {:.2}s",
         state.start_time.elapsed().as_secs_f64()
@@ -2489,12 +2660,15 @@ async fn run_selected_scenario(path: &PathBuf) -> Result<(), Box<dyn std::error:
     };
 
     // Run the scenario with TUI logging display
-    run_scenario_with_tui(scenario).await?;
+    run_scenario_with_tui(scenario, Some(path.clone())).await?;
     Ok(())
 }
 
 #[cfg(feature = "tui")]
-async fn run_scenario_with_tui(scenario: Scenario) -> Result<(), Box<dyn std::error::Error>> {
+async fn run_scenario_with_tui(
+    scenario: Scenario,
+    scenario_file_path: Option<PathBuf>,
+) -> Result<(), Box<dyn std::error::Error>> {
     // Setup terminal for scenario execution
     enable_raw_mode()?;
     let mut stdout = io::stdout();
@@ -2503,7 +2677,7 @@ async fn run_scenario_with_tui(scenario: Scenario) -> Result<(), Box<dyn std::er
     let mut terminal = Terminal::new(backend)?;
 
     // Create logging app
-    let mut logging_app = LoggingApp::new(&scenario);
+    let mut logging_app = LoggingApp::new(&scenario, scenario_file_path.clone()).await;
     let (log_collector, _) = LogCollector::new();
 
     // Add initial log message
@@ -2533,7 +2707,13 @@ async fn run_scenario_with_tui(scenario: Scenario) -> Result<(), Box<dyn std::er
         let log_collector = log_collector.clone();
         let quit_flag = Arc::clone(&quit_flag);
         async move {
-            let result = run_scenario_with_logging(scenario, log_collector, quit_flag).await;
+            let result = run_scenario_with_logging(
+                scenario,
+                scenario_file_path.clone(),
+                log_collector,
+                quit_flag,
+            )
+            .await;
             result
         }
     });
@@ -2564,12 +2744,15 @@ async fn run_scenario_with_tui(scenario: Scenario) -> Result<(), Box<dyn std::er
     // Spawn system info collection task (runs every 3 seconds in background)
     let _system_info_task = tokio::spawn({
         let quit_flag = Arc::clone(&logging_app.should_quit);
+        let current_system_info = logging_app.system_info.clone(); // Get the initial system info with cached RAM
         async move {
             let mut interval = tokio::time::interval(Duration::from_secs(3));
+            let mut system_info = current_system_info;
             while !quit_flag.load(Ordering::Relaxed) {
                 interval.tick().await;
-                if let Ok(system_info) = SystemInfo::collect().await {
-                    if system_info_sender.send(system_info).is_err() {
+                if let Ok(updated_info) = system_info.collect_with_cached_ram().await {
+                    system_info = updated_info.clone();
+                    if system_info_sender.send(updated_info).is_err() {
                         break; // Receiver dropped
                     }
                 }
@@ -2612,8 +2795,14 @@ async fn run_scenario_with_tui(scenario: Scenario) -> Result<(), Box<dyn std::er
         // Check health probes and update service statuses
         let failed_clients = logging_app.check_and_update_health_probes();
 
-        // If any clients failed health checks, terminate the scenario
-        if !failed_clients.is_empty() {
+        // Check if this is an indefinite scenario (has manual_exit condition)
+        let is_indefinite_scenario = logging_app.scenario.steps.iter().any(|step| {
+            matches!(&step.action,
+                Action::WaitCondition { condition, .. } if condition == "manual_exit")
+        });
+
+        // If any clients failed health checks, terminate the scenario (unless it's an indefinite scenario)
+        if !failed_clients.is_empty() && !is_indefinite_scenario {
             for client_id in &failed_clients {
                 logging_app.add_log(
                     &LogSource::Orchestrator,
@@ -2625,6 +2814,17 @@ async fn run_scenario_with_tui(scenario: Scenario) -> Result<(), Box<dyn std::er
             }
             logging_app.should_quit.store(true, Ordering::Relaxed);
             break;
+        } else if !failed_clients.is_empty() {
+            // For indefinite scenarios, log the health issues but don't terminate
+            for client_id in &failed_clients {
+                logging_app.add_log(
+                    &LogSource::Orchestrator,
+                    format!(
+                        "⚠️ Client {} failed liveness probe (indefinite scenario - continuing)",
+                        client_id
+                    ),
+                );
+            }
         }
 
         // Check if scenario is completed and auto-exit is enabled
@@ -2916,10 +3116,17 @@ fn draw_logging_ui(f: &mut Frame, app: &LoggingApp) {
 
 #[cfg(feature = "tui")]
 fn draw_log_viewing_ui(f: &mut Frame, app: &LoggingApp) {
+    // First, split the screen vertically to reserve space for controls at the bottom
+    let main_chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(0), Constraint::Length(3)])
+        .split(f.area());
+
+    // Now split the main area horizontally for left and right panels
     let chunks = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([Constraint::Percentage(25), Constraint::Percentage(75)])
-        .split(f.area());
+        .split(main_chunks[0]);
 
     // Split the left panel into log selector and system info
     let left_chunks = Layout::default()
@@ -3056,11 +3263,8 @@ fn draw_log_viewing_ui(f: &mut Frame, app: &LoggingApp) {
 
     f.render_widget(log_content, chunks[1]);
 
-    // Show controls at bottom
-    let controls_area = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Min(0), Constraint::Length(3)])
-        .split(f.area())[1];
+    // Show controls at bottom (using pre-allocated space)
+    let controls_area = main_chunks[1];
 
     let controls_text = if matches!(&app.selected_pane, LogPane::Client(_))
         && app.focused_pane == FocusedPane::LogSelector
@@ -3109,10 +3313,17 @@ fn draw_log_viewing_ui(f: &mut Frame, app: &LoggingApp) {
 
 #[cfg(feature = "tui")]
 fn draw_mcp_message_ui(f: &mut Frame, app: &LoggingApp) {
+    // First, split the screen vertically to reserve space for controls at the bottom
+    let main_chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(0), Constraint::Length(3)])
+        .split(f.area());
+
+    // Now split the main area horizontally for left and right panels
     let chunks = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
-        .split(f.area());
+        .split(main_chunks[0]);
 
     if let Some(ref mcp_app) = app.mcp_app {
         // Left panel: MCP Message selector
@@ -3183,11 +3394,8 @@ fn draw_mcp_message_ui(f: &mut Frame, app: &LoggingApp) {
         f.render_widget(message_details, chunks[1]);
     }
 
-    // Show controls at bottom
-    let controls_area = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Min(0), Constraint::Length(3)])
-        .split(f.area())[1];
+    // Show controls at bottom (using pre-allocated space)
+    let controls_area = main_chunks[1];
 
     let controls = Paragraph::new(vec![Line::from(vec![
         Span::styled("↑↓", Style::default().add_modifier(Modifier::BOLD)),
@@ -3209,11 +3417,15 @@ fn draw_mcp_message_ui(f: &mut Frame, app: &LoggingApp) {
 
 async fn run_scenario_with_logging(
     scenario: Scenario,
+    scenario_file_path: Option<PathBuf>,
     log_collector: LogCollector,
     quit_flag: Arc<AtomicBool>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // Create shared state wrapped in Arc<Mutex> for signal handling
-    let state = Arc::new(Mutex::new(OrchestratorState::new(scenario)));
+    let state = Arc::new(Mutex::new(OrchestratorState::new(
+        scenario,
+        scenario_file_path,
+    )));
 
     // Execute scenario with proper cleanup handling
     let result = run_scenario_inner_with_logging(
@@ -3869,6 +4081,12 @@ fn generate_report_with_logging(state: &OrchestratorState, log_collector: LogCol
         LogSource::Orchestrator,
         &format!("Scenario: {}", state.scenario.name),
     );
+    if let Some(file_path) = &state.scenario_file_path {
+        log_collector.log_str(
+            LogSource::Orchestrator,
+            &format!("Scenario file: {}", file_path.display()),
+        );
+    }
     log_collector.log_str(
         LogSource::Orchestrator,
         &format!(
@@ -4091,6 +4309,12 @@ fn show_log_summary(app: &LoggingApp) {
     println!("\n📁 Log Files Summary");
     println!("====================");
 
+    // Show scenario file information
+    if let Some(file_path) = &app.scenario_file_path {
+        println!("📋 Scenario file: {}", file_path.display());
+        println!();
+    }
+
     for (pane_name, log_file_path) in &app.log_files {
         if log_file_path.exists() {
             match std::fs::metadata(log_file_path) {
@@ -4115,12 +4339,4 @@ fn show_log_summary(app: &LoggingApp) {
             );
         }
     }
-
-    println!("\n💡 You can copy these log file paths to provide to AI for analysis:");
-    for (pane_name, log_file_path) in &app.log_files {
-        if log_file_path.exists() {
-            println!("   {} log: {}", pane_name, log_file_path.display());
-        }
-    }
-    println!();
 }

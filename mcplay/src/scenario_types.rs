@@ -484,43 +484,6 @@ impl Default for Timing {
     }
 }
 
-// Conversion helpers for backward compatibility
-impl ClientConfig {
-    /// Create a ClientConfig in mcplay format
-    pub fn new_mcplay_style(
-        id: String,
-        player_id: String,
-        mcp_port: u16,
-        client_type: String,
-    ) -> Self {
-        Self {
-            id,
-            player_id,
-            mcp_port,
-            client_type,
-            name: None,
-            config: None,
-        }
-    }
-
-    /// Create a ClientConfig in xtask format
-    pub fn new_xtask_style(
-        id: String,
-        client_type: String,
-        name: Option<String>,
-        config: Option<serde_json::Value>,
-    ) -> Self {
-        Self {
-            id,
-            player_id: String::default(),
-            mcp_port: 0,
-            client_type,
-            name,
-            config,
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -580,12 +543,14 @@ mod tests {
             description: "A test scenario".to_string(),
             version: "1.0.0".to_string(),
             infrastructure: InfrastructureConfig::default(),
-            clients: vec![ClientConfig::new_xtask_style(
-                "player1".to_string(),
-                "player".to_string(),
-                Some("Test Player".to_string()),
-                None,
-            )],
+            clients: vec![ClientConfig {
+                id: "player1".to_string(),
+                player_id: String::default(),
+                mcp_port: 0,
+                client_type: "player".to_string(),
+                name: Some("Test Player".to_string()),
+                config: None,
+            }],
             steps: vec![],
             config: None,
         };
