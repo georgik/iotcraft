@@ -70,9 +70,6 @@ getrandom = { version = "0.2", features = ["js"] }
 # Add getrandom v0.3 directly to enable wasm_js feature
 getrandom_03 = { package = "getrandom", version = "0.3", features = ["wasm_js"] }
 
-# Protocol crate (shared MCP definitions)
-iotcraft-mcp-protocol = { path = "../iotcraft-mcp-protocol", features = ["serde"] }
-
 # Desktop-specific dependencies (non-WASM)
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 rumqttc = "0.24.0"
@@ -95,31 +92,8 @@ tokio-util = { version = "0.7", features = ["codec"] }
 rayon = "1.8" # Parallel processing
 tempfile = "3.8" # For testing async file operations
 
-# Enable max optimizations for dependencies (incl. Bevy), but not for our code
-# This keeps recompilations fast while making Bevy run at good performance
-[profile.dev.package."*"]
-opt-level = 3
-
-# Enable a small amount of optimization for our own code if needed
-# Split compilation units for faster incremental builds
-[profile.dev]
-opt-level = 1
-incremental = true
-codegen-units = 256
-
-# Optimize for size in WASM builds (important for web loading times)
-[profile.release]
-opt-level = 3
-lto = "thin"
-codegen-units = 1
-
-# Special profile for WASM release builds
-[profile.wasm-release]
-inherits = "release"
-opt-level = "s"  # Optimize for size
-lto = true
-codegen-units = 1
-strip = true
+# Profile definitions moved to workspace root (/Volumes/ssdt5/Users/georgik/projects/iotcraft/Cargo.toml)
+# to avoid 'profiles for the non root package will be ignored' warnings
 
 [build-dependencies]
 chrono = "0.4"
@@ -137,8 +111,6 @@ chunk_world = []                      # Enable chunk-based world support (future
 integration-tests = []                # Feature to enable integration tests
 
 
-[workspace]
-members = [".", "xtask"]
 
 # Binary configurations
 # Desktop-only main binary

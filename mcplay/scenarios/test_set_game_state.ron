@@ -224,7 +224,7 @@ Scenario(
             filters: Some(["ui/*", "mcp/*", "set_game_state", "GameState", "NextState"]),
         )),
         environment: Some({
-            "RUST_LOG": "info,iotcraft_dekstop_client=debug",
+            "RUST_LOG": "info,iotcraft_desktop_client=debug",
             "SCENARIO_NAME": "test_set_game_state",
             "ENABLE_MCP": "true",
         }),

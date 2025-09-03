@@ -246,9 +246,9 @@ async fn handle_json_rpc_request(
         });
     }
 
-    // Wait for the response from Bevy with timeout
+    // Wait for the response from Bevy with timeout (reduced to 10 seconds for faster error handling)
     let response_result =
-        tokio::time::timeout(std::time::Duration::from_secs(30), response_rx).await;
+        tokio::time::timeout(std::time::Duration::from_secs(10), response_rx).await;
 
     match response_result {
         Ok(Ok(result)) => {
@@ -638,7 +638,12 @@ fn handle_async_tool_call_request(
     // For tools that should be queued, convert to command and track execution
     if should_queue_as_command(tool_name) {
         if let Some(cmd) = convert_tool_call_to_command(tool_name, &arguments) {
-            info!("Queueing MCP command: {} for tool {} (queue size: {})", cmd, tool_name, pending_commands.commands.len());
+            info!(
+                "Queueing MCP command: {} for tool {} (queue size: {})",
+                cmd,
+                tool_name,
+                pending_commands.commands.len()
+            );
 
             // Generate a unique request ID for tracking
             let request_id = uuid::Uuid::new_v4().to_string();
@@ -655,7 +660,11 @@ fn handle_async_tool_call_request(
             // Add command with request ID for tracking
             let full_command = format!("{} #{}", cmd, request_id);
             pending_commands.commands.push(full_command.clone());
-            info!("Added command to queue: '{}' (new queue size: {})", full_command, pending_commands.commands.len());
+            info!(
+                "Added command to queue: '{}' (new queue size: {})",
+                full_command,
+                pending_commands.commands.len()
+            );
 
             return;
         }

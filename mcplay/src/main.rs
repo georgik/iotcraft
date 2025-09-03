@@ -444,7 +444,7 @@ enum FocusedPane {
 enum UiMode {
     LogViewing,
     McpMessageSending,
-    McpParameterEditing, // New mode for editing command parameters
+    McpParameterEditing,   // New mode for editing command parameters
     McpInteractionDetails, // New mode for showing MCP request/response details
 }
 
@@ -474,27 +474,32 @@ struct McpMessage {
 #[cfg(feature = "tui")]
 impl McpMessage {
     /// Parse JSON schema to extract parameter information
-    fn parse_parameters(schema: &serde_json::Value) -> (Vec<McpParameter>, Vec<McpParameter>, usize) {
+    fn parse_parameters(
+        schema: &serde_json::Value,
+    ) -> (Vec<McpParameter>, Vec<McpParameter>, usize) {
         let mut required_params = Vec::new();
         let mut optional_params = Vec::new();
-        
+
         if let Some(properties) = schema.get("properties").and_then(|p| p.as_object()) {
-            let required_list = schema.get("required")
+            let required_list = schema
+                .get("required")
                 .and_then(|r| r.as_array())
                 .map(|arr| arr.iter().filter_map(|v| v.as_str()).collect::<Vec<_>>())
                 .unwrap_or_default();
-            
+
             for (param_name, param_def) in properties {
                 let is_required = required_list.contains(&param_name.as_str());
-                let param_type = param_def.get("type")
+                let param_type = param_def
+                    .get("type")
                     .and_then(|t| t.as_str())
                     .unwrap_or("string")
                     .to_string();
-                let description = param_def.get("description")
+                let description = param_def
+                    .get("description")
                     .and_then(|d| d.as_str())
                     .unwrap_or("")
                     .to_string();
-                
+
                 let parameter = McpParameter {
                     name: param_name.clone(),
                     param_type,
@@ -503,7 +508,7 @@ impl McpMessage {
                     default_value: None,
                     current_value: String::new(),
                 };
-                
+
                 if is_required {
                     required_params.push(parameter);
                 } else {
@@ -511,7 +516,7 @@ impl McpMessage {
                 }
             }
         }
-        
+
         let required_count = required_params.len();
         (required_params, optional_params, required_count)
     }
@@ -552,8 +557,9 @@ impl McpMessage {
         // Add all tools from the shared protocol crate
         let protocol_tools = get_all_tools();
         for tool in protocol_tools {
-            let (required_params, optional_params, required_count) = Self::parse_parameters(&tool.input_schema);
-            
+            let (required_params, optional_params, required_count) =
+                Self::parse_parameters(&tool.input_schema);
+
             messages.push(McpMessage {
                 name: tool.name.clone(),
                 description: tool.description.clone(),
@@ -569,64 +575,66 @@ impl McpMessage {
         }
 
         // Sort messages: first by required parameter count (ascending), then alphabetically
-        messages.sort_by(|a, b| {
-            match a.required_param_count.cmp(&b.required_param_count) {
+        messages.sort_by(
+            |a, b| match a.required_param_count.cmp(&b.required_param_count) {
                 std::cmp::Ordering::Equal => a.name.cmp(&b.name),
                 other => other,
-            }
-        });
+            },
+        );
 
         messages
     }
-    
+
     /// Generate current parameter values for sending request
     fn build_arguments(&self) -> serde_json::Value {
         let mut args = serde_json::Map::new();
-        
+
         // Add required parameters
         for param in &self.required_params {
             if !param.current_value.is_empty() {
                 let value = match param.param_type.as_str() {
                     "number" => {
                         if let Ok(num) = param.current_value.parse::<f64>() {
-                            serde_json::Value::Number(serde_json::Number::from_f64(num).unwrap_or(
-                                serde_json::Number::from(0)
-                            ))
+                            serde_json::Value::Number(
+                                serde_json::Number::from_f64(num)
+                                    .unwrap_or(serde_json::Number::from(0)),
+                            )
                         } else {
                             serde_json::Value::String(param.current_value.clone())
                         }
-                    },
+                    }
                     "boolean" => {
                         serde_json::Value::Bool(param.current_value.to_lowercase() == "true")
-                    },
+                    }
                     _ => serde_json::Value::String(param.current_value.clone()),
                 };
                 args.insert(param.name.clone(), value);
             }
         }
-        
+
         // Add optional parameters (only if they have values)
         for param in &self.optional_params {
             if !param.current_value.is_empty() {
                 let value = match param.param_type.as_str() {
                     "number" => {
                         if let Ok(num) = param.current_value.parse::<f64>() {
-                            serde_json::Value::Number(serde_json::Number::from_f64(num).unwrap_or(
-                                serde_json::Number::from(0)
-                            ))
+                            serde_json::Value::Number(
+                                serde_json::Number::from_f64(num)
+                                    .unwrap_or(serde_json::Number::from(0)),
+                            )
                         } else {
                             serde_json::Value::String(param.current_value.clone())
                         }
-                    },
+                    }
                     "boolean" => {
                         serde_json::Value::Bool(param.current_value.to_lowercase() == "true")
-                    },
+                    }
                     _ => serde_json::Value::String(param.current_value.clone()),
                 };
                 args.insert(param.name.clone(), value);
             }
         }
-        
+
         serde_json::Value::Object(args)
     }
 }
@@ -690,7 +698,7 @@ struct McpInteractiveApp {
     error_message: Option<String>,        // Error if request failed
     details_scroll_pos: u16,              // Scroll position for MCP interaction details
     // Parameter editing state
-    editing_message: Option<McpMessage>,  // Message being edited for parameters
+    editing_message: Option<McpMessage>, // Message being edited for parameters
     selected_param_index: usize,         // Which parameter is currently selected
     editing_param_value: bool,           // Whether we're currently editing a parameter value
     param_input_buffer: String,          // Buffer for parameter input
@@ -1897,10 +1905,29 @@ async fn execute_mcp_call(
         .write_all(format!("{}\n", request_json).as_bytes())
         .await?;
 
-    // Read response
+    // Read response with timeout
     let mut reader = BufReader::new(stream);
     let mut response_line = String::new();
-    reader.read_line(&mut response_line).await?;
+
+    // Add timeout to prevent indefinite blocking
+    match tokio::time::timeout(
+        std::time::Duration::from_secs(15),
+        reader.read_line(&mut response_line),
+    )
+    .await
+    {
+        Ok(Ok(_)) => {
+            // Response received successfully
+        }
+        Ok(Err(e)) => {
+            return Err(format!("I/O error reading MCP response: {}", e).into());
+        }
+        Err(_) => {
+            return Err(
+                "MCP request timeout after 15 seconds - no response from desktop-client".into(),
+            );
+        }
+    }
 
     let response: McpResponse = serde_json::from_str(&response_line)?;
 
@@ -2902,7 +2929,9 @@ async fn run_scenario_with_tui(
                                     UiMode::McpParameterEditing => {
                                         // Navigate up in parameter list
                                         if let Some(ref mut mcp_app) = logging_app.mcp_app {
-                                            if !mcp_app.editing_param_value && mcp_app.selected_param_index > 0 {
+                                            if !mcp_app.editing_param_value
+                                                && mcp_app.selected_param_index > 0
+                                            {
                                                 mcp_app.selected_param_index -= 1;
                                             }
                                         }
@@ -2948,9 +2977,15 @@ async fn run_scenario_with_tui(
                                         // Navigate down in parameter list
                                         if let Some(ref mut mcp_app) = logging_app.mcp_app {
                                             if !mcp_app.editing_param_value {
-                                                if let Some(ref editing_msg) = mcp_app.editing_message {
-                                                    let total_params = editing_msg.required_params.len() + editing_msg.optional_params.len();
-                                                    if mcp_app.selected_param_index < total_params.saturating_sub(1) {
+                                                if let Some(ref editing_msg) =
+                                                    mcp_app.editing_message
+                                                {
+                                                    let total_params =
+                                                        editing_msg.required_params.len()
+                                                            + editing_msg.optional_params.len();
+                                                    if mcp_app.selected_param_index
+                                                        < total_params.saturating_sub(1)
+                                                    {
                                                         mcp_app.selected_param_index += 1;
                                                     }
                                                 }
@@ -3039,18 +3074,21 @@ async fn run_scenario_with_tui(
                                                 let message = mcp_app.available_messages
                                                     [mcp_app.selected_message_index]
                                                     .clone();
-                                                
+
                                                 // Check if message has required parameters
-                                                if message.required_param_count > 0 || !message.optional_params.is_empty() {
+                                                if message.required_param_count > 0
+                                                    || !message.optional_params.is_empty()
+                                                {
                                                     // Switch to parameter editing mode
                                                     mcp_app.editing_message = Some(message.clone());
                                                     mcp_app.selected_param_index = 0;
                                                     mcp_app.editing_param_value = false;
                                                     mcp_app.param_input_buffer.clear();
-                                                    logging_app.ui_mode = UiMode::McpParameterEditing;
+                                                    logging_app.ui_mode =
+                                                        UiMode::McpParameterEditing;
                                                     continue; // Don't execute immediately
                                                 }
-                                                
+
                                                 // No parameters needed - send immediately
                                                 let client_id = mcp_app.client_id.clone();
 
@@ -3404,7 +3442,7 @@ fn draw_mcp_parameter_editing_ui(f: &mut Frame, app: &LoggingApp) {
 
             // Left panel: Parameter list
             let mut param_items = Vec::new();
-            
+
             // Add required parameters
             for (i, param) in editing_message.required_params.iter().enumerate() {
                 let is_selected = i == mcp_app.selected_param_index && !mcp_app.editing_param_value;
@@ -3413,7 +3451,7 @@ fn draw_mcp_parameter_editing_ui(f: &mut Frame, app: &LoggingApp) {
                 } else {
                     param.current_value.clone()
                 };
-                
+
                 let content = format!("🔴 {} ({}): {}", param.name, param.param_type, value_text);
                 let style = if is_selected {
                     Style::default().bg(Color::Yellow).fg(Color::Black)
@@ -3422,17 +3460,18 @@ fn draw_mcp_parameter_editing_ui(f: &mut Frame, app: &LoggingApp) {
                 };
                 param_items.push(ListItem::new(content).style(style));
             }
-            
+
             // Add optional parameters
             for (i, param) in editing_message.optional_params.iter().enumerate() {
                 let param_index = editing_message.required_params.len() + i;
-                let is_selected = param_index == mcp_app.selected_param_index && !mcp_app.editing_param_value;
+                let is_selected =
+                    param_index == mcp_app.selected_param_index && !mcp_app.editing_param_value;
                 let value_text = if param.current_value.is_empty() {
                     "<empty>".to_string()
                 } else {
                     param.current_value.clone()
                 };
-                
+
                 let content = format!("⚪ {} ({}): {}", param.name, param.param_type, value_text);
                 let style = if is_selected {
                     Style::default().bg(Color::Yellow).fg(Color::Black)
@@ -3446,7 +3485,10 @@ fn draw_mcp_parameter_editing_ui(f: &mut Frame, app: &LoggingApp) {
                 .block(
                     Block::default()
                         .borders(Borders::ALL)
-                        .title(format!("⚙️  Parameters for: {} [FOCUSED]", editing_message.name))
+                        .title(format!(
+                            "⚙️  Parameters for: {} [FOCUSED]",
+                            editing_message.name
+                        ))
                         .border_style(Style::default().fg(Color::Cyan)),
                 )
                 .highlight_style(Style::default().bg(Color::Blue).fg(Color::White));
@@ -3460,16 +3502,27 @@ fn draw_mcp_parameter_editing_ui(f: &mut Frame, app: &LoggingApp) {
                     Span::raw(&editing_message.name),
                 ]),
                 Line::from(vec![
-                    Span::styled("Description: ", Style::default().add_modifier(Modifier::BOLD)),
+                    Span::styled(
+                        "Description: ",
+                        Style::default().add_modifier(Modifier::BOLD),
+                    ),
                     Span::raw(&editing_message.description),
                 ]),
                 Line::from(Span::raw("")), // Empty line
                 Line::from(vec![
-                    Span::styled("🔴 Required", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
+                    Span::styled(
+                        "🔴 Required",
+                        Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+                    ),
                     Span::raw(" parameters must be filled"),
                 ]),
                 Line::from(vec![
-                    Span::styled("⚪ Optional", Style::default().fg(Color::Blue).add_modifier(Modifier::BOLD)),
+                    Span::styled(
+                        "⚪ Optional",
+                        Style::default()
+                            .fg(Color::Blue)
+                            .add_modifier(Modifier::BOLD),
+                    ),
                     Span::raw(" parameters are optional"),
                 ]),
                 Line::from(Span::raw("")), // Empty line
@@ -3536,7 +3589,7 @@ fn draw_mcp_message_ui(f: &mut Frame, app: &LoggingApp) {
             .enumerate()
             .map(|(i, message)| {
                 let is_selected = i == mcp_app.selected_message_index;
-                
+
                 // Show parameter count with emoji indicators
                 let param_indicator = if message.required_param_count == 0 {
                     "⚡" // Lightning for no parameters (fast/simple)
@@ -3545,21 +3598,18 @@ fn draw_mcp_message_ui(f: &mut Frame, app: &LoggingApp) {
                 } else {
                     "⚙️" // Gear for many parameters
                 };
-                
+
                 let param_count_text = if message.required_param_count > 0 {
                     format!(" ({})", message.required_param_count)
                 } else {
                     String::new()
                 };
-                
+
                 let content = format!(
-                    "{} {}{} - {}", 
-                    param_indicator,
-                    message.name, 
-                    param_count_text,
-                    message.description
+                    "{} {}{} - {}",
+                    param_indicator, message.name, param_count_text, message.description
                 );
-                
+
                 let style = if is_selected {
                     Style::default().bg(Color::Yellow).fg(Color::Black)
                 } else if message.required_param_count == 0 {

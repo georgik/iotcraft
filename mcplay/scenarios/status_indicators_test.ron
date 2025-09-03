@@ -1,0 +1,111 @@
+(
+  name: "Status Indicators Test",
+  description: "Minimal scenario to demonstrate service status transitions and health monitoring",
+  version: "1.0",
+  infrastructure: (
+    mqtt_server: (
+      required: true,
+      port: 1883,
+      config_file: None,
+      options: None,
+    ),
+    mqtt_observer: Some((
+      required: true,
+      topics: Some(["#"]),
+      client_id: Some("test_observer"),
+    )),
+    mcp_server: Some((
+      required: false,
+      port: 3000,
+    )),
+    services: None,
+  ),
+  clients: [
+    (
+      id: "test_client",
+      player_id: "test_client", 
+      mcp_port: 3001,
+      client_type: "desktop",
+      name: Some("Test Client"),
+      config: Some({
+        "enable_mcp": true,
+        "readiness_probe": {
+          "type": "tcp_port",
+          "port": 3001,
+          "initial_delay_seconds": 3,
+          "timeout_seconds": 8
+        },
+        "liveness_probe": {
+          "type": "mcp_ping",
+          "interval_seconds": 5,
+          "timeout_seconds": 3,
+          "failure_threshold": 2
+        }
+      }),
+    )
+  ],
+  steps: [
+    (
+      name: "initialization",
+      description: "Initialize and show status transitions",
+      client: "orchestrator",
+      action: (
+        type: "delay",
+        duration: 2000
+      ),
+      depends_on: [],
+      wait_before: 1000,
+      wait_after: 1000,
+      timeout: 0,
+      success_condition: None,
+    ),
+    (
+      name: "infrastructure_check",
+      description: "Verify infrastructure services are ready", 
+      client: "orchestrator",
+      action: (
+        type: "wait_condition",
+        condition: "services_ready",
+        expected_value: Some("true"),
+        timeout: 20000,
+      ),
+      depends_on: ["initialization"],
+      wait_before: 2000,
+      wait_after: 2000,
+      timeout: 0,
+      success_condition: None,
+    ),
+    (
+      name: "client_health_test",
+      description: "Test client health monitoring",
+      client: "test_client",
+      action: (
+        type: "mcp_call",
+        tool: "health_check",
+        arguments: {},
+      ),
+      depends_on: ["infrastructure_check"],
+      wait_before: 2000,
+      wait_after: 3000,
+      timeout: 0,
+      success_condition: None,
+    ),
+    (
+      name: "monitoring_demo",
+      description: "Demonstrate continuous health monitoring for 15 seconds",
+      client: "orchestrator",
+      action: (
+        type: "wait_condition",
+        condition: "monitoring_complete",
+        expected_value: Some("15000"),
+        timeout: 18000,
+      ),
+      depends_on: ["client_health_test"],
+      wait_before: 1000,
+      wait_after: 1000,
+      timeout: 0,
+      success_condition: None,
+    ),
+  ],
+  config: None,
+)

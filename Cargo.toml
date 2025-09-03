@@ -1,0 +1,81 @@
+[workspace]
+resolver = "2"
+
+members = [
+    "desktop-client",
+    "iotcraft-mcp-protocol", 
+    "mqtt-server",
+    "mcplay"
+]
+
+# Workspace-wide dependencies for consistency
+[workspace.dependencies]
+# Core async runtime
+tokio = { version = "1.47", features = ["rt-multi-thread", "macros", "fs", "net", "process", "signal", "io-util", "time", "sync"] }
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+ron = "0.8"
+
+# Error handling
+anyhow = "1.0"
+thiserror = "1.0"
+
+# Logging
+log = "0.4"
+tracing = "0.1"
+
+# Async channels
+async-channel = "2.5"
+
+# UUID generation
+uuid = { version = "1.0", features = ["v4"] }
+
+# Command line parsing
+clap = { version = "4.5", features = ["derive"] }
+
+# MQTT client
+rumqttc = "0.24.0"
+
+# Shared protocol crate
+iotcraft-mcp-protocol = { path = "iotcraft-mcp-protocol" }
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+unused_imports = "warn"
+dead_code = "allow"  # Allow dead code during development
+
+[workspace.lints.clippy]
+all = "warn"
+pedantic = "warn"
+nursery = "warn"
+cargo = "warn"
+# Disable some pedantic lints that can be overly strict
+missing_docs_in_private_items = "allow"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+
+# Profile optimizations
+[profile.dev]
+opt-level = 1
+incremental = true
+codegen-units = 256  # Split compilation units for faster incremental builds
+
+# Enable max optimizations for dependencies (incl. Bevy), but not for our code
+# This keeps recompilations fast while making Bevy run at good performance
+[profile.dev.package."*"]
+opt-level = 3
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+
+# Special profile for WASM release builds (optimize for size)
+[profile.wasm-release]
+inherits = "release"
+opt-level = "s"  # Optimize for size
+lto = true
+codegen-units = 1
+strip = true

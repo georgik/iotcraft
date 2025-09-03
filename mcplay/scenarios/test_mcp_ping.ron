@@ -1,0 +1,166 @@
+// Simple MCP Ping Test Scenario
+// This scenario tests basic MCP tool calling with ping to isolate issues
+Scenario(
+    name: "test_mcp_ping",
+    description: "Simple MCP ping test to verify tool calling mechanism",
+    version: "1.0",
+    
+    // Minimal infrastructure - MQTT server for basic functionality
+    infrastructure: InfrastructureConfig(
+        mqtt_server: MqttServerConfig(
+            required: true,
+            port: 1883,
+            config_file: None,
+            options: None,
+        ),
+        mqtt_observer: None, // No observer needed for this simple test
+        mcp_server: None,
+        services: None,
+    ),
+    
+    // Alice client for testing
+    clients: [
+        ClientConfig(
+            id: "alice",
+            player_id: "alice", 
+            mcp_port: 8080,
+            client_type: "desktop",
+            name: Some("Alice - Ping Test Client"),
+            config: None,
+        ),
+    ],
+    
+    // Simple test steps
+    steps: [
+        // Step 1: Initialize MCP connection
+        Step(
+            name: "mcp_initialize",
+            description: "Initialize MCP connection",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "initialize",
+                arguments: {
+                    "protocolVersion": "2024-11-05",
+                    "capabilities": {
+                        "tools": {}
+                    },
+                    "clientInfo": {
+                        "name": "mcplay-ping-test",
+                        "version": "1.0.0"
+                    }
+                },
+            ),
+            wait_before: 3000,
+            wait_after: 1000,
+            timeout: 10000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: [],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 2: Test direct ping tool call (handled immediately, not queued)
+        Step(
+            name: "test_ping_tool_call",
+            description: "Test ping via tools/call (should work - handled directly)",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "ping",
+                arguments: {},
+            ),
+            wait_before: 500,
+            wait_after: 1000,
+            timeout: 10000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["mcp_initialize"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 3: Test queued command (get_client_info)
+        Step(
+            name: "test_get_client_info",
+            description: "Test get_client_info (should queue and execute)",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "get_client_info",
+                arguments: {},
+            ),
+            wait_before: 500,
+            wait_after: 1000,
+            timeout: 15000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["test_ping_tool_call"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 4: Test create_world command
+        Step(
+            name: "test_create_world",
+            description: "Test create_world command (simple case)",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "create_world",
+                arguments: {
+                    "world_name": "test_world",
+                    "description": "Simple test world"
+                },
+            ),
+            wait_before: 500,
+            wait_after: 2000,
+            timeout: 15000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["test_get_client_info"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+    ],
+    
+    // Test configuration
+    config: Some(ScenarioConfig(
+        timeout_ms: Some(60000),  // 1 minute total timeout
+        logging: Some(LoggingConfig(
+            level: Some("debug"),
+            log_mqtt: Some(true),
+            log_client_actions: Some(true),
+            filters: Some([
+                "mcp/*", 
+                "ping", 
+                "get_client_info",
+                "execute_pending_commands",
+                "CommandExecutedEvent"
+            ]),
+        )),
+        environment: Some({
+            "RUST_LOG": "debug,iotcraft_desktop_client=debug",
+            "SCENARIO_NAME": "test_mcp_ping",
+            "ENABLE_MCP": "true",
+        }),
+        settings: Some({
+            "auto_cleanup": true,
+            "preserve_logs": true,
+            "fail_fast": true,
+        }),
+    )),
+)
