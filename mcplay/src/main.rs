@@ -444,7 +444,19 @@ enum FocusedPane {
 enum UiMode {
     LogViewing,
     McpMessageSending,
+    McpParameterEditing, // New mode for editing command parameters
     McpInteractionDetails, // New mode for showing MCP request/response details
+}
+
+#[cfg(feature = "tui")]
+#[derive(Debug, Clone)]
+struct McpParameter {
+    name: String,
+    param_type: String,
+    description: String,
+    required: bool,
+    default_value: Option<String>,
+    current_value: String,
 }
 
 #[cfg(feature = "tui")]
@@ -454,10 +466,56 @@ struct McpMessage {
     description: String,
     method: String,
     params: serde_json::Value,
+    required_params: Vec<McpParameter>,
+    optional_params: Vec<McpParameter>,
+    required_param_count: usize,
 }
 
 #[cfg(feature = "tui")]
 impl McpMessage {
+    /// Parse JSON schema to extract parameter information
+    fn parse_parameters(schema: &serde_json::Value) -> (Vec<McpParameter>, Vec<McpParameter>, usize) {
+        let mut required_params = Vec::new();
+        let mut optional_params = Vec::new();
+        
+        if let Some(properties) = schema.get("properties").and_then(|p| p.as_object()) {
+            let required_list = schema.get("required")
+                .and_then(|r| r.as_array())
+                .map(|arr| arr.iter().filter_map(|v| v.as_str()).collect::<Vec<_>>())
+                .unwrap_or_default();
+            
+            for (param_name, param_def) in properties {
+                let is_required = required_list.contains(&param_name.as_str());
+                let param_type = param_def.get("type")
+                    .and_then(|t| t.as_str())
+                    .unwrap_or("string")
+                    .to_string();
+                let description = param_def.get("description")
+                    .and_then(|d| d.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                
+                let parameter = McpParameter {
+                    name: param_name.clone(),
+                    param_type,
+                    description,
+                    required: is_required,
+                    default_value: None,
+                    current_value: String::new(),
+                };
+                
+                if is_required {
+                    required_params.push(parameter);
+                } else {
+                    optional_params.push(parameter);
+                }
+            }
+        }
+        
+        let required_count = required_params.len();
+        (required_params, optional_params, required_count)
+    }
+
     fn get_available_messages() -> Vec<McpMessage> {
         use iotcraft_mcp_protocol::tools::get_all_tools;
 
@@ -467,6 +525,9 @@ impl McpMessage {
                 description: "List available MCP tools".to_string(),
                 method: "tools/list".to_string(),
                 params: serde_json::json!({}),
+                required_params: Vec::new(),
+                optional_params: Vec::new(),
+                required_param_count: 0,
             },
             McpMessage {
                 name: "Initialize".to_string(),
@@ -482,12 +543,17 @@ impl McpMessage {
                         "version": "1.0.0"
                     }
                 }),
+                required_params: Vec::new(),
+                optional_params: Vec::new(),
+                required_param_count: 0,
             },
         ];
 
         // Add all tools from the shared protocol crate
         let protocol_tools = get_all_tools();
         for tool in protocol_tools {
+            let (required_params, optional_params, required_count) = Self::parse_parameters(&tool.input_schema);
+            
             messages.push(McpMessage {
                 name: tool.name.clone(),
                 description: tool.description.clone(),
@@ -496,10 +562,72 @@ impl McpMessage {
                     "name": tool.name,
                     "arguments": {}
                 }),
+                required_params,
+                optional_params,
+                required_param_count: required_count,
             });
         }
 
+        // Sort messages: first by required parameter count (ascending), then alphabetically
+        messages.sort_by(|a, b| {
+            match a.required_param_count.cmp(&b.required_param_count) {
+                std::cmp::Ordering::Equal => a.name.cmp(&b.name),
+                other => other,
+            }
+        });
+
         messages
+    }
+    
+    /// Generate current parameter values for sending request
+    fn build_arguments(&self) -> serde_json::Value {
+        let mut args = serde_json::Map::new();
+        
+        // Add required parameters
+        for param in &self.required_params {
+            if !param.current_value.is_empty() {
+                let value = match param.param_type.as_str() {
+                    "number" => {
+                        if let Ok(num) = param.current_value.parse::<f64>() {
+                            serde_json::Value::Number(serde_json::Number::from_f64(num).unwrap_or(
+                                serde_json::Number::from(0)
+                            ))
+                        } else {
+                            serde_json::Value::String(param.current_value.clone())
+                        }
+                    },
+                    "boolean" => {
+                        serde_json::Value::Bool(param.current_value.to_lowercase() == "true")
+                    },
+                    _ => serde_json::Value::String(param.current_value.clone()),
+                };
+                args.insert(param.name.clone(), value);
+            }
+        }
+        
+        // Add optional parameters (only if they have values)
+        for param in &self.optional_params {
+            if !param.current_value.is_empty() {
+                let value = match param.param_type.as_str() {
+                    "number" => {
+                        if let Ok(num) = param.current_value.parse::<f64>() {
+                            serde_json::Value::Number(serde_json::Number::from_f64(num).unwrap_or(
+                                serde_json::Number::from(0)
+                            ))
+                        } else {
+                            serde_json::Value::String(param.current_value.clone())
+                        }
+                    },
+                    "boolean" => {
+                        serde_json::Value::Bool(param.current_value.to_lowercase() == "true")
+                    },
+                    _ => serde_json::Value::String(param.current_value.clone()),
+                };
+                args.insert(param.name.clone(), value);
+            }
+        }
+        
+        serde_json::Value::Object(args)
     }
 }
 
@@ -561,6 +689,11 @@ struct McpInteractiveApp {
     response_data: Option<serde_json::Value>, // The actual response
     error_message: Option<String>,        // Error if request failed
     details_scroll_pos: u16,              // Scroll position for MCP interaction details
+    // Parameter editing state
+    editing_message: Option<McpMessage>,  // Message being edited for parameters
+    selected_param_index: usize,         // Which parameter is currently selected
+    editing_param_value: bool,           // Whether we're currently editing a parameter value
+    param_input_buffer: String,          // Buffer for parameter input
 }
 
 #[cfg(feature = "tui")]
@@ -2690,6 +2823,16 @@ async fn run_scenario_with_tui(
                                         logging_app.focused_pane = FocusedPane::LogSelector;
                                         logging_app.mcp_app = None;
                                     }
+                                    UiMode::McpParameterEditing => {
+                                        // In parameter editing mode, ESC returns to message selection
+                                        logging_app.ui_mode = UiMode::McpMessageSending;
+                                        // Clear editing state
+                                        if let Some(ref mut mcp_app) = logging_app.mcp_app {
+                                            mcp_app.editing_message = None;
+                                            mcp_app.editing_param_value = false;
+                                            mcp_app.param_input_buffer.clear();
+                                        }
+                                    }
                                     UiMode::McpInteractionDetails => {
                                         // In MCP interaction details mode, ESC returns to log viewing mode
                                         logging_app.ui_mode = UiMode::LogViewing;
@@ -2718,6 +2861,9 @@ async fn run_scenario_with_tui(
                                     UiMode::McpMessageSending => {
                                         // In MCP mode, Tab doesn't switch focus (only one focusable pane)
                                     }
+                                    UiMode::McpParameterEditing => {
+                                        // In parameter editing mode, Tab doesn't switch focus
+                                    }
                                     UiMode::McpInteractionDetails => {
                                         // In MCP interaction details mode, Tab doesn't switch focus
                                     }
@@ -2743,6 +2889,9 @@ async fn run_scenario_with_tui(
                                     UiMode::McpMessageSending => {
                                         // In MCP mode, BackTab doesn't switch focus (only one focusable pane)
                                     }
+                                    UiMode::McpParameterEditing => {
+                                        // In parameter editing mode, BackTab doesn't switch focus
+                                    }
                                     UiMode::McpInteractionDetails => {
                                         // In MCP interaction details mode, BackTab doesn't switch focus
                                     }
@@ -2750,6 +2899,14 @@ async fn run_scenario_with_tui(
                             }
                             KeyCode::Up => {
                                 match logging_app.ui_mode {
+                                    UiMode::McpParameterEditing => {
+                                        // Navigate up in parameter list
+                                        if let Some(ref mut mcp_app) = logging_app.mcp_app {
+                                            if !mcp_app.editing_param_value && mcp_app.selected_param_index > 0 {
+                                                mcp_app.selected_param_index -= 1;
+                                            }
+                                        }
+                                    }
                                     UiMode::McpInteractionDetails => {
                                         // Scroll up in MCP interaction details
                                         if let Some(ref mut mcp_app) = logging_app.mcp_app {
@@ -2787,6 +2944,19 @@ async fn run_scenario_with_tui(
                             }
                             KeyCode::Down => {
                                 match logging_app.ui_mode {
+                                    UiMode::McpParameterEditing => {
+                                        // Navigate down in parameter list
+                                        if let Some(ref mut mcp_app) = logging_app.mcp_app {
+                                            if !mcp_app.editing_param_value {
+                                                if let Some(ref editing_msg) = mcp_app.editing_message {
+                                                    let total_params = editing_msg.required_params.len() + editing_msg.optional_params.len();
+                                                    if mcp_app.selected_param_index < total_params.saturating_sub(1) {
+                                                        mcp_app.selected_param_index += 1;
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
                                     UiMode::McpInteractionDetails => {
                                         // Scroll down in MCP interaction details
                                         if let Some(ref mut mcp_app) = logging_app.mcp_app {
@@ -2847,6 +3017,10 @@ async fn run_scenario_with_tui(
                                                     response_data: None,
                                                     error_message: None,
                                                     details_scroll_pos: 0,
+                                                    editing_message: None,
+                                                    selected_param_index: 0,
+                                                    editing_param_value: false,
+                                                    param_input_buffer: String::new(),
                                                 };
                                                 mcp_app.list_state.select(Some(0));
                                                 logging_app.mcp_app = Some(mcp_app);
@@ -2857,7 +3031,7 @@ async fn run_scenario_with_tui(
                                         }
                                     }
                                     UiMode::McpMessageSending => {
-                                        // Send the selected MCP message and transition to interaction details
+                                        // Handle MCP message selection - check if it needs parameter editing
                                         if let Some(ref mut mcp_app) = logging_app.mcp_app {
                                             if mcp_app.selected_message_index
                                                 < mcp_app.available_messages.len()
@@ -2865,6 +3039,19 @@ async fn run_scenario_with_tui(
                                                 let message = mcp_app.available_messages
                                                     [mcp_app.selected_message_index]
                                                     .clone();
+                                                
+                                                // Check if message has required parameters
+                                                if message.required_param_count > 0 || !message.optional_params.is_empty() {
+                                                    // Switch to parameter editing mode
+                                                    mcp_app.editing_message = Some(message.clone());
+                                                    mcp_app.selected_param_index = 0;
+                                                    mcp_app.editing_param_value = false;
+                                                    mcp_app.param_input_buffer.clear();
+                                                    logging_app.ui_mode = UiMode::McpParameterEditing;
+                                                    continue; // Don't execute immediately
+                                                }
+                                                
+                                                // No parameters needed - send immediately
                                                 let client_id = mcp_app.client_id.clone();
 
                                                 // Update MCP app state to show we're sending
@@ -2932,6 +3119,10 @@ async fn run_scenario_with_tui(
                                             }
                                         }
                                     }
+                                    UiMode::McpParameterEditing => {
+                                        // Handle parameter editing - placeholder for now
+                                        // TODO: Implement parameter value editing
+                                    }
                                     UiMode::McpInteractionDetails => {
                                         // In interaction details mode, Enter does nothing
                                         // User must press ESC to go back
@@ -2993,6 +3184,7 @@ fn draw_logging_ui(f: &mut Frame, app: &LoggingApp) {
     match app.ui_mode {
         UiMode::LogViewing => draw_log_viewing_ui(f, app),
         UiMode::McpMessageSending => draw_mcp_message_ui(f, app),
+        UiMode::McpParameterEditing => draw_mcp_parameter_editing_ui(f, app),
         UiMode::McpInteractionDetails => draw_mcp_interaction_details_ui(f, app),
     }
 }
@@ -3195,6 +3387,134 @@ fn draw_log_viewing_ui(f: &mut Frame, app: &LoggingApp) {
 }
 
 #[cfg(feature = "tui")]
+fn draw_mcp_parameter_editing_ui(f: &mut Frame, app: &LoggingApp) {
+    // First, split the screen vertically to reserve space for controls at the bottom
+    let main_chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(0), Constraint::Length(3)])
+        .split(f.area());
+
+    if let Some(ref mcp_app) = app.mcp_app {
+        if let Some(ref editing_message) = mcp_app.editing_message {
+            // Split main area for parameter list and details
+            let chunks = Layout::default()
+                .direction(Direction::Horizontal)
+                .constraints([Constraint::Percentage(60), Constraint::Percentage(40)])
+                .split(main_chunks[0]);
+
+            // Left panel: Parameter list
+            let mut param_items = Vec::new();
+            
+            // Add required parameters
+            for (i, param) in editing_message.required_params.iter().enumerate() {
+                let is_selected = i == mcp_app.selected_param_index && !mcp_app.editing_param_value;
+                let value_text = if param.current_value.is_empty() {
+                    "<not set>".to_string()
+                } else {
+                    param.current_value.clone()
+                };
+                
+                let content = format!("🔴 {} ({}): {}", param.name, param.param_type, value_text);
+                let style = if is_selected {
+                    Style::default().bg(Color::Yellow).fg(Color::Black)
+                } else {
+                    Style::default().fg(Color::Red)
+                };
+                param_items.push(ListItem::new(content).style(style));
+            }
+            
+            // Add optional parameters
+            for (i, param) in editing_message.optional_params.iter().enumerate() {
+                let param_index = editing_message.required_params.len() + i;
+                let is_selected = param_index == mcp_app.selected_param_index && !mcp_app.editing_param_value;
+                let value_text = if param.current_value.is_empty() {
+                    "<empty>".to_string()
+                } else {
+                    param.current_value.clone()
+                };
+                
+                let content = format!("⚪ {} ({}): {}", param.name, param.param_type, value_text);
+                let style = if is_selected {
+                    Style::default().bg(Color::Yellow).fg(Color::Black)
+                } else {
+                    Style::default().fg(Color::Blue)
+                };
+                param_items.push(ListItem::new(content).style(style));
+            }
+
+            let param_list = List::new(param_items)
+                .block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .title(format!("⚙️  Parameters for: {} [FOCUSED]", editing_message.name))
+                        .border_style(Style::default().fg(Color::Cyan)),
+                )
+                .highlight_style(Style::default().bg(Color::Blue).fg(Color::White));
+
+            f.render_widget(param_list, chunks[0]);
+
+            // Right panel: Parameter details and instructions
+            let details = vec![
+                Line::from(vec![
+                    Span::styled("Command: ", Style::default().add_modifier(Modifier::BOLD)),
+                    Span::raw(&editing_message.name),
+                ]),
+                Line::from(vec![
+                    Span::styled("Description: ", Style::default().add_modifier(Modifier::BOLD)),
+                    Span::raw(&editing_message.description),
+                ]),
+                Line::from(Span::raw("")), // Empty line
+                Line::from(vec![
+                    Span::styled("🔴 Required", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
+                    Span::raw(" parameters must be filled"),
+                ]),
+                Line::from(vec![
+                    Span::styled("⚪ Optional", Style::default().fg(Color::Blue).add_modifier(Modifier::BOLD)),
+                    Span::raw(" parameters are optional"),
+                ]),
+                Line::from(Span::raw("")), // Empty line
+                Line::from("Instructions:"),
+                Line::from("• ↑↓ Navigate parameters"),
+                Line::from("• Enter: Edit parameter value"),
+                Line::from("• Ctrl+S: Send command"),
+                Line::from("• Esc: Cancel editing"),
+            ];
+
+            let details_widget = Paragraph::new(details)
+                .block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .title("📋 Parameter Details"),
+                )
+                .wrap(Wrap { trim: true });
+
+            f.render_widget(details_widget, chunks[1]);
+        }
+    }
+
+    // Show controls at bottom
+    let controls_area = main_chunks[1];
+    let controls = Paragraph::new(vec![Line::from(vec![
+        Span::styled("↑↓", Style::default().add_modifier(Modifier::BOLD)),
+        Span::raw(" Navigate  "),
+        Span::styled("Enter", Style::default().add_modifier(Modifier::BOLD)),
+        Span::raw(" Edit  "),
+        Span::styled("Ctrl+S", Style::default().add_modifier(Modifier::BOLD)),
+        Span::raw(" Send  "),
+        Span::styled("Esc", Style::default().add_modifier(Modifier::BOLD)),
+        Span::raw(" Cancel"),
+    ])])
+    .block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title("🎮 Parameter Controls"),
+    )
+    .alignment(Alignment::Center);
+
+    f.render_widget(controls, controls_area);
+}
+
+#[cfg(feature = "tui")]
 fn draw_mcp_message_ui(f: &mut Frame, app: &LoggingApp) {
     // First, split the screen vertically to reserve space for controls at the bottom
     let main_chunks = Layout::default()
@@ -3216,9 +3536,34 @@ fn draw_mcp_message_ui(f: &mut Frame, app: &LoggingApp) {
             .enumerate()
             .map(|(i, message)| {
                 let is_selected = i == mcp_app.selected_message_index;
-                let content = format!("🚀 {} - {}", message.name, message.description);
+                
+                // Show parameter count with emoji indicators
+                let param_indicator = if message.required_param_count == 0 {
+                    "⚡" // Lightning for no parameters (fast/simple)
+                } else if message.required_param_count <= 2 {
+                    "📝" // Document for few parameters
+                } else {
+                    "⚙️" // Gear for many parameters
+                };
+                
+                let param_count_text = if message.required_param_count > 0 {
+                    format!(" ({})", message.required_param_count)
+                } else {
+                    String::new()
+                };
+                
+                let content = format!(
+                    "{} {}{} - {}", 
+                    param_indicator,
+                    message.name, 
+                    param_count_text,
+                    message.description
+                );
+                
                 let style = if is_selected {
                     Style::default().bg(Color::Yellow).fg(Color::Black)
+                } else if message.required_param_count == 0 {
+                    Style::default().fg(Color::Green) // Green for parameter-less commands
                 } else {
                     Style::default()
                 };

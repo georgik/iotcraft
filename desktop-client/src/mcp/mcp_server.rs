@@ -398,8 +398,14 @@ pub fn should_queue_as_command(tool_name: &str) -> bool {
             | "leave_world"
             | "list_online_worlds"
             | "get_multiplayer_status"
+            | "get_world_status"
             | "player_move"
             | "wait_for_condition"
+            | "get_client_info"
+            | "get_game_state"
+            | "health_check"
+            | "get_system_info"
+            | "get_sensor_data"
     )
 }
 
@@ -480,7 +486,7 @@ pub fn convert_tool_call_to_command(tool_name: &str, arguments: &Value) -> Optio
             let filename = arguments.get("filename")?.as_str()?;
             Some(format!("save_map {}", filename))
         }
-        "load_world" => {
+        "load_world_by_file" => {
             let filename = arguments.get("filename")?.as_str()?;
             Some(format!("load_map {}", filename))
         }
@@ -510,12 +516,6 @@ pub fn convert_tool_call_to_command(tool_name: &str, arguments: &Value) -> Optio
         "leave_world" => Some("leave_world".to_string()),
         "list_online_worlds" => Some("list_online_worlds".to_string()),
         "get_multiplayer_status" => Some("get_multiplayer_status".to_string()),
-        "player_move" => {
-            let x = arguments.get("x")?.as_f64()?;
-            let y = arguments.get("y")?.as_f64()?;
-            let z = arguments.get("z")?.as_f64()?;
-            Some(format!("tp {} {} {}", x, y, z))
-        }
         "wait_for_condition" => {
             let condition = arguments.get("condition")?.as_str()?;
             let timeout = arguments
@@ -550,6 +550,22 @@ pub fn convert_tool_call_to_command(tool_name: &str, arguments: &Value) -> Optio
         "set_game_state" => {
             let state = arguments.get("state")?.as_str()?;
             Some(format!("set_game_state {}", state))
+        }
+        "get_client_info" => Some("get_client_info".to_string()),
+        "get_game_state" => Some("get_game_state".to_string()),
+        "health_check" => Some("health_check".to_string()),
+        "get_system_info" => Some("get_system_info".to_string()),
+        "get_sensor_data" => Some("get_sensor_data".to_string()),
+        "get_world_status" => Some("get_world_status".to_string()),
+        "player_move" => {
+            let x = arguments.get("x")?.as_f64()?;
+            let y = arguments.get("y")?.as_f64()?;
+            let z = arguments.get("z")?.as_f64()?;
+            Some(format!("player_move {} {} {}", x, y, z))
+        }
+        "load_world" => {
+            let world_name = arguments.get("world_name")?.as_str()?;
+            Some(format!("load_world {}", world_name))
         }
         _ => None,
     }
@@ -603,13 +619,30 @@ fn handle_async_tool_call_request(
         .cloned()
         .unwrap_or(json!({}));
 
+    // Handle ping tool call directly without queueing
+    if tool_name == "ping" {
+        debug!("Handling ping tool call directly");
+        let response = json!({
+            "content": [{
+                "type": "text",
+                "text": "pong"
+            }],
+            "isError": false
+        });
+        if request.response_sender.send(response).is_err() {
+            error!("Failed to send ping tool response");
+        }
+        return;
+    }
+
     // For tools that should be queued, convert to command and track execution
     if should_queue_as_command(tool_name) {
         if let Some(cmd) = convert_tool_call_to_command(tool_name, &arguments) {
-            info!("Queueing MCP command: {} for tool {}", cmd, tool_name);
+            info!("Queueing MCP command: {} for tool {} (queue size: {})", cmd, tool_name, pending_commands.commands.len());
 
             // Generate a unique request ID for tracking
             let request_id = uuid::Uuid::new_v4().to_string();
+            info!("Generated request ID: {}", request_id);
 
             // Store the pending execution for later response
             pending_executions.executions.insert(
@@ -620,9 +653,9 @@ fn handle_async_tool_call_request(
             );
 
             // Add command with request ID for tracking
-            pending_commands
-                .commands
-                .push(format!("{} #{}", cmd, request_id));
+            let full_command = format!("{} #{}", cmd, request_id);
+            pending_commands.commands.push(full_command.clone());
+            info!("Added command to queue: '{}' (new queue size: {})", full_command, pending_commands.commands.len());
 
             return;
         }
