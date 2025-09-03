@@ -40,31 +40,6 @@ fn strip_ansi_colors(text: &str) -> String {
     regex.replace_all(text, "").to_string()
 }
 
-/// Strip ANSI escape codes and emoji characters from text for clean log files
-fn strip_ansi_and_emoji(text: &str) -> String {
-    // First, strip ANSI escape sequences
-    let ansi_regex = regex::Regex::new(r"\x1B\[[0-?]*[ -/]*[@-~]").unwrap_or_else(|_| {
-        // Fallback: simple ANSI escape sequence pattern
-        regex::Regex::new(r"\x1B\[[0-9;]*[mK]").unwrap()
-    });
-    let without_ansi = ansi_regex.replace_all(text, "");
-
-    // Then, strip common emoji characters used in our status indicators
-    let emoji_chars = [
-        "⏳", "🟡", "🟢", "🔴", "🔵", "🟠", "🎭", "📡", "👁️", "👤", "🚀", "📖", "👥", "📋", "🔧",
-        "🎬", "📍", "✅", "❌", "📊", "🧹", "📁", "💡", "🔗", "🎮", "🎉", "⚠️", "🛑",
-    ];
-
-    let mut result = without_ansi.to_string();
-    for emoji in &emoji_chars {
-        result = result.replace(emoji, "");
-    }
-
-    // Clean up extra spaces that might result from emoji removal
-    let space_regex = regex::Regex::new(r"\s+").unwrap();
-    space_regex.replace_all(&result, " ").trim().to_string()
-}
-
 #[cfg(feature = "tui")]
 #[derive(Debug, Clone)]
 struct SystemInfo {
@@ -556,10 +531,10 @@ impl McpMessage {
 #[cfg(feature = "tui")]
 #[derive(Debug, Clone)]
 struct HealthProbe {
-    client_id: String,
+    _client_id: String,
     last_check: std::time::Instant,
     interval: Duration,
-    timeout: Duration,
+    _timeout: Duration,
     failure_count: u32,
     failure_threshold: u32,
     is_healthy: bool,
@@ -594,7 +569,7 @@ struct McpInteractiveApp {
     selected_message_index: usize,
     client_id: String, // The client we're sending messages to
     list_state: ListState,
-    message_result: Option<String>,
+    _message_result: Option<String>,
 }
 
 #[cfg(feature = "tui")]
@@ -741,10 +716,10 @@ impl LoggingApp {
                         health_probes.insert(
                             client.id.clone(),
                             HealthProbe {
-                                client_id: client.id.clone(),
+                                _client_id: client.id.clone(),
                                 last_check: std::time::Instant::now(),
                                 interval: Duration::from_secs(interval),
-                                timeout: Duration::from_secs(timeout),
+                                _timeout: Duration::from_secs(timeout),
                                 failure_count: 0,
                                 failure_threshold,
                                 is_healthy: true,
@@ -766,10 +741,10 @@ impl LoggingApp {
             health_probes.insert(
                 "MQTT Observer".to_string(),
                 HealthProbe {
-                    client_id: "MQTT Observer".to_string(),
+                    _client_id: "MQTT Observer".to_string(),
                     last_check: std::time::Instant::now(),
                     interval: Duration::from_secs(10), // Check every 10 seconds
-                    timeout: Duration::from_secs(5),
+                    _timeout: Duration::from_secs(5),
                     failure_count: 0,
                     failure_threshold: 3, // Allow 3 failures before marking unhealthy
                     is_healthy: true,
@@ -2809,7 +2784,7 @@ async fn run_scenario_with_tui(scenario: Scenario) -> Result<(), Box<dyn std::er
                                                     selected_message_index: 0,
                                                     client_id: client_id.clone(),
                                                     list_state: ListState::default(),
-                                                    message_result: None,
+                                                    _message_result: None,
                                                 };
                                                 mcp_app.list_state.select(Some(0));
                                                 logging_app.mcp_app = Some(mcp_app);
@@ -3349,6 +3324,17 @@ async fn start_infrastructure_with_logging(
         // Update MQTT server status to starting
         log_collector.log_str(LogSource::MqttServer, "🟡 MQTT Server starting...");
 
+        // Log the exact command being executed
+        let mqtt_cmd = format!("cargo run --release -- --port {}", port);
+        log_collector.log_str(
+            LogSource::MqttServer,
+            &format!("🚀 Executing command: {}", mqtt_cmd),
+        );
+        log_collector.log_str(
+            LogSource::MqttServer,
+            &format!("📁 Working directory: ../mqtt-server"),
+        );
+
         // Start MQTT server from ../mqtt-server directory
         let mut mqtt_process = TokioCommand::new("cargo")
             .current_dir("../mqtt-server")
@@ -3443,6 +3429,21 @@ async fn start_infrastructure_with_logging(
             );
 
             let mqtt_port = state.scenario.infrastructure.mqtt_server.port;
+
+            // Log the exact command being executed
+            let observer_cmd = format!(
+                "cargo run --bin mqtt-observer -- -h localhost -p {} -t '#' -i mcplay_observer",
+                mqtt_port
+            );
+            log_collector.log_str(
+                LogSource::MqttObserver,
+                &format!("🚀 Executing command: {}", observer_cmd),
+            );
+            log_collector.log_str(
+                LogSource::MqttObserver,
+                &format!("📁 Working directory: ../mqtt-client"),
+            );
+
             let mut observer_process = TokioCommand::new("cargo")
                 .current_dir("../mqtt-client")
                 .args(&[
@@ -3573,6 +3574,39 @@ async fn start_clients_with_logging(
         log_collector.log_str(
             LogSource::Client(client.id.clone()),
             "🟡 Client starting...",
+        );
+
+        // Build client command and log it
+        let mut client_cmd_parts = vec![
+            "cargo".to_string(),
+            "run".to_string(),
+            "--bin".to_string(),
+            "iotcraft-dekstop-client".to_string(),
+            "--".to_string(),
+            "--mcp".to_string(),
+        ];
+
+        // Add optional MQTT arguments if required
+        if state.scenario.infrastructure.mqtt_server.required {
+            client_cmd_parts.push("--mqtt-server".to_string());
+            client_cmd_parts.push(format!(
+                "localhost:{}",
+                state.scenario.infrastructure.mqtt_server.port
+            ));
+        }
+
+        let client_cmd_str = client_cmd_parts.join(" ");
+        log_collector.log_str(
+            LogSource::Client(client.id.clone()),
+            &format!("🚀 Executing command: {}", client_cmd_str),
+        );
+        log_collector.log_str(
+            LogSource::Client(client.id.clone()),
+            &format!("📁 Working directory: ../desktop-client"),
+        );
+        log_collector.log_str(
+            LogSource::Client(client.id.clone()),
+            &format!("🏠 Environment: MCP_PORT={}", client.mcp_port),
         );
 
         // Build client command arguments
