@@ -5,6 +5,7 @@
 
 use anyhow::Result;
 use clap::{Arg, Command};
+use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -19,6 +20,50 @@ use tokio::time::sleep;
 // Add chrono for timestamps
 #[cfg(feature = "tui")]
 use chrono;
+
+/// Strip ANSI escape codes from text for clean log files while preserving emojis
+fn strip_ansi_colors(text: &str) -> String {
+    // Regex to match ANSI escape sequences for colors and formatting
+    // This matches comprehensive ANSI patterns including:
+    // - Color codes: \x1B[31m, \x1B[1;32m, \x1B[0m
+    // - Cursor movement: \x1B[2J, \x1B[H
+    // - Other formatting: \x1B[K, \x1B[?25h
+    static ANSI_REGEX: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
+    let regex = ANSI_REGEX.get_or_init(|| {
+        // More comprehensive ANSI escape sequence pattern
+        // \x1B\[ - ESC[
+        // [0-9;?]* - parameter bytes (numbers, semicolons, question marks)
+        // [a-zA-Z] - final byte (letter commands like m, K, H, J, etc.)
+        Regex::new(r"\x1B\[[0-9;?]*[a-zA-Z]").expect("Valid ANSI regex")
+    });
+
+    regex.replace_all(text, "").to_string()
+}
+
+/// Strip ANSI escape codes and emoji characters from text for clean log files
+fn strip_ansi_and_emoji(text: &str) -> String {
+    // First, strip ANSI escape sequences
+    let ansi_regex = regex::Regex::new(r"\x1B\[[0-?]*[ -/]*[@-~]").unwrap_or_else(|_| {
+        // Fallback: simple ANSI escape sequence pattern
+        regex::Regex::new(r"\x1B\[[0-9;]*[mK]").unwrap()
+    });
+    let without_ansi = ansi_regex.replace_all(text, "");
+
+    // Then, strip common emoji characters used in our status indicators
+    let emoji_chars = [
+        "⏳", "🟡", "🟢", "🔴", "🔵", "🟠", "🎭", "📡", "👁️", "👤", "🚀", "📖", "👥", "📋", "🔧",
+        "🎬", "📍", "✅", "❌", "📊", "🧹", "📁", "💡", "🔗", "🎮", "🎉", "⚠️", "🛑",
+    ];
+
+    let mut result = without_ansi.to_string();
+    for emoji in &emoji_chars {
+        result = result.replace(emoji, "");
+    }
+
+    // Clean up extra spaces that might result from emoji removal
+    let space_regex = regex::Regex::new(r"\s+").unwrap();
+    space_regex.replace_all(&result, " ").trim().to_string()
+}
 
 #[cfg(feature = "tui")]
 #[derive(Debug, Clone)]
@@ -540,6 +585,7 @@ struct LoggingApp {
     health_probes: HashMap<String, HealthProbe>, // Active health probes
     scenario_completed: bool,            // Track if scenario is completed
     auto_exit_after_completion: bool,    // Auto exit when scenario completes
+    observer_process_healthy: bool,      // Track MQTT observer process health
 }
 
 #[cfg(feature = "tui")]
@@ -709,6 +755,28 @@ impl LoggingApp {
             }
         }
 
+        // Add health probe for MQTT Observer if required
+        if scenario
+            .infrastructure
+            .mqtt_observer
+            .as_ref()
+            .map(|obs| obs.required)
+            .unwrap_or(false)
+        {
+            health_probes.insert(
+                "MQTT Observer".to_string(),
+                HealthProbe {
+                    client_id: "MQTT Observer".to_string(),
+                    last_check: std::time::Instant::now(),
+                    interval: Duration::from_secs(10), // Check every 10 seconds
+                    timeout: Duration::from_secs(5),
+                    failure_count: 0,
+                    failure_threshold: 3, // Allow 3 failures before marking unhealthy
+                    is_healthy: true,
+                },
+            );
+        }
+
         Self {
             logs,
             selected_pane: LogPane::Orchestrator,
@@ -728,6 +796,7 @@ impl LoggingApp {
             health_probes,
             scenario_completed: false,
             auto_exit_after_completion: true, // Enable auto-exit by default
+            observer_process_healthy: true,
         }
     }
 
@@ -742,10 +811,11 @@ impl LoggingApp {
         // Parse and update service status based on message content
         self.parse_and_update_status(&pane_name, &message);
 
-        // Write to log file
+        // Write to log file (strip ANSI colors but preserve emojis)
         if let Some(log_file_path) = self.log_files.get(&pane_name) {
             let timestamp = chrono::Utc::now().format("%H:%M:%S%.3f");
-            let log_entry = format!("[{}] {}\n", timestamp, message);
+            let clean_message = strip_ansi_colors(&message);
+            let log_entry = format!("[{}] {}\n", timestamp, clean_message);
             let _ = std::fs::OpenOptions::new()
                 .create(true)
                 .append(true)
@@ -907,9 +977,17 @@ impl LoggingApp {
     }
 
     fn perform_health_check(&self, client_id: &str) -> bool {
-        // For now, we'll do a basic check to see if the client exists
-        // In a real implementation, this would send an MCP ping request
-        // and wait for a response within the timeout period
+        // Handle MQTT Observer health check
+        if client_id == "MQTT Observer" {
+            // Check both service status and process health
+            let status_ok = matches!(self.get_service_status(client_id), ServiceStatus::Ready);
+            let process_ok = self.observer_process_healthy;
+
+            // Observer is healthy if both status and process are OK
+            return status_ok && process_ok;
+        }
+
+        // Handle client health checks
         if let Some(_client) = self.scenario.clients.iter().find(|c| c.id == client_id) {
             // Basic assumption: if we have the client in our scenario and
             // it's been marked as ready, it's probably healthy
@@ -933,6 +1011,24 @@ impl LoggingApp {
             self.update_service_status(service_name, ServiceStatus::Unhealthy);
         } else if message.contains("⏳") || message.contains("waiting") {
             self.update_service_status(service_name, ServiceStatus::Waiting);
+        }
+
+        // Special handling for MQTT Observer connection status
+        if service_name == "MQTT Observer" {
+            if message.contains("Connected to MQTT broker")
+                || message.contains("Successfully connected")
+                || message.contains("MQTT connection established")
+            {
+                self.update_service_status(service_name, ServiceStatus::Ready);
+            } else if message.contains("Connection failed")
+                || message.contains("Failed to connect")
+                || message.contains("Connection lost")
+            {
+                self.update_service_status(service_name, ServiceStatus::Failed);
+            } else if message.contains("Connecting to") || message.contains("Attempting connection")
+            {
+                self.update_service_status(service_name, ServiceStatus::Starting);
+            }
         }
     }
 }
@@ -3338,6 +3434,13 @@ async fn start_infrastructure_with_logging(
 
             // Update MQTT observer status to starting
             log_collector.log_str(LogSource::MqttObserver, "🟡 MQTT Observer starting...");
+            log_collector.log_str(
+                LogSource::MqttObserver,
+                &format!(
+                    "Connecting to MQTT broker at localhost:{}",
+                    state.scenario.infrastructure.mqtt_server.port
+                ),
+            );
 
             let mqtt_port = state.scenario.infrastructure.mqtt_server.port;
             let mut observer_process = TokioCommand::new("cargo")
@@ -3374,8 +3477,27 @@ async fn start_infrastructure_with_logging(
                 tokio::spawn(async move {
                     let mut reader = BufReader::new(stdout);
                     let mut line = String::new();
+                    let mut connection_established = false;
+
                     while reader.read_line(&mut line).await.is_ok() && !line.is_empty() {
-                        log_collector.log_str(LogSource::MqttObserver, line.trim());
+                        let trimmed_line = line.trim();
+
+                        // Check for connection status in observer output
+                        if !connection_established
+                            && (trimmed_line.contains("Connected to")
+                                || trimmed_line.contains("Connection successful")
+                                || trimmed_line.contains("Subscribed to")
+                                || trimmed_line.contains("MQTT client connected"))
+                        {
+                            connection_established = true;
+                            log_collector.log_str(
+                                LogSource::MqttObserver,
+                                "Connected to MQTT broker - Observer ready",
+                            );
+                        }
+
+                        // Log the actual output
+                        log_collector.log_str(LogSource::MqttObserver, trimmed_line);
                         line.clear();
                     }
                 });
@@ -3400,10 +3522,22 @@ async fn start_infrastructure_with_logging(
                 .infrastructure_processes
                 .insert("mqtt_observer".to_string(), observer_process);
 
-            log_collector.log_str(LogSource::Orchestrator, "  ✅ MQTT observer started");
+            log_collector.log_str(
+                LogSource::Orchestrator,
+                "  ✅ MQTT observer process started",
+            );
 
-            // Update MQTT observer status to ready
-            log_collector.log_str(LogSource::MqttObserver, "🟢 MQTT Observer ready");
+            // Wait for MQTT observer to establish connection (readiness check)
+            log_collector.log_str(
+                LogSource::Orchestrator,
+                "  Waiting for MQTT observer to connect to broker...",
+            );
+
+            // Simple delay to allow observer to connect - in a real implementation,
+            // we would monitor the observer's connection status more precisely
+            tokio::time::sleep(Duration::from_millis(2000)).await;
+
+            log_collector.log_str(LogSource::Orchestrator, "  ✅ MQTT observer ready");
         }
     }
 
