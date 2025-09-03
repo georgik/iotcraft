@@ -6,6 +6,7 @@ use crate::console::console_trait::{Console, ConsoleResult};
 
 /// Simple console implementation using basic logging
 /// Works reliably on both desktop and WASM
+#[allow(dead_code)]
 pub struct SimpleConsole {
     command_parser: CommandParser,
     output_lines: VecDeque<String>,
@@ -22,6 +23,7 @@ impl Default for SimpleConsole {
 }
 
 impl SimpleConsole {
+    #[allow(dead_code)]
     pub fn new() -> Self {
         Self {
             command_parser: CommandParser::new(),
@@ -33,6 +35,7 @@ impl SimpleConsole {
         }
     }
 
+    #[allow(dead_code)]
     fn add_output_line(&mut self, line: String) {
         // Split multi-line output
         for single_line in line.split('\n') {
@@ -46,6 +49,7 @@ impl SimpleConsole {
         }
     }
 
+    #[allow(dead_code)]
     pub fn execute_command(&mut self, command: &str, world: &mut World) {
         if command.trim().is_empty() {
             return;
@@ -146,6 +150,7 @@ impl Console for SimpleConsole {
 }
 
 /// Resource for simple console state
+#[allow(dead_code)]
 #[derive(Resource)]
 pub struct SimpleConsoleState {
     pub pending_command: Option<String>,
@@ -153,6 +158,7 @@ pub struct SimpleConsoleState {
 }
 
 /// System to handle simple console input via keyboard shortcuts
+#[allow(dead_code)]
 fn handle_simple_console_input(
     keyboard_input: Res<ButtonInput<KeyCode>>,
     mut console_state: ResMut<SimpleConsoleState>,

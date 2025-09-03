@@ -15,6 +15,7 @@ pub struct PlayerProfile {
 impl PlayerProfile {
     /// Create a new PlayerProfile with the given name
     /// This method works on both desktop and WASM targets
+    #[allow(dead_code)] // Used in tests and potential library usage
     pub fn new(name: String) -> Self {
         let player_id = format!("player-{}", uuid_like());
         Self {

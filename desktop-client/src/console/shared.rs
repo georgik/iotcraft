@@ -4,16 +4,11 @@
 use bevy::prelude::*;
 use std::collections::VecDeque;
 
-/// Shared console result type
-#[derive(Debug, Clone)]
-pub enum ConsoleResult {
-    Success(String),
-    Error(String),
-    CommandNotFound(String),
-    InvalidArgs(String),
-}
+// ConsoleResult is defined in console_trait.rs to avoid duplication
+use crate::console::console_trait::ConsoleResult;
 
 /// Shared console trait for both desktop and WASM implementations
+#[allow(dead_code)]
 pub trait SharedConsole: Send + Sync {
     /// Execute a command and return the result
     fn execute_command(&mut self, command: &str, world: &mut World) -> ConsoleResult;
@@ -38,6 +33,7 @@ pub trait SharedConsole: Send + Sync {
 }
 
 /// Shared console state that can be used by both desktop and WASM
+#[allow(dead_code)]
 #[derive(Resource)]
 pub struct SharedConsoleState {
     pub visible: bool,
@@ -60,6 +56,7 @@ impl Default for SharedConsoleState {
 }
 
 impl SharedConsoleState {
+    #[allow(dead_code)]
     pub fn add_output_line(&mut self, line: String) {
         // Split multi-line output
         for single_line in line.split('\n') {
@@ -72,6 +69,7 @@ impl SharedConsoleState {
         }
     }
 
+    #[allow(dead_code)]
     pub fn add_to_history(&mut self, command: String) {
         if self.command_history.last() != Some(&command) {
             self.command_history.push(command);
@@ -81,16 +79,19 @@ impl SharedConsoleState {
         }
     }
 
+    #[allow(dead_code)]
     pub fn clear_output(&mut self) {
         self.output_lines.clear();
     }
 
+    #[allow(dead_code)]
     pub fn toggle_visibility(&mut self) {
         self.visible = !self.visible;
     }
 }
 
 /// Console configuration resource  
+#[allow(dead_code)]
 #[derive(Resource, Clone)]
 pub struct SharedConsoleConfig {
     pub toggle_key: KeyCode,
@@ -107,6 +108,7 @@ impl Default for SharedConsoleConfig {
 }
 
 /// Event for sending messages to the console from other systems
+#[allow(dead_code)]
 #[derive(Debug, Clone, bevy::prelude::Event, bevy::prelude::BufferedEvent)]
 pub struct ConsoleMessageEvent {
     pub message: String,
@@ -115,12 +117,14 @@ pub struct ConsoleMessageEvent {
 /// Basic shared console implementation using the command parser
 use crate::console::command_parser::CommandParser;
 
+#[allow(dead_code)]
 pub struct BasicSharedConsole {
     command_parser: CommandParser,
     state: SharedConsoleState,
 }
 
 impl BasicSharedConsole {
+    #[allow(dead_code)]
     pub fn new() -> Self {
         Self {
             command_parser: CommandParser::new(),
@@ -129,11 +133,13 @@ impl BasicSharedConsole {
     }
 
     /// Get access to the output lines for rendering
+    #[allow(dead_code)]
     pub fn get_output_lines(&self) -> &VecDeque<String> {
         &self.state.output_lines
     }
 
     /// Get mutable access to the state (for web console integration)
+    #[allow(dead_code)]
     pub fn get_state_mut(&mut self) -> &mut SharedConsoleState {
         &mut self.state
     }
@@ -156,39 +162,28 @@ impl SharedConsole for BasicSharedConsole {
 
         // Add result to output
         match &result {
-            crate::console::console_trait::ConsoleResult::Success(msg) => {
+            ConsoleResult::Success(msg) => {
                 if msg == "CLEAR_OUTPUT" {
                     self.state.clear_output();
                 } else if !msg.is_empty() {
                     self.state.add_output_line(msg.clone());
                 }
             }
-            crate::console::console_trait::ConsoleResult::Error(msg) => {
+            ConsoleResult::Error(msg) => {
                 self.state.add_output_line(format!("ERROR: {}", msg));
             }
-            crate::console::console_trait::ConsoleResult::CommandNotFound(msg) => {
+            ConsoleResult::CommandNotFound(msg) => {
                 self.state
                     .add_output_line(format!("Unknown command: {}", msg));
             }
-            crate::console::console_trait::ConsoleResult::InvalidArgs(msg) => {
+            ConsoleResult::InvalidArgs(msg) => {
                 self.state
                     .add_output_line(format!("Invalid arguments: {}", msg));
             }
         }
 
-        // Convert to shared result type
-        match result {
-            crate::console::console_trait::ConsoleResult::Success(msg) => {
-                ConsoleResult::Success(msg)
-            }
-            crate::console::console_trait::ConsoleResult::Error(msg) => ConsoleResult::Error(msg),
-            crate::console::console_trait::ConsoleResult::CommandNotFound(msg) => {
-                ConsoleResult::CommandNotFound(msg)
-            }
-            crate::console::console_trait::ConsoleResult::InvalidArgs(msg) => {
-                ConsoleResult::InvalidArgs(msg)
-            }
-        }
+        // Return result directly (no conversion needed since we're using the same type)
+        result
     }
 
     fn add_output(&mut self, message: &str) {

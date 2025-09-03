@@ -127,6 +127,8 @@ default = ["console"]
 console-bevy = ["dep:bevy_console"]  # Legacy desktop-only console
 # Convenience feature aliases
 console = []                          # Default to Simple console (no extra deps)
+# World features
+chunk_world = []                      # Enable chunk-based world support (future feature)
 # Test-specific features
 integration-tests = []                # Feature to enable integration tests
 

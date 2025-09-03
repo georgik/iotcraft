@@ -9,8 +9,10 @@ use crate::mqtt::TemperatureResource;
 // Platform-specific imports for environment and inventory
 // Also include for tests since test code needs access to these types
 #[cfg(any(not(target_arch = "wasm32"), test))]
+#[allow(unused_imports)] // Used in non-WASM builds and tests
 use crate::environment::{BlockType, VoxelWorld};
 #[cfg(any(not(target_arch = "wasm32"), test))]
+#[allow(unused_imports)] // Used in non-WASM builds and tests
 use crate::inventory::{ItemType, PlaceBlockEvent, PlayerInventory};
 
 /// Unified command parser that works with any console implementation

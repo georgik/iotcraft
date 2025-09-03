@@ -859,7 +859,7 @@ fn execute_pending_commands(
                     });
 
                     // Set game state to InGame to transition UI from main menu
-                    if let Some(mut next_state) = next_game_state.as_mut() {
+                    if let Some(next_state) = next_game_state.as_mut() {
                         next_state.set(crate::ui::main_menu::GameState::InGame);
                         info!("Set game state to InGame for world creation transition");
                     } else {
@@ -924,7 +924,7 @@ fn execute_pending_commands(
                     };
 
                     // Set the game state
-                    if let Some(mut next_state) = next_game_state.as_mut() {
+                    if let Some(next_state) = next_game_state.as_mut() {
                         next_state.set(new_state);
                         info!("Set game state to {}", state_str);
 
@@ -994,7 +994,6 @@ fn execute_console_commands(
     mut console_manager: ResMut<ConsoleManager>,
 ) {
     use crate::console::command_parser::CommandParser;
-    use crate::console::console_trait::Console;
 
     // Process commands that start with "CONSOLE_COMMAND:"
     let console_commands: Vec<String> = pending_commands
@@ -1025,8 +1024,9 @@ fn execute_console_commands(
                 (command_without_prefix.to_string(), None)
             };
 
-        // Use the console's command parser
-        let mut parser = CommandParser::new();
+        // Use the console's command parser - note: parser is created but not currently used
+        // for actual command execution due to world access limitations in this context
+        let _parser = CommandParser::new();
         // We need to access the world, so we'll do this through the console manager
         // For now, just try to add the command as output and execute it via console
         console_manager.add_message(&format!("Executing: {}", actual_command));
