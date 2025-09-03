@@ -3581,89 +3581,95 @@ fn centered_rect(
 
 #[cfg(feature = "tui")]
 fn format_json_with_syntax_highlighting(json_str: String) -> Vec<Line<'static>> {
-    json_str
-        .lines()
-        .map(|line| {
-            let mut spans = Vec::new();
-            let chars = line.chars().collect::<Vec<char>>();
-            let mut i = 0;
-
-            while i < chars.len() {
-                let ch = chars[i];
-                match ch {
-                    '"' => {
-                        // Handle string literals
-                        let start = i;
-                        i += 1;
-
-                        // Read until closing quote, handling escapes
-                        while i < chars.len() {
-                            if chars[i] == '"' && (i == 0 || chars[i - 1] != '\\') {
-                                i += 1;
-                                break;
-                            }
-                            i += 1;
+    json_str.lines().map(|line| {
+        // Use a simple regex-based approach to preserve whitespace exactly
+        let mut spans = Vec::new();
+        let mut current_pos = 0;
+        
+        // Handle the line character by character, but group similar characters
+        let chars: Vec<char> = line.chars().collect();
+        
+        while current_pos < chars.len() {
+            let ch = chars[current_pos];
+            
+            match ch {
+                // Handle strings
+                '"' => {
+                    let start = current_pos;
+                    current_pos += 1;
+                    
+                    // Find the end of the string, handling escapes
+                    while current_pos < chars.len() {
+                        if chars[current_pos] == '"' && (current_pos == 0 || chars[current_pos - 1] != '\\') {
+                            current_pos += 1;
+                            break;
                         }
-
-                        let string_content: String = chars[start..i].iter().collect();
-
-                        // Determine if this is a key (followed by :) or a value
-                        let remaining_chars = &chars[i..];
-                        let remaining_str: String = remaining_chars.iter().collect();
-                        let is_key = remaining_str.trim_start().starts_with(':');
-
-                        let style = if is_key {
-                            Style::default().fg(Color::Cyan)
-                        } else {
-                            Style::default().fg(Color::Green)
-                        };
-
-                        spans.push(Span::styled(string_content, style));
+                        current_pos += 1;
                     }
-                    '{' | '}' | '[' | ']' | ',' | ':' => {
-                        // Handle punctuation
-                        spans.push(Span::styled(
-                            ch.to_string(),
-                            Style::default().fg(Color::Yellow),
-                        ));
-                        i += 1;
+                    
+                    let string_part: String = chars[start..current_pos].iter().collect();
+                    
+                    // Check if this is a key by looking ahead for ':'
+                    let rest_of_line = &chars[current_pos..];
+                    let remaining: String = rest_of_line.iter().collect();
+                    let is_key = remaining.trim_start().starts_with(':');
+                    
+                    let color = if is_key { Color::Cyan } else { Color::Green };
+                    spans.push(Span::styled(string_part, Style::default().fg(color)));
+                }
+                
+                // Handle punctuation  
+                '{' | '}' | '[' | ']' | ',' | ':' => {
+                    spans.push(Span::styled(
+                        ch.to_string(), 
+                        Style::default().fg(Color::Yellow)
+                    ));
+                    current_pos += 1;
+                }
+                
+                // Handle whitespace (preserve exactly)
+                ' ' | '\t' => {
+                    let start = current_pos;
+                    while current_pos < chars.len() && matches!(chars[current_pos], ' ' | '\t') {
+                        current_pos += 1;
                     }
-                    ' ' | '\t' => {
-                        // Handle whitespace - preserve it exactly as is
-                        spans.push(Span::raw(ch.to_string()));
-                        i += 1;
-                    }
-                    _ => {
-                        // Handle numbers, booleans, null, and other tokens
-                        let start = i;
-
-                        // Read the complete token
-                        while i < chars.len()
-                            && !matches!(chars[i], ',' | '}' | ']' | ' ' | '\t' | '\n' | '{' | '[')
-                        {
-                            i += 1;
+                    let whitespace: String = chars[start..current_pos].iter().collect();
+                    spans.push(Span::raw(whitespace));
+                }
+                
+                // Handle other tokens (numbers, booleans, null, etc.)
+                _ => {
+                    let start = current_pos;
+                    // Read until we hit a delimiter
+                    while current_pos < chars.len() {
+                        let ch = chars[current_pos];
+                        if matches!(ch, '"' | '{' | '}' | '[' | ']' | ',' | ':' | ' ' | '\t') {
+                            break;
                         }
-
-                        let token: String = chars[start..i].iter().collect();
-
-                        let style = if token.parse::<f64>().is_ok() {
-                            Style::default().fg(Color::Magenta)
+                        current_pos += 1;
+                    }
+                    
+                    if current_pos > start {
+                        let token: String = chars[start..current_pos].iter().collect();
+                        
+                        let color = if token.parse::<f64>().is_ok() {
+                            Color::Magenta  // Numbers
                         } else if matches!(token.as_str(), "true" | "false") {
-                            Style::default().fg(Color::Blue)
+                            Color::Blue     // Booleans
                         } else if token == "null" {
-                            Style::default().fg(Color::Red)
+                            Color::Red      // Null
                         } else {
-                            Style::default()
+                            Color::White    // Default
                         };
-
-                        spans.push(Span::styled(token, style));
+                        
+                        spans.push(Span::styled(token, Style::default().fg(color)));
                     }
                 }
             }
-
-            Line::from(spans)
-        })
-        .collect()
+        }
+        
+        Line::from(spans)
+    }).collect()
 }
 
 async fn run_scenario_with_logging(
