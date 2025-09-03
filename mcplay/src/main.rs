@@ -459,13 +459,9 @@ struct McpMessage {
 #[cfg(feature = "tui")]
 impl McpMessage {
     fn get_available_messages() -> Vec<McpMessage> {
-        vec![
-            McpMessage {
-                name: "Ping".to_string(),
-                description: "Send a ping to test connectivity".to_string(),
-                method: "ping".to_string(),
-                params: serde_json::json!({}),
-            },
+        use iotcraft_mcp_protocol::tools::get_all_tools;
+
+        let mut messages = vec![
             McpMessage {
                 name: "List Tools".to_string(),
                 description: "List available MCP tools".to_string(),
@@ -487,74 +483,23 @@ impl McpMessage {
                     }
                 }),
             },
-            McpMessage {
-                name: "Get Client Info".to_string(),
-                description: "Get basic information about the desktop client".to_string(),
+        ];
+
+        // Add all tools from the shared protocol crate
+        let protocol_tools = get_all_tools();
+        for tool in protocol_tools {
+            messages.push(McpMessage {
+                name: tool.name.clone(),
+                description: tool.description.clone(),
                 method: "tools/call".to_string(),
                 params: serde_json::json!({
-                    "name": "get_client_info",
+                    "name": tool.name,
                     "arguments": {}
                 }),
-            },
-            McpMessage {
-                name: "Get Game State".to_string(),
-                description: "Get current game state from the desktop client".to_string(),
-                method: "tools/call".to_string(),
-                params: serde_json::json!({
-                    "name": "get_game_state",
-                    "arguments": {}
-                }),
-            },
-            McpMessage {
-                name: "Set Game State (MainMenu)".to_string(),
-                description: "Set game state to MainMenu".to_string(),
-                method: "tools/call".to_string(),
-                params: serde_json::json!({
-                    "name": "set_game_state",
-                    "arguments": {
-                        "state": "MainMenu"
-                    }
-                }),
-            },
-            McpMessage {
-                name: "Set Game State (Playing)".to_string(),
-                description: "Set game state to Playing".to_string(),
-                method: "tools/call".to_string(),
-                params: serde_json::json!({
-                    "name": "set_game_state",
-                    "arguments": {
-                        "state": "Playing"
-                    }
-                }),
-            },
-            McpMessage {
-                name: "List Available Commands".to_string(),
-                description: "List all available MCP commands/tools".to_string(),
-                method: "tools/call".to_string(),
-                params: serde_json::json!({
-                    "name": "list_commands",
-                    "arguments": {}
-                }),
-            },
-            McpMessage {
-                name: "Health Check".to_string(),
-                description: "Perform a health check on the desktop client".to_string(),
-                method: "tools/call".to_string(),
-                params: serde_json::json!({
-                    "name": "health_check",
-                    "arguments": {}
-                }),
-            },
-            McpMessage {
-                name: "Get System Info".to_string(),
-                description: "Get system information from the desktop client".to_string(),
-                method: "tools/call".to_string(),
-                params: serde_json::json!({
-                    "name": "get_system_info",
-                    "arguments": {}
-                }),
-            },
-        ]
+            });
+        }
+
+        messages
     }
 }
 
@@ -1379,14 +1324,14 @@ async fn start_infrastructure(
         let mqtt_ready = wait_for_port_with_retries_and_context(
             "localhost",
             port,
-            300,
+            600, // Increased from 300 (5 min) to 600 (10 min) for Rust build time
             verbose,
             Some("cargo run --release (mqtt-server)"),
         )
         .await;
         if !mqtt_ready {
             return Err(format!(
-                "MQTT server failed to start on port {} within 5 minute timeout",
+                "MQTT server failed to start on port {} within 10 minute timeout",
                 port
             )
             .into());
@@ -1528,7 +1473,7 @@ async fn start_clients(
         let mcp_ready = wait_for_port_with_retries_and_context(
             "localhost",
             client.mcp_port,
-            300,
+            600, // Increased from 300 (5 min) to 600 (10 min) for Rust build time
             verbose,
             Some(&format!(
                 "cargo run --bin iotcraft-dekstop-client ({})",
@@ -3581,95 +3526,101 @@ fn centered_rect(
 
 #[cfg(feature = "tui")]
 fn format_json_with_syntax_highlighting(json_str: String) -> Vec<Line<'static>> {
-    json_str.lines().map(|line| {
-        // Use a simple regex-based approach to preserve whitespace exactly
-        let mut spans = Vec::new();
-        let mut current_pos = 0;
-        
-        // Handle the line character by character, but group similar characters
-        let chars: Vec<char> = line.chars().collect();
-        
-        while current_pos < chars.len() {
-            let ch = chars[current_pos];
-            
-            match ch {
-                // Handle strings
-                '"' => {
-                    let start = current_pos;
-                    current_pos += 1;
-                    
-                    // Find the end of the string, handling escapes
-                    while current_pos < chars.len() {
-                        if chars[current_pos] == '"' && (current_pos == 0 || chars[current_pos - 1] != '\\') {
+    json_str
+        .lines()
+        .map(|line| {
+            // Use a simple regex-based approach to preserve whitespace exactly
+            let mut spans = Vec::new();
+            let mut current_pos = 0;
+
+            // Handle the line character by character, but group similar characters
+            let chars: Vec<char> = line.chars().collect();
+
+            while current_pos < chars.len() {
+                let ch = chars[current_pos];
+
+                match ch {
+                    // Handle strings
+                    '"' => {
+                        let start = current_pos;
+                        current_pos += 1;
+
+                        // Find the end of the string, handling escapes
+                        while current_pos < chars.len() {
+                            if chars[current_pos] == '"'
+                                && (current_pos == 0 || chars[current_pos - 1] != '\\')
+                            {
+                                current_pos += 1;
+                                break;
+                            }
                             current_pos += 1;
-                            break;
                         }
+
+                        let string_part: String = chars[start..current_pos].iter().collect();
+
+                        // Check if this is a key by looking ahead for ':'
+                        let rest_of_line = &chars[current_pos..];
+                        let remaining: String = rest_of_line.iter().collect();
+                        let is_key = remaining.trim_start().starts_with(':');
+
+                        let color = if is_key { Color::Cyan } else { Color::Green };
+                        spans.push(Span::styled(string_part, Style::default().fg(color)));
+                    }
+
+                    // Handle punctuation
+                    '{' | '}' | '[' | ']' | ',' | ':' => {
+                        spans.push(Span::styled(
+                            ch.to_string(),
+                            Style::default().fg(Color::Yellow),
+                        ));
                         current_pos += 1;
                     }
-                    
-                    let string_part: String = chars[start..current_pos].iter().collect();
-                    
-                    // Check if this is a key by looking ahead for ':'
-                    let rest_of_line = &chars[current_pos..];
-                    let remaining: String = rest_of_line.iter().collect();
-                    let is_key = remaining.trim_start().starts_with(':');
-                    
-                    let color = if is_key { Color::Cyan } else { Color::Green };
-                    spans.push(Span::styled(string_part, Style::default().fg(color)));
-                }
-                
-                // Handle punctuation  
-                '{' | '}' | '[' | ']' | ',' | ':' => {
-                    spans.push(Span::styled(
-                        ch.to_string(), 
-                        Style::default().fg(Color::Yellow)
-                    ));
-                    current_pos += 1;
-                }
-                
-                // Handle whitespace (preserve exactly)
-                ' ' | '\t' => {
-                    let start = current_pos;
-                    while current_pos < chars.len() && matches!(chars[current_pos], ' ' | '\t') {
-                        current_pos += 1;
-                    }
-                    let whitespace: String = chars[start..current_pos].iter().collect();
-                    spans.push(Span::raw(whitespace));
-                }
-                
-                // Handle other tokens (numbers, booleans, null, etc.)
-                _ => {
-                    let start = current_pos;
-                    // Read until we hit a delimiter
-                    while current_pos < chars.len() {
-                        let ch = chars[current_pos];
-                        if matches!(ch, '"' | '{' | '}' | '[' | ']' | ',' | ':' | ' ' | '\t') {
-                            break;
+
+                    // Handle whitespace (preserve exactly)
+                    ' ' | '\t' => {
+                        let start = current_pos;
+                        while current_pos < chars.len() && matches!(chars[current_pos], ' ' | '\t')
+                        {
+                            current_pos += 1;
                         }
-                        current_pos += 1;
+                        let whitespace: String = chars[start..current_pos].iter().collect();
+                        spans.push(Span::raw(whitespace));
                     }
-                    
-                    if current_pos > start {
-                        let token: String = chars[start..current_pos].iter().collect();
-                        
-                        let color = if token.parse::<f64>().is_ok() {
-                            Color::Magenta  // Numbers
-                        } else if matches!(token.as_str(), "true" | "false") {
-                            Color::Blue     // Booleans
-                        } else if token == "null" {
-                            Color::Red      // Null
-                        } else {
-                            Color::White    // Default
-                        };
-                        
-                        spans.push(Span::styled(token, Style::default().fg(color)));
+
+                    // Handle other tokens (numbers, booleans, null, etc.)
+                    _ => {
+                        let start = current_pos;
+                        // Read until we hit a delimiter
+                        while current_pos < chars.len() {
+                            let ch = chars[current_pos];
+                            if matches!(ch, '"' | '{' | '}' | '[' | ']' | ',' | ':' | ' ' | '\t') {
+                                break;
+                            }
+                            current_pos += 1;
+                        }
+
+                        if current_pos > start {
+                            let token: String = chars[start..current_pos].iter().collect();
+
+                            let color = if token.parse::<f64>().is_ok() {
+                                Color::Magenta // Numbers
+                            } else if matches!(token.as_str(), "true" | "false") {
+                                Color::Blue // Booleans
+                            } else if token == "null" {
+                                Color::Red // Null
+                            } else {
+                                Color::White // Default
+                            };
+
+                            spans.push(Span::styled(token, Style::default().fg(color)));
+                        }
                     }
                 }
             }
-        }
-        
-        Line::from(spans)
-    }).collect()
+
+            Line::from(spans)
+        })
+        .collect()
 }
 
 async fn run_scenario_with_logging(
@@ -3859,14 +3810,14 @@ async fn start_infrastructure_with_logging(
         let mqtt_ready = wait_for_port_with_retries_and_context_with_logging(
             "localhost",
             port,
-            300,
+            600, // Increased from 300 (5 min) to 600 (10 min) for Rust build time
             Some("cargo run --release (mqtt-server)"),
             log_collector.clone(),
         )
         .await;
         if !mqtt_ready {
             let error_msg = format!(
-                "MQTT server failed to start on port {} within 5 minute timeout",
+                "MQTT server failed to start on port {} within 10 minute timeout",
                 port
             );
             log_collector.log_str(LogSource::Orchestrator, &format!("❌ {}", error_msg));
@@ -4175,7 +4126,7 @@ async fn start_clients_with_logging(
         let mcp_ready = wait_for_port_with_retries_and_context_with_logging(
             "localhost",
             client.mcp_port,
-            300,
+            600, // Increased from 300 (5 min) to 600 (10 min) for Rust build time
             Some(&format!(
                 "cargo run --bin iotcraft-dekstop-client ({})",
                 client.id

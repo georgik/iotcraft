@@ -42,6 +42,7 @@ flate2 = "1.0"
 # Performance optimization dependencies
 bytemuck = { version = "1.16", features = ["derive"] } # GPU data alignment
 crossterm = "0.29.0"
+iotcraft-mcp-protocol = { version = "0.1.0", path = "../iotcraft-mcp-protocol", features = ["serde"] }
 
 # Web-specific dependencies
 [target.'cfg(target_arch = "wasm32")'.dependencies]
@@ -68,6 +69,9 @@ console_error_panic_hook = "0.1"
 getrandom = { version = "0.2", features = ["js"] }
 # Add getrandom v0.3 directly to enable wasm_js feature
 getrandom_03 = { package = "getrandom", version = "0.3", features = ["wasm_js"] }
+
+# Protocol crate (shared MCP definitions)
+iotcraft-mcp-protocol = { path = "../iotcraft-mcp-protocol", features = ["serde"] }
 
 # Desktop-specific dependencies (non-WASM)
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
