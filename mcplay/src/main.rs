@@ -196,7 +196,7 @@ impl SystemInfo {
 
     /// Get current memory usage in MB (called periodically)
     async fn get_memory_usage(
-        total_ram_mb: u64,
+        _total_ram_mb: u64,
     ) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
         #[cfg(target_os = "macos")]
         {
@@ -273,9 +273,9 @@ impl SystemInfo {
 
             let output_str = String::from_utf8(output.stdout)?;
             let mut page_size = 4096u64; // Default page size on macOS
-            let mut free_pages = 0u64;
+            let mut _free_pages = 0u64;
             let mut active_pages = 0u64;
-            let mut inactive_pages = 0u64;
+            let mut _inactive_pages = 0u64;
             let mut wired_pages = 0u64;
             let mut compressed_pages = 0u64;
 
@@ -306,19 +306,19 @@ impl SystemInfo {
                         .parse::<u64>()
                     {
                         if line.contains("Pages free:") {
-                            free_pages = pages;
+                            _free_pages = pages;
                         } else if line.contains("Pages active:") {
                             active_pages = pages;
                         } else if line.contains("Pages inactive:") {
-                            inactive_pages = pages;
+                            _inactive_pages = pages;
                         } else if line.contains("Pages wired down:") {
                             wired_pages = pages;
                         } else if line.contains("Pages speculative:") {
                             // Speculative pages count as inactive/free-ish
-                            inactive_pages += pages;
+                            _inactive_pages += pages;
                         } else if line.contains("Pages purgeable:") {
                             // Purgeable pages can be reclaimed, treat as part of available memory
-                            inactive_pages += pages;
+                            _inactive_pages += pages;
                         } else if line.contains("compressed:") {
                             compressed_pages = pages;
                         }
@@ -534,7 +534,7 @@ impl ServiceStatus {
 }
 
 #[cfg(feature = "tui")]
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Clone)]
 enum LogPane {
     Orchestrator,
     MqttServer,
@@ -1110,18 +1110,6 @@ impl LoggingApp {
             {
                 self.update_service_status(service_name, ServiceStatus::Starting);
             }
-        }
-    }
-}
-
-#[cfg(feature = "tui")]
-impl Clone for LogPane {
-    fn clone(&self) -> Self {
-        match self {
-            LogPane::Orchestrator => LogPane::Orchestrator,
-            LogPane::MqttServer => LogPane::MqttServer,
-            LogPane::MqttObserver => LogPane::MqttObserver,
-            LogPane::Client(id) => LogPane::Client(id.clone()),
         }
     }
 }
@@ -2848,7 +2836,11 @@ async fn run_scenario_with_tui(
                 Event::Key(key) => {
                     if key.kind == KeyEventKind::Press {
                         match key.code {
-                            KeyCode::Char('q') | KeyCode::Char('c')
+                            KeyCode::Char('q') => {
+                                logging_app.should_quit.store(true, Ordering::Relaxed);
+                                break;
+                            }
+                            KeyCode::Char('c')
                                 if key
                                     .modifiers
                                     .contains(crossterm::event::KeyModifiers::CONTROL) =>
@@ -3005,11 +2997,16 @@ async fn run_scenario_with_tui(
                                                     .clone();
                                                 let client_id = mcp_app.client_id.clone();
 
-                                                // Log the message being sent
+                                                // Log the message being sent with prominent visual feedback
+                                                logging_app.add_log(
+                                                    &LogSource::Client(client_id.clone()),
+                                                    "====================================="
+                                                        .to_string(),
+                                                );
                                                 logging_app.add_log(
                                                     &LogSource::Client(client_id.clone()),
                                                     format!(
-                                                        "🚀 Sending MCP message: {}",
+                                                        "🚀 SENDING MCP MESSAGE: {}",
                                                         message.name
                                                     ),
                                                 );
@@ -3020,6 +3017,11 @@ async fn run_scenario_with_tui(
                                                 logging_app.add_log(
                                                     &LogSource::Client(client_id.clone()),
                                                     format!("   Params: {}", message.params),
+                                                );
+                                                logging_app.add_log(
+                                                    &LogSource::Client(client_id.clone()),
+                                                    "====================================="
+                                                        .to_string(),
                                                 );
 
                                                 // Try to actually send the MCP message
@@ -3046,12 +3048,24 @@ async fn run_scenario_with_tui(
                                                         );
                                                     }
                                                 }
+
+                                                // Switch to the client's log pane to show the message
+                                                let client_pane =
+                                                    LogPane::Client(client_id.clone());
+                                                if let Some(index) = logging_app
+                                                    .panes
+                                                    .iter()
+                                                    .position(|p| p == &client_pane)
+                                                {
+                                                    logging_app.selected_pane_index = index;
+                                                    logging_app.selected_pane = client_pane;
+                                                }
                                             }
                                         }
 
-                                        // Return to log viewing mode
+                                        // Return to log viewing mode with client pane selected
                                         logging_app.ui_mode = UiMode::LogViewing;
-                                        logging_app.focused_pane = FocusedPane::LogSelector;
+                                        logging_app.focused_pane = FocusedPane::LogContent; // Focus on content to show the logs
                                         logging_app.mcp_app = None;
                                     }
                                 }
