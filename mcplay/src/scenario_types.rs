@@ -135,7 +135,7 @@ pub struct ClientConfig {
 
     /// Extended client configuration (xtask extension)
     #[serde(default)]
-    pub config: Option<ExtendedClientConfig>,
+    pub config: Option<serde_json::Value>,
 }
 
 /// Extended client configuration for xtask scenarios
@@ -508,7 +508,7 @@ impl ClientConfig {
         id: String,
         client_type: String,
         name: Option<String>,
-        config: Option<ExtendedClientConfig>,
+        config: Option<serde_json::Value>,
     ) -> Self {
         Self {
             id,

@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpStream;
 use tokio::process::{Child, Command as TokioCommand};
-use tokio::sync::{Mutex, broadcast};
+use tokio::sync::{broadcast, Mutex};
 use tokio::time::sleep;
 
 // Add chrono for timestamps
@@ -256,16 +256,16 @@ impl SystemInfo {
 use crossterm::{
     event::{self, Event, KeyCode, KeyEventKind},
     execute,
-    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
+    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
 #[cfg(feature = "tui")]
 use ratatui::{
-    Frame, Terminal,
     backend::CrosstermBackend,
     layout::{Alignment, Constraint, Direction, Layout},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap},
+    Frame, Terminal,
 };
 #[cfg(feature = "tui")]
 use std::io;
@@ -273,7 +273,8 @@ use std::io;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 // Import our scenario types
-use iotcraft_desktop_client::scenario_types::*;
+mod scenario_types;
+use scenario_types::*;
 
 #[derive(Debug, Clone)]
 pub enum LogSource {
@@ -334,6 +335,42 @@ struct App {
     show_details: bool,
     selected_scenario: Option<ScenarioInfo>,
     message: Option<String>,
+}
+
+#[cfg(feature = "tui")]
+#[derive(Debug, Clone, PartialEq)]
+enum ServiceStatus {
+    Waiting,   // ⏳ Gray - Waiting for dependencies
+    Starting,  // 🟡 Yellow - Service is starting (compilation, etc.)
+    Ready,     // 🟢 Green - Service is ready and healthy
+    Failed,    // 🔴 Red - Service failed (exit code != 0)
+    Stopped,   // 🔵 Blue - Service stopped normally (exit code 0)
+    Unhealthy, // 🟠 Orange - Service running but health check failing
+}
+
+#[cfg(feature = "tui")]
+impl ServiceStatus {
+    fn get_emoji(&self) -> &'static str {
+        match self {
+            ServiceStatus::Waiting => "⏳",
+            ServiceStatus::Starting => "🟡",
+            ServiceStatus::Ready => "🟢",
+            ServiceStatus::Failed => "🔴",
+            ServiceStatus::Stopped => "🔵",
+            ServiceStatus::Unhealthy => "🟠",
+        }
+    }
+
+    fn get_color(&self) -> Color {
+        match self {
+            ServiceStatus::Waiting => Color::Gray,
+            ServiceStatus::Starting => Color::Yellow,
+            ServiceStatus::Ready => Color::Green,
+            ServiceStatus::Failed => Color::Red,
+            ServiceStatus::Stopped => Color::Blue,
+            ServiceStatus::Unhealthy => Color::LightRed,
+        }
+    }
 }
 
 #[cfg(feature = "tui")]
@@ -472,6 +509,18 @@ impl McpMessage {
 }
 
 #[cfg(feature = "tui")]
+#[derive(Debug, Clone)]
+struct HealthProbe {
+    client_id: String,
+    last_check: std::time::Instant,
+    interval: Duration,
+    timeout: Duration,
+    failure_count: u32,
+    failure_threshold: u32,
+    is_healthy: bool,
+}
+
+#[cfg(feature = "tui")]
 struct LoggingApp {
     logs: HashMap<String, Vec<String>>, // key: pane_name, value: log lines
     selected_pane: LogPane,
@@ -487,6 +536,10 @@ struct LoggingApp {
     scenario: Scenario,                  // Store scenario for client connections
     system_info: SystemInfo,             // Current system information
     last_system_update: std::time::Instant, // When system info was last updated
+    service_statuses: HashMap<String, ServiceStatus>, // Track service status
+    health_probes: HashMap<String, HealthProbe>, // Active health probes
+    scenario_completed: bool,            // Track if scenario is completed
+    auto_exit_after_completion: bool,    // Auto exit when scenario completes
 }
 
 #[cfg(feature = "tui")]
@@ -599,6 +652,63 @@ impl LoggingApp {
             println!("[DEBUG] Pane {}: {:?}", idx, pane);
         }
 
+        // Initialize service statuses
+        let mut service_statuses = HashMap::new();
+        service_statuses.insert("Orchestrator".to_string(), ServiceStatus::Starting);
+
+        if scenario.infrastructure.mqtt_server.required {
+            service_statuses.insert("MQTT Server".to_string(), ServiceStatus::Waiting);
+        }
+
+        if scenario
+            .infrastructure
+            .mqtt_observer
+            .as_ref()
+            .map(|obs| obs.required)
+            .unwrap_or(false)
+        {
+            service_statuses.insert("MQTT Observer".to_string(), ServiceStatus::Waiting);
+        }
+
+        for client in &scenario.clients {
+            service_statuses.insert(client.id.clone(), ServiceStatus::Waiting);
+        }
+
+        // Initialize health probes for clients with liveness probes
+        let mut health_probes = HashMap::new();
+        for client in &scenario.clients {
+            if let Some(config) = &client.config {
+                if let Some(liveness_config) = &config.get("liveness_probe") {
+                    if let Some(interval) = liveness_config
+                        .get("interval_seconds")
+                        .and_then(|v| v.as_u64())
+                    {
+                        let timeout = liveness_config
+                            .get("timeout_seconds")
+                            .and_then(|v| v.as_u64())
+                            .unwrap_or(3);
+                        let failure_threshold = liveness_config
+                            .get("failure_threshold")
+                            .and_then(|v| v.as_u64())
+                            .unwrap_or(2) as u32;
+
+                        health_probes.insert(
+                            client.id.clone(),
+                            HealthProbe {
+                                client_id: client.id.clone(),
+                                last_check: std::time::Instant::now(),
+                                interval: Duration::from_secs(interval),
+                                timeout: Duration::from_secs(timeout),
+                                failure_count: 0,
+                                failure_threshold,
+                                is_healthy: true,
+                            },
+                        );
+                    }
+                }
+            }
+        }
+
         Self {
             logs,
             selected_pane: LogPane::Orchestrator,
@@ -614,6 +724,10 @@ impl LoggingApp {
             scenario: scenario.clone(),     // Store scenario for client connections
             system_info: SystemInfo::new(), // Initialize with empty system info
             last_system_update: std::time::Instant::now(), // Track when system info was last updated
+            service_statuses,
+            health_probes,
+            scenario_completed: false,
+            auto_exit_after_completion: true, // Enable auto-exit by default
         }
     }
 
@@ -624,6 +738,9 @@ impl LoggingApp {
             LogSource::MqttObserver => "MQTT Observer".to_string(),
             LogSource::Client(id) => id.clone(),
         };
+
+        // Parse and update service status based on message content
+        self.parse_and_update_status(&pane_name, &message);
 
         // Write to log file
         if let Some(log_file_path) = self.log_files.get(&pane_name) {
@@ -731,6 +848,91 @@ impl LoggingApp {
                     self.auto_scroll = true;
                 }
             }
+        }
+    }
+
+    fn update_service_status(&mut self, service_name: &str, status: ServiceStatus) {
+        if let Some(current_status) = self.service_statuses.get_mut(service_name) {
+            *current_status = status;
+        } else {
+            self.service_statuses
+                .insert(service_name.to_string(), status);
+        }
+    }
+
+    fn get_service_status(&self, service_name: &str) -> ServiceStatus {
+        self.service_statuses
+            .get(service_name)
+            .cloned()
+            .unwrap_or(ServiceStatus::Waiting)
+    }
+
+    fn check_and_update_health_probes(&mut self) -> Vec<String> {
+        let mut failed_clients = Vec::new();
+        let current_time = std::time::Instant::now();
+
+        let client_ids: Vec<String> = self.health_probes.keys().cloned().collect();
+
+        for client_id in client_ids {
+            let should_check = self
+                .health_probes
+                .get(&client_id)
+                .map(|probe| current_time.duration_since(probe.last_check) >= probe.interval)
+                .unwrap_or(false);
+
+            if should_check {
+                // Perform health check before modifying probe
+                let health_check_result = self.perform_health_check(&client_id);
+
+                if let Some(probe) = self.health_probes.get_mut(&client_id) {
+                    probe.last_check = current_time;
+
+                    if health_check_result {
+                        probe.failure_count = 0;
+                        probe.is_healthy = true;
+                        self.update_service_status(&client_id, ServiceStatus::Ready);
+                    } else {
+                        probe.failure_count += 1;
+                        if probe.failure_count >= probe.failure_threshold {
+                            probe.is_healthy = false;
+                            self.update_service_status(&client_id, ServiceStatus::Unhealthy);
+                            failed_clients.push(client_id.clone());
+                        }
+                    }
+                }
+            }
+        }
+
+        failed_clients
+    }
+
+    fn perform_health_check(&self, client_id: &str) -> bool {
+        // For now, we'll do a basic check to see if the client exists
+        // In a real implementation, this would send an MCP ping request
+        // and wait for a response within the timeout period
+        if let Some(_client) = self.scenario.clients.iter().find(|c| c.id == client_id) {
+            // Basic assumption: if we have the client in our scenario and
+            // it's been marked as ready, it's probably healthy
+            // TODO: Implement actual MCP ping request with timeout
+            return matches!(self.get_service_status(client_id), ServiceStatus::Ready);
+        }
+        false
+    }
+
+    fn parse_and_update_status(&mut self, service_name: &str, message: &str) {
+        // Parse status indicators from emoji/text markers in log messages
+        if message.contains("🟢") || message.contains("ready") {
+            self.update_service_status(service_name, ServiceStatus::Ready);
+        } else if message.contains("🟡") || message.contains("starting") {
+            self.update_service_status(service_name, ServiceStatus::Starting);
+        } else if message.contains("🔴") || message.contains("failed") {
+            self.update_service_status(service_name, ServiceStatus::Failed);
+        } else if message.contains("🔵") || message.contains("stopped normally") {
+            self.update_service_status(service_name, ServiceStatus::Stopped);
+        } else if message.contains("🟠") || message.contains("unhealthy") {
+            self.update_service_status(service_name, ServiceStatus::Unhealthy);
+        } else if message.contains("⏳") || message.contains("waiting") {
+            self.update_service_status(service_name, ServiceStatus::Waiting);
         }
     }
 }
@@ -1198,7 +1400,8 @@ async fn start_clients(
 
         // Build client command arguments
         let mut cmd = TokioCommand::new("cargo");
-        cmd.arg("run")
+        cmd.current_dir("../desktop-client")
+            .arg("run")
             .arg("--bin")
             .arg("iotcraft-dekstop-client")
             .args(&["--", "--mcp"])
@@ -2288,7 +2491,7 @@ async fn run_scenario_with_tui(scenario: Scenario) -> Result<(), Box<dyn std::er
         tokio::sync::mpsc::unbounded_channel::<SystemInfo>();
 
     // Spawn system info collection task (runs every 3 seconds in background)
-    let system_info_task = tokio::spawn({
+    let _system_info_task = tokio::spawn({
         let quit_flag = Arc::clone(&logging_app.should_quit);
         async move {
             let mut interval = tokio::time::interval(Duration::from_secs(3));
@@ -2333,6 +2536,39 @@ async fn run_scenario_with_tui(scenario: Scenario) -> Result<(), Box<dyn std::er
         while let Ok(new_system_info) = system_info_receiver.try_recv() {
             logging_app.system_info = new_system_info;
             logging_app.last_system_update = std::time::Instant::now();
+        }
+
+        // Check health probes and update service statuses
+        let failed_clients = logging_app.check_and_update_health_probes();
+
+        // If any clients failed health checks, terminate the scenario
+        if !failed_clients.is_empty() {
+            for client_id in &failed_clients {
+                logging_app.add_log(
+                    &LogSource::Orchestrator,
+                    format!(
+                        "❌ Client {} failed liveness probe - terminating scenario",
+                        client_id
+                    ),
+                );
+            }
+            logging_app.should_quit.store(true, Ordering::Relaxed);
+            break;
+        }
+
+        // Check if scenario is completed and auto-exit is enabled
+        if scenario_task.is_finished() && !logging_app.scenario_completed {
+            logging_app.scenario_completed = true;
+            logging_app.add_log(
+                &LogSource::Orchestrator,
+                "🎉 Scenario completed successfully!".to_string(),
+            );
+
+            if logging_app.auto_exit_after_completion {
+                // Wait a moment for the final log to be displayed
+                tokio::time::sleep(Duration::from_millis(2000)).await;
+                break;
+            }
         }
 
         // Handle input events
@@ -2576,10 +2812,14 @@ async fn run_scenario_with_tui(scenario: Scenario) -> Result<(), Box<dyn std::er
     // Show log files summary
     show_log_summary(&logging_app);
 
-    // Simple completion message and exit
-    println!("\n📍 Scenario completed.");
+    // Simple completion message
+    if logging_app.scenario_completed {
+        println!("\n🎉 Scenario completed successfully!");
+    } else {
+        println!("\n📍 Scenario execution ended.");
+    }
 
-    // Get scenario result and exit immediately
+    // Get scenario result
     let _result = match scenario_task.await? {
         Ok(_) => {
             let _logs = log_task.await?;
@@ -2591,8 +2831,8 @@ async fn run_scenario_with_tui(scenario: Scenario) -> Result<(), Box<dyn std::er
         }
     };
 
-    // Force exit to prevent hanging
-    std::process::exit(0);
+    // Clean exit - no forced exit
+    Ok(())
 }
 
 #[cfg(feature = "tui")]
@@ -2622,12 +2862,20 @@ fn draw_log_viewing_ui(f: &mut Frame, app: &LoggingApp) {
         .iter()
         .enumerate()
         .map(|(_i, pane)| {
-            let name = match pane {
-                LogPane::Orchestrator => "🎭 Orchestrator".to_string(),
-                LogPane::MqttServer => "📡 MQTT Server".to_string(),
-                LogPane::MqttObserver => "👁️ MQTT Observer".to_string(),
-                LogPane::Client(id) => format!("👤 Client: {}", id),
+            let (service_name, base_name) = match pane {
+                LogPane::Orchestrator => {
+                    ("Orchestrator".to_string(), "🎭 Orchestrator".to_string())
+                }
+                LogPane::MqttServer => ("MQTT Server".to_string(), "📡 MQTT Server".to_string()),
+                LogPane::MqttObserver => {
+                    ("MQTT Observer".to_string(), "👁️ MQTT Observer".to_string())
+                }
+                LogPane::Client(id) => (id.clone(), format!("👤 Client: {}", id)),
             };
+
+            let status = app.get_service_status(&service_name);
+            let status_indicator = status.get_emoji();
+            let name = format!("{} {}", status_indicator, base_name);
 
             let is_selected = match (&app.selected_pane, pane) {
                 (LogPane::Orchestrator, LogPane::Orchestrator) => true,
@@ -2640,7 +2888,7 @@ fn draw_log_viewing_ui(f: &mut Frame, app: &LoggingApp) {
             let style = if is_selected {
                 Style::default().bg(Color::Yellow).fg(Color::Black)
             } else {
-                Style::default()
+                Style::default().fg(status.get_color())
             };
 
             ListItem::new(name).style(style)
@@ -2972,6 +3220,9 @@ async fn start_infrastructure_with_logging(
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     log_collector.log_str(LogSource::Orchestrator, "🔧 Starting infrastructure...");
 
+    // Update orchestrator status to ready
+    log_collector.log_str(LogSource::Orchestrator, "🟢 Orchestrator ready");
+
     // Check if MQTT port is already in use before starting
     if state.scenario.infrastructure.mqtt_server.required {
         let port = state.scenario.infrastructure.mqtt_server.port;
@@ -2998,6 +3249,9 @@ async fn start_infrastructure_with_logging(
             LogSource::Orchestrator,
             &format!("  Starting MQTT server on port {}", port),
         );
+
+        // Update MQTT server status to starting
+        log_collector.log_str(LogSource::MqttServer, "🟡 MQTT Server starting...");
 
         // Start MQTT server from ../mqtt-server directory
         let mut mqtt_process = TokioCommand::new("cargo")
@@ -3072,12 +3326,18 @@ async fn start_infrastructure_with_logging(
             LogSource::Orchestrator,
             &format!("  ✅ MQTT server ready on port {}", port),
         );
+
+        // Update MQTT server status to ready
+        log_collector.log_str(LogSource::MqttServer, "🟢 MQTT Server ready");
     }
 
     // Start MQTT observer if required
     if let Some(ref mqtt_observer) = state.scenario.infrastructure.mqtt_observer {
         if mqtt_observer.required {
             log_collector.log_str(LogSource::Orchestrator, "  Starting MQTT observer");
+
+            // Update MQTT observer status to starting
+            log_collector.log_str(LogSource::MqttObserver, "🟡 MQTT Observer starting...");
 
             let mqtt_port = state.scenario.infrastructure.mqtt_server.port;
             let mut observer_process = TokioCommand::new("cargo")
@@ -3141,6 +3401,9 @@ async fn start_infrastructure_with_logging(
                 .insert("mqtt_observer".to_string(), observer_process);
 
             log_collector.log_str(LogSource::Orchestrator, "  ✅ MQTT observer started");
+
+            // Update MQTT observer status to ready
+            log_collector.log_str(LogSource::MqttObserver, "🟢 MQTT Observer ready");
         }
     }
 
@@ -3172,9 +3435,16 @@ async fn start_clients_with_logging(
             &format!("  Starting client: {}", client.id),
         );
 
+        // Update client status to starting
+        log_collector.log_str(
+            LogSource::Client(client.id.clone()),
+            "🟡 Client starting...",
+        );
+
         // Build client command arguments
         let mut cmd = TokioCommand::new("cargo");
-        cmd.arg("run")
+        cmd.current_dir("../desktop-client")
+            .arg("run")
             .arg("--bin")
             .arg("iotcraft-dekstop-client")
             .args(&["--", "--mcp"])
@@ -3306,6 +3576,12 @@ async fn start_clients_with_logging(
         log_collector.log_str(
             LogSource::Orchestrator,
             &format!("  ✅ Client {} ready", client.id),
+        );
+
+        // Update client status to ready
+        log_collector.log_str(
+            LogSource::Client(client.id.clone()),
+            "🟢 Client ready and healthy",
         );
     }
 

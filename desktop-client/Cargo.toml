@@ -42,8 +42,6 @@ flate2 = "1.0"
 # Performance optimization dependencies
 bytemuck = { version = "1.16", features = ["derive"] } # GPU data alignment
 crossterm = "0.29.0"
-# TUI dependencies (optional, used by mcplay binary)
-ratatui = { version = "0.29.0", optional = true }
 
 # Web-specific dependencies
 [target.'cfg(target_arch = "wasm32")'.dependencies]
@@ -124,13 +122,11 @@ chrono = "0.4"
 
 # Workspace for xtask
 [features]
-default = ["console", "tui"]
+default = ["console"]
 # Console implementations (choose one)
 console-bevy = ["dep:bevy_console"]  # Legacy desktop-only console
 # Convenience feature aliases
 console = []                          # Default to Simple console (no extra deps)
-# TUI feature for mcplay
-tui = ["dep:ratatui"]
 # Test-specific features
 integration-tests = []                # Feature to enable integration tests
 
@@ -156,10 +152,6 @@ name = "mqtt_test"
 path = "src/bin/mqtt_test.rs"
 required-features = []
 
-[[bin]]
-name = "mcplay"
-path = "src/bin/mcplay.rs"
-required-features = []
 
 # Custom commands (use via .cargo/config.toml for local aliases)
 # For now, use: cargo run --package xtask -- <command>

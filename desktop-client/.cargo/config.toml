@@ -3,11 +3,14 @@ xtask = "run --package xtask --"
 
 # Platform-specific linker configuration
 # Use system linker on macOS since lld doesn't support macOS platform
+# Note: Don't override linker for crypto crates like 'ring' as it causes constant recompilation
 [target.aarch64-apple-darwin]
-rustflags = ["-C", "linker=/usr/bin/ld"]
+# Let Cargo use the default linker for better compatibility with native code crates
+# rustflags = ["-C", "linker=/usr/bin/ld"]
 
 [target.x86_64-apple-darwin] 
-rustflags = ["-C", "linker=/usr/bin/ld"]
+# Let Cargo use the default linker for better compatibility with native code crates
+# rustflags = ["-C", "linker=/usr/bin/ld"]
 
 # Linux: Use lld for faster builds (now installed in CI)
 [target.x86_64-unknown-linux-gnu]
