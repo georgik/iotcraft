@@ -175,10 +175,19 @@ pub struct PendingToolExecution {
     pub response_sender: tokio::sync::oneshot::Sender<serde_json::Value>,
 }
 
+/// MCP Command execution request (separate from script commands)
+#[derive(Debug)]
+pub struct McpCommandExecution {
+    pub request_id: String,
+    pub tool_name: String,
+    pub arguments: serde_json::Value,
+}
+
 /// Resource to track pending tool executions
 #[derive(Resource, Default)]
 pub struct PendingToolExecutions {
     pub executions: std::collections::HashMap<String, PendingToolExecution>,
+    pub mcp_commands: Vec<McpCommandExecution>,
 }
 
 /// Event to signal that a command has been executed and results are available

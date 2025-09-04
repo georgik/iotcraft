@@ -1546,9 +1546,8 @@ async fn start_clients(
         let mut cmd = TokioCommand::new("cargo");
         cmd.current_dir("../desktop-client")
             .arg("run")
-            .arg("--bin")
-            .arg("iotcraft-dekstop-client")
-            .args(&["--", "--mcp"])
+            .arg("--")
+            .arg("--mcp")
             .env("MCP_PORT", client.mcp_port.to_string())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped());
@@ -1616,10 +1615,7 @@ async fn start_clients(
             client.mcp_port,
             600, // Increased from 300 (5 min) to 600 (10 min) for Rust build time
             verbose,
-            Some(&format!(
-                "cargo run --bin iotcraft-dekstop-client ({})",
-                client.id
-            )),
+            Some(&format!("cargo run ({})", client.id)),
         )
         .await;
         if !mcp_ready {
@@ -1883,20 +1879,52 @@ async fn execute_mcp_call(
 ) -> Result<serde_json::Value, Box<dyn std::error::Error + Send + Sync>> {
     // Note: verbose logging is now handled by the logging system
 
-    let stream = state
-        .client_connections
-        .get_mut(client_id)
-        .ok_or_else(|| format!("No connection to client {}", client_id))?;
+    // Handle different MCP methods
+    let method = if tool == "initialize" || tool == "tools/list" {
+        tool.to_string()
+    } else {
+        "tools/call".to_string()
+    };
+
+    let params = if method == "tools/call" {
+        serde_json::json!({
+            "name": tool,
+            "arguments": arguments
+        })
+    } else {
+        arguments.clone()
+    };
+
+    // Create a fresh connection for each request to avoid connection state issues
+    // This ensures the desktop-client MCP server can properly handle queued commands
+    let client = state
+        .scenario
+        .clients
+        .iter()
+        .find(|c| c.id == client_id)
+        .ok_or_else(|| format!("Client {} not found in scenario", client_id))?;
+
+    let mut stream = TcpStream::connect(format!("localhost:{}", client.mcp_port))
+        .await
+        .map_err(|e| {
+            format!(
+                "Failed to connect to client {} MCP server: {}",
+                client_id, e
+            )
+        })?;
+
+    // Generate unique request ID
+    let request_id = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64;
 
     // Create MCP request
     let request = McpRequest {
         jsonrpc: "2.0".to_string(),
-        id: 1,
-        method: "tools/call".to_string(),
-        params: serde_json::json!({
-            "name": tool,
-            "arguments": arguments
-        }),
+        id: request_id,
+        method,
+        params,
     };
 
     // Send request
@@ -1905,17 +1933,18 @@ async fn execute_mcp_call(
         .write_all(format!("{}\n", request_json).as_bytes())
         .await?;
 
-    // Read response with timeout
-    let mut reader = BufReader::new(stream);
+    // For queued commands, we need to wait longer as they go through the command execution system
+    let timeout_duration = if is_queued_command(tool) {
+        std::time::Duration::from_secs(30) // Longer timeout for queued commands
+    } else {
+        std::time::Duration::from_secs(10) // Shorter timeout for direct responses
+    };
+
+    // Read response with appropriate timeout
+    let mut reader = BufReader::new(&mut stream);
     let mut response_line = String::new();
 
-    // Add timeout to prevent indefinite blocking
-    match tokio::time::timeout(
-        std::time::Duration::from_secs(15),
-        reader.read_line(&mut response_line),
-    )
-    .await
-    {
+    match tokio::time::timeout(timeout_duration, reader.read_line(&mut response_line)).await {
         Ok(Ok(_)) => {
             // Response received successfully
         }
@@ -1923,9 +1952,11 @@ async fn execute_mcp_call(
             return Err(format!("I/O error reading MCP response: {}", e).into());
         }
         Err(_) => {
-            return Err(
-                "MCP request timeout after 15 seconds - no response from desktop-client".into(),
-            );
+            return Err(format!(
+                "MCP request timeout after {} seconds - no response from desktop-client",
+                timeout_duration.as_secs()
+            )
+            .into());
         }
     }
 
@@ -1938,6 +1969,23 @@ async fn execute_mcp_call(
     Ok(response
         .result
         .unwrap_or(serde_json::json!({"status": "success"})))
+}
+
+/// Check if a command should be queued (needs longer timeout)
+fn is_queued_command(tool: &str) -> bool {
+    matches!(
+        tool,
+        "create_world"
+            | "place_block"
+            | "create_wall"
+            | "get_client_info"
+            | "get_world_status"
+            | "spawn_device"
+            | "move_device"
+            | "save_world"
+            | "load_world"
+            | "set_game_state"
+    )
 }
 
 async fn execute_wait_condition(
