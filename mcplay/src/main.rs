@@ -4486,6 +4486,12 @@ async fn start_clients_with_logging(
             "--mcp".to_string(),
         ];
 
+        // Add player configuration
+        client_cmd_parts.push("--player-id".to_string());
+        client_cmd_parts.push(client.player_id.clone());
+        client_cmd_parts.push("--player-name".to_string());
+        client_cmd_parts.push(client.id.clone()); // Use client ID as display name
+
         // Add optional MQTT arguments if required
         if state.scenario.infrastructure.mqtt_server.required {
             client_cmd_parts.push("--mqtt-server".to_string());
@@ -4516,6 +4522,10 @@ async fn start_clients_with_logging(
             .arg("--bin")
             .arg("iotcraft-dekstop-client")
             .args(&["--", "--mcp"])
+            .arg("--player-id")
+            .arg(&client.player_id)
+            .arg("--player-name")
+            .arg(&client.id) // Use client ID as display name
             .env("MCP_PORT", client.mcp_port.to_string())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped());
