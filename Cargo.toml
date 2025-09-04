@@ -3,6 +3,7 @@ resolver = "2"
 
 members = [
     "desktop-client",
+    "desktop-client/xtask",
     "iotcraft-mcp-protocol", 
     "mqtt-server",
     "mqtt-client",

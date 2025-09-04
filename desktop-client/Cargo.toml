@@ -41,7 +41,6 @@ async-channel = "2.5"
 flate2 = "1.0"
 # Performance optimization dependencies
 bytemuck = { version = "1.16", features = ["derive"] } # GPU data alignment
-crossterm = "0.29.0"
 iotcraft-mcp-protocol = { version = "0.1.0", path = "../iotcraft-mcp-protocol", features = ["serde"] }
 
 # Web-specific dependencies
@@ -91,6 +90,7 @@ whoami = "1.5"
 tokio-util = { version = "0.7", features = ["codec"] }
 rayon = "1.8" # Parallel processing
 tempfile = "3.8" # For testing async file operations
+crossterm = "0.29.0" # Terminal manipulation - desktop only
 
 # Profile definitions moved to workspace root (/Volumes/ssdt5/Users/georgik/projects/iotcraft/Cargo.toml)
 # to avoid 'profiles for the non root package will be ignored' warnings
