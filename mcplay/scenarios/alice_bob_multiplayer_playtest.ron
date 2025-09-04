@@ -1,0 +1,225 @@
+(
+  name: "Alice Bob Multiplayer Playtest",
+  description: "Alice creates and enters a medieval world, publishes it, Bob joins and enters it, then wait indefinitely for manual playtesting",
+  version: "1.0",
+  infrastructure: (
+    mqtt_server: (
+      required: true,
+      port: 1883,
+      config_file: None,
+      options: None,
+    ),
+    mqtt_observer: Some((
+      required: true, 
+      topics: Some(["#"]),
+      client_id: Some("observer_playtest"),
+    )),
+    mcp_server: None,
+    services: None,
+  ),
+  clients: [
+    (
+      id: "alice",
+      player_id: "alice",
+      mcp_port: 3001,
+      client_type: "desktop",
+      name: Some("Alice - World Host"),
+      config: Some({
+        "enable_mcp": true,
+        "readiness_probe": {
+          "type": "tcp_port", 
+          "port": 3001,
+          "initial_delay_seconds": 5,
+          "timeout_seconds": 10
+        },
+        "liveness_probe": {
+          "type": "mcp_ping",
+          "interval_seconds": 30,
+          "timeout_seconds": 10,
+          "failure_threshold": 5
+        }
+      }),
+    ),
+    (
+      id: "bob",
+      player_id: "bob",
+      mcp_port: 3002,
+      client_type: "desktop", 
+      name: Some("Bob - World Joiner"),
+      config: Some({
+        "enable_mcp": true,
+        "readiness_probe": {
+          "type": "tcp_port",
+          "port": 3002, 
+          "initial_delay_seconds": 5,
+          "timeout_seconds": 10
+        },
+        "liveness_probe": {
+          "type": "mcp_ping",
+          "interval_seconds": 30,
+          "timeout_seconds": 10,
+          "failure_threshold": 5
+        }
+      }),
+    )
+  ],
+  steps: [
+    // Alice creates a new world
+    (
+      name: "alice_create_world",
+      description: "Alice creates a new multiplayer world",
+      client: "alice",
+      action: (
+        type: "mcp_call",
+        tool: "create_world",
+        arguments: {
+          "world_name": "alice_multiplayer_world",
+          "description": "A world for Alice and Bob to play together",
+          "template": "medieval"
+        },
+      ),
+      depends_on: [],
+      wait_before: 2000,  // Wait 2s for Alice to be ready
+      wait_after: 3000,   // Wait 3s for world creation to complete
+      timeout: 30000,
+      success_condition: None,
+    ),
+    
+    // Alice loads her created world locally (filesystem-based)
+    (
+      name: "alice_load_world",
+      description: "Alice loads her created world from local filesystem",
+      client: "alice",
+      action: (
+        type: "mcp_call",
+        tool: "load_world_by_name",
+        arguments: {
+          "world_name": "alice_multiplayer_world"
+        },
+      ),
+      depends_on: ["alice_create_world"],
+      wait_before: 1000,
+      wait_after: 5000,   // Wait for Alice to load and enter game
+      timeout: 30000,
+      success_condition: None,
+    ),
+    
+    // Alice publishes the world for multiplayer
+    (
+      name: "alice_publish_world", 
+      description: "Alice publishes her world for others to join",
+      client: "alice",
+      action: (
+        type: "mcp_call",
+        tool: "publish_world",
+        arguments: {
+          "world_name": "alice_multiplayer_world",
+          "max_players": 4,
+          "is_public": true
+        },
+      ),
+      depends_on: ["alice_load_world"],
+      wait_before: 1000,
+      wait_after: 3000,   // Wait for world to be published
+      timeout: 20000,
+      success_condition: None,
+    ),
+    
+    // Bob gets client info to verify he's ready
+    (
+      name: "bob_get_client_info",
+      description: "Bob checks his client status",
+      client: "bob", 
+      action: (
+        type: "mcp_call",
+        tool: "get_client_info",
+        arguments: {},
+      ),
+      depends_on: [],
+      wait_before: 1000,
+      wait_after: 2000,
+      timeout: 10000,
+      success_condition: None,
+    ),
+    
+    // Bob joins Alice's published world via MQTT
+    (
+      name: "bob_join_world",
+      description: "Bob joins Alice's published world via multiplayer",
+      client: "bob",
+      action: (
+        type: "mcp_call",
+        tool: "join_world", 
+        arguments: {
+          "world_id": "alice_multiplayer_world"
+        },
+      ),
+      depends_on: ["alice_publish_world", "bob_get_client_info"],
+      wait_before: 2000,
+      wait_after: 5000,   // Wait for Bob to join and enter game
+      timeout: 30000,
+      success_condition: None,
+    ),
+    
+    // Verify both players are in game
+    (
+      name: "alice_verify_game_state",
+      description: "Verify Alice is in the multiplayer game",
+      client: "alice",
+      action: (
+        type: "mcp_call",
+        tool: "get_game_state",
+        arguments: {},
+      ),
+      depends_on: ["bob_join_world"],
+      wait_before: 1000,
+      wait_after: 1000,
+      timeout: 10000,
+      success_condition: None,
+    ),
+    
+    (
+      name: "bob_verify_game_state",
+      description: "Verify Bob is in the multiplayer game", 
+      client: "bob",
+      action: (
+        type: "mcp_call",
+        tool: "get_game_state",
+        arguments: {},
+      ),
+      depends_on: ["bob_join_world"],
+      wait_before: 1000,
+      wait_after: 2000,
+      timeout: 10000,
+      success_condition: None,
+    ),
+    
+    // Wait indefinitely for manual playtesting
+    (
+      name: "wait_for_playtesting",
+      description: "Wait indefinitely for manual playtesting - press Ctrl+C to stop",
+      client: "alice",
+      action: (
+        type: "wait_condition",
+        condition: "manual_testing_complete",
+        expected_value: Some("never_reached"),
+        timeout: 3600000  // 1 hour timeout as safety
+      ),
+      depends_on: ["alice_verify_game_state", "bob_verify_game_state"],
+      wait_before: 1000,
+      wait_after: 0,
+      timeout: 7200000,  // 2 hours for manual testing
+      success_condition: None,
+    ),
+  ],
+  config: Some((
+    timeout_ms: Some(7200000),  // 2 hours max runtime in milliseconds
+    logging: None,
+    environment: None,
+    settings: Some({
+      "cleanup_on_exit": true,
+      "keep_logs": true,
+      "manual_testing_mode": true
+    }),
+  )),
+)

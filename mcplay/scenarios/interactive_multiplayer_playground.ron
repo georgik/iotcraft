@@ -1,0 +1,312 @@
+// Interactive Multiplayer Playground
+// Sets up Alice and Bob in a shared world, then keeps them running indefinitely for manual testing
+Scenario(
+    name: "interactive_multiplayer_playground",
+    description: "Alice and Bob join a shared world and stay online for interactive testing",
+    version: "1.0",
+
+    infrastructure: InfrastructureConfig(
+        mqtt_server: MqttServerConfig(
+            required: true,
+            port: 1883,
+            config_file: None,
+            options: None,
+        ),
+        mqtt_observer: Some(MqttObserverConfig(
+            required: true,
+            topics: Some(["world/#", "players/#", "multiplayer/#"]),
+            client_id: Some("playground_observer"),
+        )),
+        mcp_server: None,
+        services: None,
+    ),
+
+    clients: [
+        ClientConfig(
+            id: "alice",
+            player_id: "alice",
+            mcp_port: 3001,
+            client_type: "desktop",
+            name: Some("Alice - World Host"),
+            config: None,
+        ),
+        ClientConfig(
+            id: "bob",
+            player_id: "bob", 
+            mcp_port: 3002,
+            client_type: "desktop",
+            name: Some("Bob - World Joiner"),
+            config: None,
+        ),
+    ],
+
+    steps: [
+        // === SETUP PHASE ===
+        Step(
+            name: "alice_initialize",
+            description: "Initialize Alice's MCP connection",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "initialize",
+                arguments: {
+                    "protocolVersion": "2024-11-05",
+                    "capabilities": { "tools": {} },
+                    "clientInfo": {"name": "playground_alice", "version": "1.0"}
+                },
+            ),
+            wait_before: 500,
+            wait_after: 500,
+            timeout: 15000,
+            success_condition: Some(( type: "mcp_response", expected: "success" )),
+            depends_on: [],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        Step(
+            name: "bob_initialize",
+            description: "Initialize Bob's MCP connection",
+            client: "bob",
+            action: (
+                type: "mcp_call",
+                tool: "initialize",
+                arguments: {
+                    "protocolVersion": "2024-11-05",
+                    "capabilities": { "tools": {} },
+                    "clientInfo": {"name": "playground_bob", "version": "1.0"}
+                },
+            ),
+            wait_before: 500,
+            wait_after: 500,
+            timeout: 15000,
+            success_condition: Some(( type: "mcp_response", expected: "success" )),
+            depends_on: [],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+
+        // === WORLD SETUP ===
+        Step(
+            name: "alice_create_world",
+            description: "Alice creates the playground world",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "create_world",
+                arguments: { 
+                    "world_name": "playground_world", 
+                    "description": "Interactive multiplayer playground for testing"
+                },
+            ),
+            wait_before: 500,
+            wait_after: 2000,
+            timeout: 30000,
+            success_condition: Some(( type: "mcp_response", expected: "success" )),
+            depends_on: ["alice_initialize"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        Step(
+            name: "alice_publish_world",
+            description: "Alice publishes the world for multiplayer",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "publish_world",
+                arguments: { 
+                    "world_name": "playground_world", 
+                    "max_players": 4, 
+                    "is_public": true 
+                },
+            ),
+            wait_before: 500,
+            wait_after: 1500,
+            timeout: 20000,
+            success_condition: Some(( type: "mcp_response", expected: "success" )),
+            depends_on: ["alice_create_world"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+
+        // === INITIAL POSITIONING ===  
+        Step(
+            name: "alice_initial_position",
+            description: "Position Alice at spawn area",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "player_move",
+                arguments: { "x": 0.0, "y": 2.0, "z": 0.0 },
+            ),
+            wait_before: 500,
+            wait_after: 1000,
+            timeout: 15000,
+            success_condition: Some(( type: "mcp_response", expected: "success" )),
+            depends_on: ["alice_publish_world"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        Step(
+            name: "bob_initial_position",
+            description: "Position Bob nearby",
+            client: "bob",
+            action: (
+                type: "mcp_call",
+                tool: "player_move",
+                arguments: { "x": 5.0, "y": 2.0, "z": 0.0 },
+            ),
+            wait_before: 500,
+            wait_after: 1000,
+            timeout: 15000,
+            success_condition: Some(( type: "mcp_response", expected: "success" )),
+            depends_on: ["bob_initialize"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+
+        // === STATUS CHECK ===
+        Step(
+            name: "alice_status_check",
+            description: "Check Alice's multiplayer status and position",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "get_multiplayer_status",
+                arguments: {},
+            ),
+            wait_before: 500,
+            wait_after: 500,
+            timeout: 15000,
+            success_condition: Some(( type: "mcp_response", expected: "success" )),
+            depends_on: ["alice_initial_position"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        Step(
+            name: "bob_status_check",
+            description: "Check Bob's multiplayer status and position",
+            client: "bob",
+            action: (
+                type: "mcp_call",
+                tool: "get_multiplayer_status",
+                arguments: {},
+            ),
+            wait_before: 500,
+            wait_after: 500,
+            timeout: 15000,
+            success_condition: Some(( type: "mcp_response", expected: "success" )),
+            depends_on: ["bob_initial_position"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+
+        // === PLAYGROUND SETUP COMPLETE ===
+        Step(
+            name: "playground_ready",
+            description: "🎮 PLAYGROUND READY! Alice (port 3001) and Bob (port 3002) are online and ready for manual testing",
+            client: "orchestrator",
+            action: (
+                type: "wait_condition",
+                condition: "indefinite",
+                timeout: 3600000, // 1 hour timeout (can be extended)
+            ),
+            wait_before: 1000,
+            wait_after: 0,
+            timeout: 3600000, // 1 hour
+            success_condition: None, // Will run indefinitely until manual stop
+            depends_on: ["alice_status_check", "bob_status_check"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+    ],
+
+    config: Some(ScenarioConfig(
+        timeout_ms: Some(7200000), // 2 hours total timeout
+        logging: Some(LoggingConfig(
+            level: Some("info"),
+            log_mqtt: Some(true),
+            log_client_actions: Some(true),
+            filters: Some([
+                "mcp/*",
+                "multiplayer/*",
+                "get_multiplayer_status",
+                "player_move",
+                "player_positions", 
+                "world/*",
+                "playground/*",
+            ]),
+        )),
+        environment: Some({
+            "RUST_LOG": "info,iotcraft_desktop_client=info",
+            "SCENARIO_NAME": "interactive_multiplayer_playground",
+            "ENABLE_MCP": "true",
+            "ENABLE_WORLD_SYNC": "true",
+        }),
+        settings: Some({
+            "auto_cleanup": false, // Don't auto-cleanup to keep clients running
+            "preserve_logs": true,
+            "fail_fast": false,
+            "keep_clients_alive": true,
+        }),
+    )),
+)
+
+/*
+=== MANUAL TESTING INSTRUCTIONS ===
+
+Once the scenario starts and shows "🎮 PLAYGROUND READY!", you can use these MCP commands:
+
+🔌 CONNECTION ENDPOINTS:
+- Alice: localhost:3001 (MCP)
+- Bob: localhost:3002 (MCP)
+
+📋 USEFUL MCP COMMANDS FOR TESTING:
+
+1. CHECK POSITIONS:
+   curl -X POST http://localhost:3001/mcp \
+     -H "Content-Type: application/json" \
+     -d '{"method": "tools/call", "params": {"name": "get_multiplayer_status", "arguments": {}}}'
+
+2. MOVE PLAYERS:
+   # Move Alice forward
+   curl -X POST http://localhost:3001/mcp \
+     -H "Content-Type: application/json" \
+     -d '{"method": "tools/call", "params": {"name": "player_move", "arguments": {"x": 2.0, "y": 2.0, "z": 5.0}}}'
+   
+   # Move Bob backward  
+   curl -X POST http://localhost:3002/mcp \
+     -H "Content-Type: application/json" \
+     -d '{"method": "tools/call", "params": {"name": "player_move", "arguments": {"x": 3.0, "y": 2.0, "z": -3.0}}}'
+
+3. PLACE BLOCKS:
+   curl -X POST http://localhost:3001/mcp \
+     -H "Content-Type: application/json" \
+     -d '{"method": "tools/call", "params": {"name": "place_block", "arguments": {"block_type": "dirt", "x": 10, "y": 1, "z": 10}}}'
+
+4. GET WORLD STATUS:
+   curl -X POST http://localhost:3001/mcp \
+     -H "Content-Type: application/json" \
+     -d '{"method": "tools/call", "params": {"name": "get_world_status", "arguments": {}}}'
+
+5. LIST AVAILABLE TOOLS:
+   curl -X POST http://localhost:3001/mcp \
+     -H "Content-Type: application/json" \
+     -d '{"method": "tools/list", "params": {}}'
+
+🎯 TEST SCENARIOS TO TRY:
+- Move both players and verify positions update via get_multiplayer_status
+- Place blocks with one client and check world_status with the other
+- Test different movement patterns (forward/backward/side-to-side)
+- Verify that positions are tracked correctly in multiplayer mode
+
+⏹️  TO STOP: Press Ctrl+C in the terminal running mcplay
+*/

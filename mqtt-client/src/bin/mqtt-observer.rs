@@ -1,22 +1,22 @@
 //! MQTT Observer - Subscribe to all MQTT topics and output messages
-//! 
+//!
 //! This binary is designed to replace mosquitto_sub in the mcplay scenario runner.
 //! It subscribes to all topics (#) and outputs messages in a format that mcplay can consume.
 
-use rumqttc::{AsyncClient, MqttOptions, QoS, Event, Packet};
+use rumqttc::{AsyncClient, Event, MqttOptions, Packet, QoS};
 use std::time::Duration;
 use std::{env, process};
 
 #[tokio::main]
 async fn main() {
     let args: Vec<String> = env::args().collect();
-    
+
     // Parse command line arguments similar to mosquitto_sub
     let mut host = "localhost".to_string();
     let mut port = 1883u16;
     let mut topic = "#".to_string(); // Default to all topics
     let mut client_id = "mqtt-observer".to_string();
-    
+
     let mut i = 1;
     while i < args.len() {
         match args[i].as_str() {
@@ -76,23 +76,26 @@ async fn main() {
             }
         }
     }
-    
+
     // Configure MQTT options
     let mut mqttoptions = MqttOptions::new(&client_id, &host, port);
     mqttoptions.set_keep_alive(Duration::from_secs(5));
-    
+
     // Create an async client and event loop
     let (client, mut eventloop) = AsyncClient::new(mqttoptions, 10);
-    
+
     // Subscribe to the specified topic pattern
     if let Err(e) = client.subscribe(&topic, QoS::AtMostOnce).await {
         eprintln!("Failed to subscribe to topic '{}': {}", topic, e);
         process::exit(1);
     }
-    
+
     // Output subscription confirmation to stderr so it doesn't interfere with message output
-    eprintln!("mqtt-observer: Connected to {}:{}, subscribed to '{}'", host, port, topic);
-    
+    eprintln!(
+        "mqtt-observer: Connected to {}:{}, subscribed to '{}'",
+        host, port, topic
+    );
+
     // Process incoming messages using async event loop
     loop {
         match eventloop.poll().await {
@@ -101,7 +104,7 @@ async fn main() {
                 // Format: topic payload
                 let payload = String::from_utf8_lossy(&publish.payload);
                 println!("{} {}", publish.topic, payload);
-                
+
                 // Flush stdout to ensure immediate output
                 use std::io::{self, Write};
                 let _ = io::stdout().flush();

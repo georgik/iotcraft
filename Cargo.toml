@@ -5,6 +5,7 @@ members = [
     "desktop-client",
     "iotcraft-mcp-protocol", 
     "mqtt-server",
+    "mqtt-client",
     "mcplay"
 ]
 

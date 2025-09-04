@@ -100,7 +100,7 @@ use shared_materials::SharedMaterialsPlugin;
 #[cfg(not(target_arch = "wasm32"))]
 use ui::{CrosshairPlugin, ErrorIndicatorPlugin, GameState, InventoryUiPlugin, MainMenuPlugin};
 #[cfg(not(target_arch = "wasm32"))]
-use world::{CreateWorldEvent, WorldPlugin};
+use world::{CreateWorldEvent, LoadWorldEvent, WorldPlugin};
 
 // Helper function to extract client number from player ID for window positioning
 #[cfg(not(target_arch = "wasm32"))]
@@ -173,7 +173,6 @@ fn write_to_console(message: String) {
 fn execute_pending_commands(
     mut pending_commands: ResMut<crate::script::script_types::PendingCommands>,
     mut command_executed_events: EventWriter<CommandExecutedEvent>,
-    #[cfg(feature = "console")] mut blink_state: ResMut<BlinkState>,
     temperature: Res<TemperatureResource>,
     mqtt_config: Res<MqttConfig>,
     mut voxel_world: ResMut<VoxelWorld>,
@@ -186,6 +185,7 @@ fn execute_pending_commands(
     mut inventory: ResMut<PlayerInventory>,
     mut camera_query: Query<(&mut Transform, &mut CameraController), With<Camera>>,
     mut create_world_events: EventWriter<CreateWorldEvent>,
+    mut load_world_events: EventWriter<LoadWorldEvent>,
     mut next_game_state: Option<ResMut<NextState<GameState>>>,
 ) {
     // Add comprehensive debug logging
@@ -345,18 +345,14 @@ fn execute_pending_commands(
                     let action = parts[1];
                     match action {
                         "start" => {
-                            #[cfg(feature = "console")]
-                            {
-                                blink_state.blinking = true;
-                            }
-                            info!("Blink started via script");
+                            info!(
+                                "Blink started via script (state management disabled in MCP mode)"
+                            );
                         }
                         "stop" => {
-                            #[cfg(feature = "console")]
-                            {
-                                blink_state.blinking = false;
-                            }
-                            info!("Blink stopped via script");
+                            info!(
+                                "Blink stopped via script (state management disabled in MCP mode)"
+                            );
                         }
                         _ => {
                             info!("Usage: blink [start|stop]");
@@ -1018,6 +1014,50 @@ fn execute_pending_commands(
                     }
                 } else {
                     let error_msg = "Usage: create_world <world_name> <description>".to_string();
+                    #[cfg(feature = "console")]
+                    write_to_console(error_msg.clone());
+
+                    if let Some(req_id) = request_id {
+                        command_executed_events.write(CommandExecutedEvent {
+                            request_id: req_id,
+                            result: error_msg,
+                        });
+                    }
+                }
+            }
+            "load_world" => {
+                if parts.len() >= 2 {
+                    let world_name = parts[1].to_string();
+
+                    info!("Executing load_world command: world_name='{}'", world_name);
+
+                    // Send LoadWorldEvent to trigger world loading
+                    load_world_events.write(LoadWorldEvent {
+                        world_name: world_name.clone(),
+                    });
+
+                    // Set game state to InGame to transition UI from main menu
+                    if let Some(next_state) = next_game_state.as_mut() {
+                        next_state.set(crate::ui::main_menu::GameState::InGame);
+                        info!("Set game state to InGame for world loading transition");
+                    } else {
+                        warn!("NextState<GameState> resource not available for state transition");
+                    }
+
+                    let result_msg =
+                        format!("Loaded world: {} and transitioned to InGame", world_name);
+                    #[cfg(feature = "console")]
+                    write_to_console(result_msg.clone());
+
+                    // Emit command executed event if this was from MCP
+                    if let Some(req_id) = request_id {
+                        command_executed_events.write(CommandExecutedEvent {
+                            request_id: req_id,
+                            result: result_msg,
+                        });
+                    }
+                } else {
+                    let error_msg = "Usage: load_world <world_name>".to_string();
                     #[cfg(feature = "console")]
                     write_to_console(error_msg.clone());
 

@@ -1,0 +1,118 @@
+(
+  name: "Debug Alice World Creation",
+  description: "Debug scenario to test Alice world creation and publishing",
+  version: "1.0",
+  infrastructure: (
+    mqtt_server: (
+      required: true,
+      port: 1883,
+      config_file: None,
+      options: None,
+    ),
+    mqtt_observer: Some((
+      required: true, 
+      topics: Some(["#"]),
+      client_id: Some("debug_observer"),
+    )),
+    mcp_server: None,
+    services: None,
+  ),
+  clients: [
+    (
+      id: "alice",
+      player_id: "alice",
+      mcp_port: 3001,
+      client_type: "desktop",
+      name: Some("Alice Debug Client"),
+      config: Some({
+        "enable_mcp": true,
+        "readiness_probe": {
+          "type": "tcp_port", 
+          "port": 3001,
+          "initial_delay_seconds": 5,
+          "timeout_seconds": 10
+        },
+        "liveness_probe": {
+          "type": "mcp_ping",
+          "interval_seconds": 30,
+          "timeout_seconds": 10,
+          "failure_threshold": 5
+        }
+      }),
+    )
+  ],
+  steps: [
+    (
+      name: "alice_get_client_info",
+      description: "Alice checks her client status", 
+      client: "alice",
+      action: (
+        type: "mcp_call",
+        tool: "get_client_info",
+        arguments: {},
+      ),
+      depends_on: [],
+      wait_before: 1000,
+      wait_after: 1000,
+      timeout: 15000,
+      success_condition: None,
+    ),
+    
+    (
+      name: "alice_create_world",
+      description: "Alice creates a new multiplayer world",
+      client: "alice",
+      action: (
+        type: "mcp_call",
+        tool: "create_world",
+        arguments: {
+          "world_name": "debug_test_world",
+          "description": "A debug test world",
+          "template": "default"
+        },
+      ),
+      depends_on: ["alice_get_client_info"],
+      wait_before: 2000,
+      wait_after: 5000,
+      timeout: 20000,
+      success_condition: None,
+    ),
+    
+    (
+      name: "alice_get_game_state",
+      description: "Alice checks her game state after world creation",
+      client: "alice",
+      action: (
+        type: "mcp_call",
+        tool: "get_game_state",
+        arguments: {},
+      ),
+      depends_on: ["alice_create_world"],
+      wait_before: 1000,
+      wait_after: 2000,
+      timeout: 15000,
+      success_condition: None,
+    ),
+    
+    (
+      name: "alice_publish_world",
+      description: "Alice publishes her world for others to join",
+      client: "alice", 
+      action: (
+        type: "mcp_call",
+        tool: "publish_world",
+        arguments: {
+          "world_name": "debug_test_world",
+          "max_players": 2,
+          "is_public": true
+        },
+      ),
+      depends_on: ["alice_get_game_state"],
+      wait_before: 1000,
+      wait_after: 2000,
+      timeout: 20000,
+      success_condition: None,
+    ),
+  ],
+  config: None,
+)
