@@ -16,41 +16,49 @@ pub struct MainMenuPlugin;
 
 impl Plugin for MainMenuPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(
-            OnEnter(GameState::MainMenu),
-            (setup_main_menu, release_cursor_for_main_menu),
-        )
-        .add_systems(OnExit(GameState::MainMenu), despawn_main_menu)
-        .add_systems(
-            OnEnter(GameState::WorldSelection),
-            setup_world_selection_menu,
-        )
-        .add_systems(
-            OnExit(GameState::WorldSelection),
-            despawn_world_selection_menu,
-        )
-        .add_systems(OnEnter(GameState::Settings), setup_settings_menu)
-        .add_systems(OnExit(GameState::Settings), despawn_settings_menu)
-        .add_systems(OnEnter(GameState::GameplayMenu), setup_gameplay_menu)
-        .add_systems(OnExit(GameState::GameplayMenu), despawn_gameplay_menu)
-        .add_systems(OnEnter(GameState::InGame), grab_cursor_on_game_start)
-        .add_systems(OnEnter(GameState::ConsoleOpen), release_cursor_for_console)
-        .add_systems(OnExit(GameState::ConsoleOpen), grab_cursor_after_console)
-        .add_systems(
-            Update,
-            (
-                main_menu_interaction.run_if(in_state(GameState::MainMenu)),
-                settings_menu_interaction.run_if(in_state(GameState::Settings)),
-                language_button_interaction.run_if(in_state(GameState::Settings)),
-                world_selection_interaction.run_if(in_state(GameState::WorldSelection)),
-                delete_world_interaction.run_if(in_state(GameState::WorldSelection)),
-                online_world_interaction.run_if(in_state(GameState::WorldSelection)),
-                refresh_online_worlds_interaction.run_if(in_state(GameState::WorldSelection)),
-                update_online_worlds_ui.run_if(in_state(GameState::WorldSelection)),
-                gameplay_menu_interaction.run_if(in_state(GameState::GameplayMenu)),
-                handle_escape_key.run_if(not(in_state(GameState::MainMenu))),
-            ),
-        );
+        app.init_resource::<WorldCreationState>()
+            .add_systems(
+                OnEnter(GameState::MainMenu),
+                (setup_main_menu, release_cursor_for_main_menu),
+            )
+            .add_systems(OnExit(GameState::MainMenu), despawn_main_menu)
+            .add_systems(
+                OnEnter(GameState::WorldSelection),
+                setup_world_selection_menu,
+            )
+            .add_systems(
+                OnExit(GameState::WorldSelection),
+                despawn_world_selection_menu,
+            )
+            .add_systems(OnEnter(GameState::WorldCreation), setup_world_creation_menu)
+            .add_systems(
+                OnExit(GameState::WorldCreation),
+                despawn_world_creation_menu,
+            )
+            .add_systems(OnEnter(GameState::Settings), setup_settings_menu)
+            .add_systems(OnExit(GameState::Settings), despawn_settings_menu)
+            .add_systems(OnEnter(GameState::GameplayMenu), setup_gameplay_menu)
+            .add_systems(OnExit(GameState::GameplayMenu), despawn_gameplay_menu)
+            .add_systems(OnEnter(GameState::InGame), grab_cursor_on_game_start)
+            .add_systems(OnEnter(GameState::ConsoleOpen), release_cursor_for_console)
+            .add_systems(OnExit(GameState::ConsoleOpen), grab_cursor_after_console)
+            .add_systems(
+                Update,
+                (
+                    main_menu_interaction.run_if(in_state(GameState::MainMenu)),
+                    settings_menu_interaction.run_if(in_state(GameState::Settings)),
+                    language_button_interaction.run_if(in_state(GameState::Settings)),
+                    world_selection_interaction.run_if(in_state(GameState::WorldSelection)),
+                    delete_world_interaction.run_if(in_state(GameState::WorldSelection)),
+                    online_world_interaction.run_if(in_state(GameState::WorldSelection)),
+                    refresh_online_worlds_interaction.run_if(in_state(GameState::WorldSelection)),
+                    update_online_worlds_ui.run_if(in_state(GameState::WorldSelection)),
+                    world_creation_interaction.run_if(in_state(GameState::WorldCreation)),
+                    world_name_input_system.run_if(in_state(GameState::WorldCreation)),
+                    gameplay_menu_interaction.run_if(in_state(GameState::GameplayMenu)),
+                    handle_escape_key.run_if(not(in_state(GameState::MainMenu))),
+                ),
+            );
     }
 }
 
@@ -193,6 +201,43 @@ pub struct BackToMainMenuButton;
 #[derive(Component)]
 pub struct RefreshOnlineWorldsButton;
 
+/// Component to mark the world creation menu UI
+#[derive(Component)]
+pub struct WorldCreationMenu;
+
+/// Component for world name text input
+#[derive(Component)]
+pub struct WorldNameInput {
+    pub text: String,
+    pub focused: bool,
+}
+
+/// Component to mark the text display for world name input
+#[derive(Component)]
+pub struct WorldNameInputText;
+
+/// Component for template selection buttons
+#[derive(Component)]
+pub struct TemplateButton {
+    pub template_name: String,
+    pub selected: bool,
+}
+
+/// Component for the create world button in world creation menu
+#[derive(Component)]
+pub struct CreateWorldWithTemplateButton;
+
+/// Component for the back button in world creation menu
+#[derive(Component)]
+pub struct BackToWorldSelectionButton;
+
+/// Resource to track the current world creation state
+#[derive(Resource, Default)]
+pub struct WorldCreationState {
+    pub world_name: String,
+    pub selected_template: String,
+}
+
 /// Game state enum
 #[derive(Debug, Clone, Eq, PartialEq, Hash, States, Default)]
 pub enum GameState {
@@ -200,6 +245,7 @@ pub enum GameState {
     MainMenu,
     Settings,
     WorldSelection,
+    WorldCreation,
     GameplayMenu,
     InGame,
     ConsoleOpen,
@@ -946,7 +992,6 @@ fn world_selection_interaction(
     >,
     mut game_state: ResMut<NextState<GameState>>,
     mut load_world_events: EventWriter<LoadWorldEvent>,
-    mut create_world_events: EventWriter<CreateWorldEvent>,
 ) {
     for (interaction, mut color, select_button) in select_world_query.iter_mut() {
         match *interaction {
@@ -970,14 +1015,8 @@ fn world_selection_interaction(
         match *interaction {
             Interaction::Pressed => {
                 *color = Color::srgb(0.35, 0.75, 0.35).into();
-                // For simplicity, we'll create a new world with a default name
-                let new_world_name = format!("NewWorld-{}", chrono::Utc::now().timestamp());
-                create_world_events.write(CreateWorldEvent {
-                    world_name: new_world_name.clone(),
-                    description: "A new world".to_string(),
-                });
-                // No need to send LoadWorldEvent - create_empty_world already sets up CurrentWorld
-                game_state.set(GameState::InGame);
+                // Navigate to world creation UI instead of creating world immediately
+                game_state.set(GameState::WorldCreation);
             }
             Interaction::Hovered => {
                 *color = Color::srgb(0.25, 0.25, 0.25).into();
@@ -1512,6 +1551,7 @@ fn handle_escape_key(
             GameState::InGame => game_state.set(GameState::GameplayMenu),
             GameState::GameplayMenu => game_state.set(GameState::InGame),
             GameState::Settings => game_state.set(GameState::MainMenu),
+            GameState::WorldCreation => game_state.set(GameState::WorldSelection),
             _ => (),
         }
     }
@@ -1737,6 +1777,526 @@ fn update_online_worlds_ui(
                 }
             }
         });
+    }
+}
+
+fn setup_world_creation_menu(
+    mut commands: Commands,
+    mut creation_state: ResMut<WorldCreationState>,
+    fonts: Res<Fonts>,
+) {
+    // Reset creation state
+    creation_state.world_name = String::new();
+    creation_state.selected_template = "default".to_string();
+
+    commands
+        .spawn((
+            Node {
+                width: Val::Percent(100.0),
+                height: Val::Percent(100.0),
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+                ..default()
+            },
+            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.8)),
+            WorldCreationMenu,
+        ))
+        .with_children(|parent| {
+            // Main container
+            parent
+                .spawn(Node {
+                    width: Val::Px(600.0),
+                    height: Val::Px(500.0),
+                    flex_direction: FlexDirection::Column,
+                    padding: UiRect::all(Val::Px(30.0)),
+                    border: UiRect::all(Val::Px(2.0)),
+                    justify_content: JustifyContent::SpaceBetween,
+                    ..default()
+                })
+                .insert(BorderColor::all(Color::srgb(0.3, 0.3, 0.5)))
+                .insert(BackgroundColor(Color::srgba(0.1, 0.1, 0.2, 0.9)))
+                .with_children(|parent| {
+                    // Title
+                    parent.spawn((
+                        Text::new("Create New World"),
+                        TextFont {
+                            font: fonts.regular.clone(),
+                            font_size: 32.0,
+                            font_smoothing: bevy::text::FontSmoothing::default(),
+                            line_height: bevy::text::LineHeight::default(),
+                        },
+                        TextColor(Color::WHITE),
+                        Node {
+                            align_self: AlignSelf::Center,
+                            margin: UiRect::bottom(Val::Px(20.0)),
+                            ..default()
+                        },
+                    ));
+
+                    // World name input section
+                    parent
+                        .spawn(Node {
+                            width: Val::Percent(100.0),
+                            flex_direction: FlexDirection::Column,
+                            margin: UiRect::bottom(Val::Px(20.0)),
+                            ..default()
+                        })
+                        .with_children(|parent| {
+                            // World name label
+                            parent.spawn((
+                                Text::new("World Name:"),
+                                TextFont {
+                                    font: fonts.regular.clone(),
+                                    font_size: 18.0,
+                                    font_smoothing: bevy::text::FontSmoothing::default(),
+                                    line_height: bevy::text::LineHeight::default(),
+                                },
+                                TextColor(Color::WHITE),
+                                Node {
+                                    margin: UiRect::bottom(Val::Px(8.0)),
+                                    ..default()
+                                },
+                            ));
+
+                            // World name input field
+                            parent
+                                .spawn((
+                                    Node {
+                                        width: Val::Percent(100.0),
+                                        height: Val::Px(40.0),
+                                        padding: UiRect::all(Val::Px(10.0)),
+                                        border: UiRect::all(Val::Px(1.0)),
+                                        ..default()
+                                    },
+                                    BorderColor::all(Color::srgb(0.5, 0.5, 0.5)),
+                                    BackgroundColor(Color::srgba(0.2, 0.2, 0.3, 1.0)),
+                                    WorldNameInput {
+                                        text: String::new(),
+                                        focused: false,
+                                    },
+                                ))
+                                .with_children(|parent| {
+                                    parent.spawn((
+                                        Text::new("Enter world name..."),
+                                        TextFont {
+                                            font: fonts.regular.clone(),
+                                            font_size: 16.0,
+                                            font_smoothing: bevy::text::FontSmoothing::default(),
+                                            line_height: bevy::text::LineHeight::default(),
+                                        },
+                                        TextColor(Color::srgb(0.7, 0.7, 0.7)),
+                                        WorldNameInputText,
+                                    ));
+                                });
+                        });
+
+                    // Template selection section
+                    parent
+                        .spawn(Node {
+                            width: Val::Percent(100.0),
+                            flex_direction: FlexDirection::Column,
+                            margin: UiRect::bottom(Val::Px(20.0)),
+                            ..default()
+                        })
+                        .with_children(|parent| {
+                            // Template selection label
+                            parent.spawn((
+                                Text::new("Select Template:"),
+                                TextFont {
+                                    font: fonts.regular.clone(),
+                                    font_size: 18.0,
+                                    font_smoothing: bevy::text::FontSmoothing::default(),
+                                    line_height: bevy::text::LineHeight::default(),
+                                },
+                                TextColor(Color::WHITE),
+                                Node {
+                                    margin: UiRect::bottom(Val::Px(10.0)),
+                                    ..default()
+                                },
+                            ));
+
+                            // Template buttons grid
+                            parent
+                                .spawn(Node {
+                                    width: Val::Percent(100.0),
+                                    flex_direction: FlexDirection::Row,
+                                    justify_content: JustifyContent::SpaceBetween,
+                                    flex_wrap: FlexWrap::Wrap,
+                                    row_gap: Val::Px(10.0),
+                                    column_gap: Val::Px(10.0),
+                                    ..default()
+                                })
+                                .with_children(|parent| {
+                                    // Template buttons
+                                    let templates = vec![
+                                        ("default", "Default", "Basic world with grass plains"),
+                                        ("medieval", "Medieval", "Castle and village setting"),
+                                        ("modern", "Modern", "Urban cityscape environment"),
+                                        ("creative", "Creative", "Sandbox with material samples"),
+                                    ];
+
+                                    for (template_id, name, description) in templates {
+                                        let is_selected = template_id == "default";
+                                        parent
+                                            .spawn((
+                                                Button,
+                                                Node {
+                                                    width: Val::Px(130.0),
+                                                    height: Val::Px(80.0),
+                                                    flex_direction: FlexDirection::Column,
+                                                    justify_content: JustifyContent::Center,
+                                                    align_items: AlignItems::Center,
+                                                    padding: UiRect::all(Val::Px(8.0)),
+                                                    border: UiRect::all(Val::Px(2.0)),
+                                                    ..default()
+                                                },
+                                                BorderColor::all(if is_selected {
+                                                    Color::srgb(0.4, 0.7, 0.4)
+                                                } else {
+                                                    Color::srgb(0.3, 0.3, 0.3)
+                                                }),
+                                                BackgroundColor(if is_selected {
+                                                    Color::srgba(0.2, 0.4, 0.2, 0.8)
+                                                } else {
+                                                    Color::srgba(0.15, 0.15, 0.15, 0.8)
+                                                }),
+                                                TemplateButton {
+                                                    template_name: template_id.to_string(),
+                                                    selected: is_selected,
+                                                },
+                                            ))
+                                            .with_children(|parent| {
+                                                parent.spawn((
+                                                    Text::new(name),
+                                                    TextFont {
+                                                        font: fonts.regular.clone(),
+                                                        font_size: 14.0,
+                                                        font_smoothing:
+                                                            bevy::text::FontSmoothing::default(),
+                                                        line_height:
+                                                            bevy::text::LineHeight::default(),
+                                                    },
+                                                    TextColor(Color::WHITE),
+                                                    Node {
+                                                        margin: UiRect::bottom(Val::Px(4.0)),
+                                                        ..default()
+                                                    },
+                                                ));
+                                                parent.spawn((
+                                                    Text::new(description),
+                                                    TextFont {
+                                                        font: fonts.regular.clone(),
+                                                        font_size: 10.0,
+                                                        font_smoothing:
+                                                            bevy::text::FontSmoothing::default(),
+                                                        line_height:
+                                                            bevy::text::LineHeight::default(),
+                                                    },
+                                                    TextColor(Color::srgb(0.8, 0.8, 0.8)),
+                                                ));
+                                            });
+                                    }
+                                });
+                        });
+
+                    // Action buttons
+                    parent
+                        .spawn(Node {
+                            width: Val::Percent(100.0),
+                            flex_direction: FlexDirection::Row,
+                            justify_content: JustifyContent::SpaceBetween,
+                            ..default()
+                        })
+                        .with_children(|parent| {
+                            // Back button
+                            parent
+                                .spawn((
+                                    Button,
+                                    Node {
+                                        width: Val::Px(120.0),
+                                        height: Val::Px(50.0),
+                                        justify_content: JustifyContent::Center,
+                                        align_items: AlignItems::Center,
+                                        ..default()
+                                    },
+                                    BackgroundColor(Color::srgb(0.3, 0.15, 0.15)),
+                                    BackToWorldSelectionButton,
+                                ))
+                                .with_children(|parent| {
+                                    parent.spawn((
+                                        Text::new("Back"),
+                                        TextFont {
+                                            font: fonts.regular.clone(),
+                                            font_size: 18.0,
+                                            font_smoothing: bevy::text::FontSmoothing::default(),
+                                            line_height: bevy::text::LineHeight::default(),
+                                        },
+                                        TextColor(Color::WHITE),
+                                    ));
+                                });
+
+                            // Create World button
+                            parent
+                                .spawn((
+                                    Button,
+                                    Node {
+                                        width: Val::Px(150.0),
+                                        height: Val::Px(50.0),
+                                        justify_content: JustifyContent::Center,
+                                        align_items: AlignItems::Center,
+                                        ..default()
+                                    },
+                                    BackgroundColor(Color::srgb(0.2, 0.4, 0.2)),
+                                    CreateWorldWithTemplateButton,
+                                ))
+                                .with_children(|parent| {
+                                    parent.spawn((
+                                        Text::new("Create World"),
+                                        TextFont {
+                                            font: fonts.regular.clone(),
+                                            font_size: 18.0,
+                                            font_smoothing: bevy::text::FontSmoothing::default(),
+                                            line_height: bevy::text::LineHeight::default(),
+                                        },
+                                        TextColor(Color::WHITE),
+                                    ));
+                                });
+                        });
+                });
+        });
+}
+
+fn despawn_world_creation_menu(
+    mut commands: Commands,
+    query: Query<Entity, With<WorldCreationMenu>>,
+) {
+    for entity in query.iter() {
+        commands.entity(entity).despawn();
+    }
+}
+
+fn world_creation_interaction(
+    mut template_queries: ParamSet<(
+        Query<(&Interaction, &TemplateButton), (Changed<Interaction>, With<TemplateButton>)>,
+        Query<(&mut TemplateButton, &mut BackgroundColor, &mut BorderColor), With<TemplateButton>>,
+    )>,
+    mut create_button_query: Query<
+        (&Interaction, &mut BackgroundColor),
+        (
+            Changed<Interaction>,
+            With<CreateWorldWithTemplateButton>,
+            Without<TemplateButton>,
+        ),
+    >,
+    mut back_button_query: Query<
+        (&Interaction, &mut BackgroundColor),
+        (
+            Changed<Interaction>,
+            With<BackToWorldSelectionButton>,
+            Without<CreateWorldWithTemplateButton>,
+            Without<TemplateButton>,
+        ),
+    >,
+    mut creation_state: ResMut<WorldCreationState>,
+    mut game_state: ResMut<NextState<GameState>>,
+    mut create_world_events: EventWriter<CreateWorldEvent>,
+) {
+    // Handle template button interactions
+    // First, collect interaction data without mutable access
+    let mut interaction_data = Vec::new();
+    for (interaction, template_button) in template_queries.p0().iter() {
+        interaction_data.push((*interaction, template_button.template_name.clone()));
+    }
+
+    // Now process the interactions using mutable access
+    for (interaction, template_name) in interaction_data {
+        match interaction {
+            Interaction::Pressed => {
+                // Update all template buttons
+                for (mut template, mut color, mut border) in template_queries.p1().iter_mut() {
+                    if template.template_name == template_name {
+                        // Select this template
+                        template.selected = true;
+                        *color = Color::srgba(0.2, 0.4, 0.2, 0.8).into();
+                        *border = Color::srgb(0.4, 0.7, 0.4).into();
+                        creation_state.selected_template = template_name.clone();
+                        info!("Selected template: {}", template_name);
+                    } else {
+                        // Deselect all other templates
+                        template.selected = false;
+                        *color = Color::srgba(0.15, 0.15, 0.15, 0.8).into();
+                        *border = Color::srgb(0.3, 0.3, 0.3).into();
+                    }
+                }
+            }
+            Interaction::Hovered => {
+                // For hover, find this specific template and update it
+                for (template, mut color, _border) in template_queries.p1().iter_mut() {
+                    if template.template_name == template_name && !template.selected {
+                        *color = Color::srgba(0.25, 0.25, 0.25, 0.8).into();
+                        break;
+                    }
+                }
+            }
+            Interaction::None => {
+                // For none, find this specific template and reset it
+                for (template, mut color, _border) in template_queries.p1().iter_mut() {
+                    if template.template_name == template_name && !template.selected {
+                        *color = Color::srgba(0.15, 0.15, 0.15, 0.8).into();
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    // Handle create world button
+    for (interaction, mut color) in create_button_query.iter_mut() {
+        match *interaction {
+            Interaction::Pressed => {
+                *color = Color::srgb(0.4, 0.6, 0.4).into();
+
+                // Validate input
+                if creation_state.world_name.trim().is_empty() {
+                    info!("Cannot create world: World name is empty");
+                    // TODO: Show error message to user
+                    continue;
+                }
+
+                // Create the world with selected template
+                create_world_events.write(CreateWorldEvent {
+                    world_name: creation_state.world_name.clone(),
+                    description: format!(
+                        "World created with {} template",
+                        creation_state.selected_template
+                    ),
+                    template: Some(creation_state.selected_template.clone()),
+                });
+
+                info!(
+                    "Creating world '{}' with template '{}'",
+                    creation_state.world_name, creation_state.selected_template
+                );
+
+                // Transition to game
+                game_state.set(GameState::InGame);
+            }
+            Interaction::Hovered => {
+                *color = Color::srgb(0.3, 0.5, 0.3).into();
+            }
+            Interaction::None => {
+                *color = Color::srgb(0.2, 0.4, 0.2).into();
+            }
+        }
+    }
+
+    // Handle back button
+    for (interaction, mut color) in back_button_query.iter_mut() {
+        match *interaction {
+            Interaction::Pressed => {
+                *color = Color::srgb(0.5, 0.25, 0.25).into();
+                game_state.set(GameState::WorldSelection);
+            }
+            Interaction::Hovered => {
+                *color = Color::srgb(0.4, 0.2, 0.2).into();
+            }
+            Interaction::None => {
+                *color = Color::srgb(0.3, 0.15, 0.15).into();
+            }
+        }
+    }
+}
+
+fn world_name_input_system(
+    mut char_events: EventReader<bevy::input::keyboard::KeyboardInput>,
+    keys: Res<ButtonInput<KeyCode>>,
+    mut input_query: Query<&mut WorldNameInput>,
+    mut text_query: Query<&mut Text, With<WorldNameInputText>>,
+    mut creation_state: ResMut<WorldCreationState>,
+) {
+    for mut input in input_query.iter_mut() {
+        if !input.focused {
+            input.focused = true; // Auto-focus for now
+        }
+
+        if input.focused {
+            // Handle character input
+            for event in char_events.read() {
+                if let bevy::input::ButtonState::Pressed = event.state {
+                    // Use the same approach as the console for character input
+                    if let Some(character) = keycode_to_char(event.key_code) {
+                        if character.is_alphanumeric()
+                            || character == '_'
+                            || character == '-'
+                            || character == ' '
+                        {
+                            input.text.push(character);
+                            creation_state.world_name = input.text.clone();
+                        }
+                    }
+                }
+            }
+
+            // Handle backspace
+            if keys.just_pressed(KeyCode::Backspace) {
+                input.text.pop();
+                creation_state.world_name = input.text.clone();
+            }
+
+            // Update display text - only update WorldNameInputText components
+            for mut text in text_query.iter_mut() {
+                if input.text.is_empty() {
+                    **text = "Enter world name...".to_string();
+                } else {
+                    **text = input.text.clone();
+                }
+            }
+        }
+    }
+}
+
+/// Convert KeyCode to character for printable keys (simplified version)
+fn keycode_to_char(key_code: KeyCode) -> Option<char> {
+    match key_code {
+        KeyCode::KeyA => Some('a'),
+        KeyCode::KeyB => Some('b'),
+        KeyCode::KeyC => Some('c'),
+        KeyCode::KeyD => Some('d'),
+        KeyCode::KeyE => Some('e'),
+        KeyCode::KeyF => Some('f'),
+        KeyCode::KeyG => Some('g'),
+        KeyCode::KeyH => Some('h'),
+        KeyCode::KeyI => Some('i'),
+        KeyCode::KeyJ => Some('j'),
+        KeyCode::KeyK => Some('k'),
+        KeyCode::KeyL => Some('l'),
+        KeyCode::KeyM => Some('m'),
+        KeyCode::KeyN => Some('n'),
+        KeyCode::KeyO => Some('o'),
+        KeyCode::KeyP => Some('p'),
+        KeyCode::KeyQ => Some('q'),
+        KeyCode::KeyR => Some('r'),
+        KeyCode::KeyS => Some('s'),
+        KeyCode::KeyT => Some('t'),
+        KeyCode::KeyU => Some('u'),
+        KeyCode::KeyV => Some('v'),
+        KeyCode::KeyW => Some('w'),
+        KeyCode::KeyX => Some('x'),
+        KeyCode::KeyY => Some('y'),
+        KeyCode::KeyZ => Some('z'),
+        KeyCode::Digit0 => Some('0'),
+        KeyCode::Digit1 => Some('1'),
+        KeyCode::Digit2 => Some('2'),
+        KeyCode::Digit3 => Some('3'),
+        KeyCode::Digit4 => Some('4'),
+        KeyCode::Digit5 => Some('5'),
+        KeyCode::Digit6 => Some('6'),
+        KeyCode::Digit7 => Some('7'),
+        KeyCode::Digit8 => Some('8'),
+        KeyCode::Digit9 => Some('9'),
+        KeyCode::Space => Some(' '),
+        KeyCode::Minus => Some('-'),
+        _ => None,
     }
 }
 

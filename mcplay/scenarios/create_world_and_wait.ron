@@ -1,0 +1,162 @@
+// Create World and Wait Indefinitely Scenario
+// Creates a world via MCP, then waits indefinitely for manual testing/interaction
+Scenario(
+    name: "create_world_and_wait",
+    description: "Creates a new world via MCP, then keeps everything running indefinitely for manual testing",
+    version: "1.0",
+    
+    // Infrastructure setup - MQTT server with observer for debugging
+    infrastructure: InfrastructureConfig(
+        mqtt_server: MqttServerConfig(
+            required: true,
+            port: 1883,
+            config_file: None,
+            options: None,
+        ),
+        mqtt_observer: Some(MqttObserverConfig(
+            required: true,  // Enable for debugging MQTT issues
+            topics: Some(["#"]),  // Monitor all topics
+            client_id: Some("debug_observer"),
+        )),
+        mcp_server: None,
+        services: None,
+    ),
+    
+    // Single client for testing
+    clients: [
+        ClientConfig(
+            id: "player1",
+            player_id: "player1", 
+            mcp_port: 8080,
+            client_type: "desktop",
+            name: Some("Player 1 - World Creator"),
+            config: None,
+        ),
+    ],
+    
+    // Steps: Initialize MCP, create world, then wait indefinitely
+    steps: [
+        // Step 1: Initialize MCP connection
+        Step(
+            name: "mcp_initialize",
+            description: "Initialize MCP connection",
+            client: "player1",
+            action: (
+                type: "mcp_call",
+                tool: "initialize",
+                arguments: {
+                    "protocolVersion": "2024-11-05",
+                    "capabilities": {
+                        "tools": {}
+                    },
+                    "clientInfo": {
+                        "name": "world-creator-test",
+                        "version": "1.0.0"
+                    }
+                },
+            ),
+            wait_before: 1000,   // Wait for client to be ready
+            wait_after: 500,     // Brief pause after initialization
+            timeout: 10000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: [],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 2: Create the world
+        Step(
+            name: "create_test_world",
+            description: "Create a new world for manual testing",
+            client: "player1",
+            action: (
+                type: "mcp_call",
+                tool: "create_world",
+                arguments: {
+                    "world_name": "manual_test_world",
+                    "description": "World created for manual testing and interaction"
+                },
+            ),
+            wait_before: 500,    // Brief wait before creation
+            wait_after: 2000,    // Wait for world to be fully created
+            timeout: 20000,      // Generous timeout for world creation
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["mcp_initialize"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 3: Verify we're in-game by checking world status
+        Step(
+            name: "verify_world_created",
+            description: "Verify the world was created and we're in-game",
+            client: "player1",
+            action: (
+                type: "mcp_call",
+                tool: "get_world_status",
+                arguments: {},
+            ),
+            wait_before: 1000,   // Wait a moment after world creation
+            wait_after: 1000,    // Brief pause after verification
+            timeout: 10000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["create_test_world"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 4: Wait indefinitely for manual testing
+        Step(
+            name: "wait_indefinitely",
+            description: "Keep everything running indefinitely for manual testing - world is ready for interaction. Press Ctrl+C to exit.",
+            client: "orchestrator",
+            action: (
+                type: "wait_condition",
+                condition: "manual_exit",
+                expected_value: Some("never"),
+                timeout: 86400000,  // 24 hours timeout (essentially indefinite)
+            ),
+            wait_before: 2000,    // Brief wait to show status
+            wait_after: 0,
+            timeout: 86400000,   // 24 hours
+            success_condition: None,
+            depends_on: ["verify_world_created"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+    ],
+    
+    // Global scenario configuration for long-running test
+    config: Some(ScenarioConfig(
+        timeout_ms: Some(86400000),  // 24 hours global timeout
+        logging: Some(LoggingConfig(
+            level: Some("info"),
+            log_mqtt: Some(true),
+            log_client_actions: Some(true),
+            filters: Some(["world/*", "mcp/*", "mqtt/*", "multiplayer/*", "ui/*", "GameState"]),
+        )),
+        environment: Some({
+            "RUST_LOG": "info,rumqttc=warn",  // Reduce MQTT client noise
+            "SCENARIO_NAME": "create_world_and_wait",
+            "ENABLE_MCP": "true",
+        }),
+        settings: Some({
+            "auto_cleanup": false,  // Don't auto cleanup for manual testing
+            "preserve_logs": true,
+            "manual_mode": true,
+        }),
+    )),
+)

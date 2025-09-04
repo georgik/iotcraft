@@ -110,6 +110,8 @@ impl CommandParser {
             "load_world" => self.handle_load_world_command(args, world),
             #[cfg(not(target_arch = "wasm32"))]
             "set_game_state" => self.handle_set_game_state_command(args, world),
+            #[cfg(not(target_arch = "wasm32"))]
+            "player_move" => self.handle_player_move_command(args, world),
             // WASM-only simplified commands (for desktop-only functionality)
             #[cfg(target_arch = "wasm32")]
             "spawn"
@@ -131,6 +133,7 @@ impl CommandParser {
             | "create_world"
             | "load_world"
             | "set_game_state"
+            | "player_move"
             | "place"
             | "remove"
             | "wall"
@@ -168,6 +171,7 @@ impl CommandParser {
             "  give <item_type> <count> - Give items to inventory",
             "  tp <x> <y> <z> - Teleport to coordinates",
             "  look <yaw> <pitch> - Set camera rotation",
+            "  player_move <x> <y> <z> - Move player to coordinates",
             "  move <device_id> <x> <y> <z> - Move a device",
             "  list - List all connected devices",
             "  test_error <message> - Test error indicator",
@@ -918,6 +922,7 @@ impl CommandParser {
             create_events.write(CreateWorldEvent {
                 world_name: world_name.clone(),
                 description: description.clone(),
+                template: None, // Use default template for console command
             });
 
             // Set game state to InGame to transition UI
@@ -969,15 +974,17 @@ impl CommandParser {
     #[cfg(not(target_arch = "wasm32"))]
     fn handle_set_game_state_command(&self, args: &[&str], world: &mut World) -> ConsoleResult {
         if args.is_empty() {
-            return ConsoleResult::InvalidArgs("Usage: set_game_state <state>".to_string());
+            return ConsoleResult::InvalidArgs(
+                "Usage: set_game_state <state> (MainMenu|InGame)".to_string(),
+            );
         }
 
         let state_str = args[0];
         use crate::ui::main_menu::GameState;
 
-        let new_state = match state_str {
-            "MainMenu" => GameState::MainMenu,
-            "InGame" => GameState::InGame,
+        let new_state = match state_str.to_lowercase().as_str() {
+            "mainmenu" | "main_menu" => GameState::MainMenu,
+            "ingame" | "in_game" => GameState::InGame,
             _ => {
                 return ConsoleResult::InvalidArgs(format!(
                     "Invalid game state: {}. Valid states: MainMenu, InGame",
@@ -986,16 +993,67 @@ impl CommandParser {
             }
         };
 
+        // Set the next game state
         if let Some(mut next_state) = world.get_resource_mut::<NextState<GameState>>() {
-            next_state.set(new_state);
-            ConsoleResult::Success(format!("Set game state to {}", state_str))
+            next_state.set(new_state.clone());
+            ConsoleResult::Success(format!(
+                "Game state will be set to {:?} on next frame",
+                new_state
+            ))
         } else {
             ConsoleResult::Error("Game state resource not available".to_string())
         }
     }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn handle_player_move_command(&self, args: &[&str], world: &mut World) -> ConsoleResult {
+        if args.len() != 3 {
+            return ConsoleResult::InvalidArgs("Usage: player_move <x> <y> <z>".to_string());
+        }
+
+        // Parse coordinates
+        let x = match args[0].parse::<f32>() {
+            Ok(x) => x,
+            Err(_) => {
+                return ConsoleResult::InvalidArgs("X coordinate must be a number".to_string());
+            }
+        };
+        let y = match args[1].parse::<f32>() {
+            Ok(y) => y,
+            Err(_) => {
+                return ConsoleResult::InvalidArgs("Y coordinate must be a number".to_string());
+            }
+        };
+        let z = match args[2].parse::<f32>() {
+            Ok(z) => z,
+            Err(_) => {
+                return ConsoleResult::InvalidArgs("Z coordinate must be a number".to_string());
+            }
+        };
+
+        // Find camera and move it (this represents player position)
+        let mut camera_found = false;
+        let mut camera_query = world.query_filtered::<(
+            &mut Transform,
+            &mut crate::camera_controllers::CameraController,
+        ), With<Camera>>();
+
+        for (mut transform, _camera_controller) in camera_query.iter_mut(world) {
+            // Set the camera position
+            transform.translation = bevy::math::Vec3::new(x, y, z);
+            camera_found = true;
+            break; // Only move the first camera found
+        }
+
+        if camera_found {
+            ConsoleResult::Success(format!("Player moved to ({:.1}, {:.1}, {:.1})", x, y, z))
+        } else {
+            ConsoleResult::Error("Could not find camera/player to move".to_string())
+        }
+    }
 }
 
-#[cfg(all(test, not(target_arch = "wasm32")))]
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::camera_controllers::CameraController;

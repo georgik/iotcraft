@@ -1966,6 +1966,43 @@ async fn execute_mcp_call(
         return Err(format!("MCP error: {}", error).into());
     }
 
+    // Log MCP response content for debugging, especially for data-rich commands
+    if let Some(ref result) = response.result {
+        match tool {
+            "list_online_worlds"
+            | "get_multiplayer_status"
+            | "get_client_info"
+            | "get_world_status"
+            | "tools/list" => {
+                println!(
+                    "🔍 MCP Response for '{}': {}",
+                    tool,
+                    serde_json::to_string_pretty(result)
+                        .unwrap_or_else(|_| "<invalid json>".to_string())
+                );
+            }
+            _ => {
+                // For other commands, just log a brief summary to avoid spam
+                let summary =
+                    if result.is_object() && result.as_object().unwrap().contains_key("content") {
+                        format!("has content field")
+                    } else {
+                        format!(
+                            "result type: {}",
+                            if result.is_object() {
+                                "object"
+                            } else if result.is_array() {
+                                "array"
+                            } else {
+                                "primitive"
+                            }
+                        )
+                    };
+                println!("📋 MCP Response for '{}': {}", tool, summary);
+            }
+        }
+    }
+
     Ok(response
         .result
         .unwrap_or(serde_json::json!({"status": "success"})))

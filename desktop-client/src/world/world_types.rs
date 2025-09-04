@@ -75,6 +75,7 @@ pub struct SaveWorldEvent {
 pub struct CreateWorldEvent {
     pub world_name: String,
     pub description: String,
+    pub template: Option<String>,
 }
 
 /// Event to request deleting a world

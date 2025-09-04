@@ -93,6 +93,23 @@ pub struct OnlineWorlds {
     pub last_updated: Option<std::time::Instant>,
 }
 
+/// Player position information for multiplayer status
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PlayerPosition {
+    pub player_id: String,
+    pub player_name: String,
+    pub x: f32,
+    pub y: f32,
+    pub z: f32,
+    pub last_updated: String,
+}
+
+/// Resource to track player positions in multiplayer
+#[derive(Resource, Debug, Default)]
+pub struct MultiplayerPlayerPositions {
+    pub positions: HashMap<String, PlayerPosition>,
+}
+
 /// Events for multiplayer world management
 #[derive(Event, BufferedEvent)]
 pub struct PublishWorldEvent {
@@ -121,6 +138,13 @@ pub struct WorldChangeEvent {
 
 #[derive(Event, BufferedEvent)]
 pub struct RefreshOnlineWorldsEvent;
+
+#[derive(Event, BufferedEvent)]
+pub struct PlayerMoveEvent {
+    pub x: f32,
+    pub y: f32,
+    pub z: f32,
+}
 
 #[derive(Event, BufferedEvent)]
 pub struct WorldStateReceivedEvent {
@@ -158,6 +182,7 @@ impl Plugin for SharedWorldPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<MultiplayerMode>()
             .init_resource::<OnlineWorlds>()
+            .init_resource::<MultiplayerPlayerPositions>()
             .add_event::<PublishWorldEvent>()
             .add_event::<UnpublishWorldEvent>()
             .add_event::<JoinSharedWorldEvent>()
@@ -166,6 +191,7 @@ impl Plugin for SharedWorldPlugin {
             .add_event::<RefreshOnlineWorldsEvent>()
             .add_event::<WorldStateReceivedEvent>()
             .add_event::<BlockChangeEvent>()
+            .add_event::<PlayerMoveEvent>()
             .add_systems(
                 Update,
                 (
@@ -179,6 +205,8 @@ impl Plugin for SharedWorldPlugin {
                     handle_world_state_received_events,
                     auto_enable_multiplayer_when_mqtt_available,
                     auto_transition_to_game_on_multiplayer_changes,
+                    track_local_player_position,
+                    handle_player_move_events,
                 ),
             );
     }
@@ -563,4 +591,81 @@ fn auto_transition_to_game_on_multiplayer_changes(
         }
     }
     // When in MainMenu state, respect the user's choice to stay there even with active multiplayer
+}
+
+/// System that tracks the local player's position and updates the multiplayer position data
+fn track_local_player_position(
+    mut player_positions: ResMut<MultiplayerPlayerPositions>,
+    player_profile: Res<crate::profile::PlayerProfile>,
+    multiplayer_mode: Res<MultiplayerMode>,
+    camera_query: Query<&Transform, (With<Camera>, Without<crate::player_avatar::PlayerAvatar>)>,
+) {
+    // Only track position in multiplayer modes
+    match &*multiplayer_mode {
+        MultiplayerMode::SinglePlayer => return,
+        _ => {}
+    }
+
+    // Get camera/player position
+    if let Ok(camera_transform) = camera_query.single() {
+        let position = PlayerPosition {
+            player_id: player_profile.player_id.clone(),
+            player_name: player_profile.player_name.clone(),
+            x: camera_transform.translation.x,
+            y: camera_transform.translation.y,
+            z: camera_transform.translation.z,
+            last_updated: chrono::Utc::now().to_rfc3339(),
+        };
+
+        player_positions
+            .positions
+            .insert(player_profile.player_id.clone(), position);
+    }
+}
+
+/// System that handles PlayerMoveEvent by updating camera position and player position tracking
+fn handle_player_move_events(
+    mut move_events: EventReader<PlayerMoveEvent>,
+    mut camera_query: Query<&mut Transform, With<Camera>>,
+    mut player_positions: ResMut<MultiplayerPlayerPositions>,
+    player_profile: Res<crate::profile::PlayerProfile>,
+    multiplayer_mode: Res<MultiplayerMode>,
+) {
+    for event in move_events.read() {
+        info!(
+            "Handling player move event: ({}, {}, {})",
+            event.x, event.y, event.z
+        );
+
+        // Try to move any camera (simplified query to avoid conflicts)
+        for mut camera_transform in camera_query.iter_mut() {
+            camera_transform.translation = Vec3::new(event.x, event.y, event.z);
+            info!("Moved camera to: ({}, {}, {})", event.x, event.y, event.z);
+            break; // Only move the first camera
+        }
+
+        // Update player position tracking immediately (for any multiplayer mode)
+        match &*multiplayer_mode {
+            MultiplayerMode::SinglePlayer => {} // Don't track in single player
+            _ => {
+                let position = PlayerPosition {
+                    player_id: player_profile.player_id.clone(),
+                    player_name: player_profile.player_name.clone(),
+                    x: event.x,
+                    y: event.y,
+                    z: event.z,
+                    last_updated: chrono::Utc::now().to_rfc3339(),
+                };
+
+                player_positions
+                    .positions
+                    .insert(player_profile.player_id.clone(), position);
+
+                info!(
+                    "Updated position tracking for player {} to ({}, {}, {})",
+                    player_profile.player_id, event.x, event.y, event.z
+                );
+            }
+        }
+    }
 }

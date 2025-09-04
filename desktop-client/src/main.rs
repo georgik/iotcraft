@@ -153,6 +153,9 @@ struct Args {
     /// Player ID override for multiplayer testing (default: auto-generated)
     #[arg(short = 'p', long = "player-id")]
     player_id: Option<String>,
+    /// Player name override (default: system username, shows in window title)
+    #[arg(short = 'n', long = "player-name")]
+    player_name: Option<String>,
     /// Run in MCP (Model Context Protocol) server mode
     #[arg(long)]
     mcp: bool,
@@ -185,6 +188,27 @@ fn execute_pending_commands(
     mut create_world_events: EventWriter<CreateWorldEvent>,
     mut next_game_state: Option<ResMut<NextState<GameState>>>,
 ) {
+    // Add comprehensive debug logging
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static DEBUG_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    let counter = DEBUG_COUNTER.fetch_add(1, Ordering::Relaxed);
+    if counter % 300 == 0 {
+        // Log every 5 seconds at 60fps
+        info!(
+            "[DEBUG] execute_pending_commands system running, tick {}, queue size: {}",
+            counter,
+            pending_commands.commands.len()
+        );
+    }
+
+    if !pending_commands.commands.is_empty() {
+        info!(
+            "[DEBUG] Processing {} commands from pending queue",
+            pending_commands.commands.len()
+        );
+    }
+
     for command in pending_commands.commands.drain(..) {
         info!("Executing queued command: {}", command);
 
@@ -967,6 +991,7 @@ fn execute_pending_commands(
                     create_world_events.write(CreateWorldEvent {
                         world_name: world_name.clone(),
                         description: description.clone(),
+                        template: None, // Use default template for command execution
                     });
 
                     // Set game state to InGame to transition UI from main menu
@@ -1356,14 +1381,15 @@ fn main() {
     app.insert_resource(localization_config)
         .insert_resource(ClearColor(Color::srgb(0.53, 0.81, 0.92)))
         .insert_resource(mqtt_config)
-        .insert_resource(profile::load_or_create_profile_with_override(
+        .insert_resource(profile::load_or_create_profile_with_override_full(
             args.player_id,
+            args.player_name,
         ));
     // Script resources are now handled by the ScriptPlugin
 
     // Add default plugins with custom window configuration
     let player_profile = app.world().resource::<profile::PlayerProfile>();
-    let window_title = format!("IoTCraft - {}", player_profile.player_id);
+    let window_title = format!("IoTCraft - {}", player_profile.player_name);
 
     // Get client number from player_id (assuming format like "player-1", "player-2", etc.)
     let client_offset = extract_client_number(&player_profile.player_id).unwrap_or(0);

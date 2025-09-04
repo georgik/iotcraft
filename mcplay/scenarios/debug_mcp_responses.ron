@@ -1,0 +1,194 @@
+// Debug MCP Responses Scenario
+// This scenario shows the actual content of MCP responses to help us extract world_id values
+Scenario(
+    name: "debug_mcp_responses",
+    description: "Debug scenario to show MCP response content for get_multiplayer_status and list_online_worlds",
+    version: "1.0",
+    
+    // Minimal infrastructure
+    infrastructure: InfrastructureConfig(
+        mqtt_server: MqttServerConfig(
+            required: true,
+            port: 1883,
+            config_file: None,
+            options: None,
+        ),
+        mqtt_observer: None,
+        mcp_server: None,
+        services: None,
+    ),
+    
+    // Single client for testing
+    clients: [
+        ClientConfig(
+            id: "debug_client",
+            player_id: "debug_client", 
+            mcp_port: 8080,
+            client_type: "desktop",
+            name: Some("Debug Client"),
+            config: None,
+        ),
+    ],
+    
+    // Debug steps to see response content
+    steps: [
+        // Step 1: Initialize MCP
+        Step(
+            name: "mcp_initialize",
+            description: "Initialize MCP connection",
+            client: "debug_client",
+            action: (
+                type: "mcp_call",
+                tool: "initialize",
+                arguments: {
+                    "protocolVersion": "2024-11-05",
+                    "capabilities": { "tools": {} },
+                    "clientInfo": {
+                        "name": "debug-response-viewer",
+                        "version": "1.0.0"
+                    }
+                },
+            ),
+            wait_before: 500,
+            wait_after: 200,
+            timeout: 10000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: [],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 2: Create world
+        Step(
+            name: "create_world",
+            description: "Create world to generate multiplayer status",
+            client: "debug_client",
+            action: (
+                type: "mcp_call",
+                tool: "create_world",
+                arguments: {
+                    "world_name": "debug_world_12345",
+                    "description": "Debug world for response testing"
+                },
+            ),
+            wait_before: 200,
+            wait_after: 1000,
+            timeout: 15000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["mcp_initialize"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 3: Publish world
+        Step(
+            name: "publish_world",
+            description: "Publish world to see publishing response",
+            client: "debug_client",
+            action: (
+                type: "mcp_call",
+                tool: "publish_world",
+                arguments: {
+                    "world_name": "debug_world_12345",
+                    "max_players": 2,
+                    "is_public": true
+                },
+            ),
+            wait_before: 200,
+            wait_after: 1000,
+            timeout: 15000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["create_world"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 4: Get multiplayer status (this should show the world_id with timestamp)
+        Step(
+            name: "get_multiplayer_status_debug",
+            description: "DEBUG: Get multiplayer status to see actual world_id format",
+            client: "debug_client",
+            action: (
+                type: "mcp_call",
+                tool: "get_multiplayer_status",
+                arguments: {},
+            ),
+            wait_before: 200,
+            wait_after: 500,
+            timeout: 10000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["publish_world"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 5: List online worlds (this should show discoverable worlds)
+        Step(
+            name: "list_online_worlds_debug",
+            description: "DEBUG: List online worlds to see discovery response format",
+            client: "debug_client",
+            action: (
+                type: "mcp_call",
+                tool: "list_online_worlds",
+                arguments: {},
+            ),
+            wait_before: 200,
+            wait_after: 500,
+            timeout: 10000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["get_multiplayer_status_debug"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+    ],
+    
+    // Configuration for detailed debugging
+    config: Some(ScenarioConfig(
+        timeout_ms: Some(60000),
+        logging: Some(LoggingConfig(
+            level: Some("debug"), // Enable debug logging to see response details
+            log_mqtt: Some(true),
+            log_client_actions: Some(true),
+            filters: Some([
+                "mcp/*", 
+                "multiplayer/*", 
+                "get_multiplayer_status",
+                "list_online_worlds",
+                "publish_world",
+                "world_id",
+                "HostingWorld",
+                "SharedWorldInfo"
+            ]),
+        )),
+        environment: Some({
+            "RUST_LOG": "debug,iotcraft_desktop_client=debug",
+            "SCENARIO_NAME": "debug_mcp_responses",
+            "ENABLE_MCP": "true",
+        }),
+        settings: Some({
+            "auto_cleanup": true,
+            "preserve_logs": true, // Keep logs to see response content
+            "fail_fast": false, // Continue even if some steps fail
+        }),
+    )),
+)

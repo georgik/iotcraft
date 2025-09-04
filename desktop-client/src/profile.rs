@@ -64,7 +64,10 @@ fn profile_path() -> PathBuf {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-pub fn load_or_create_profile_with_override(player_id_override: Option<String>) -> PlayerProfile {
+pub fn load_or_create_profile_with_override_full(
+    player_id_override: Option<String>,
+    player_name_override: Option<String>,
+) -> PlayerProfile {
     let path = profile_path();
     let mut profile = if let Ok(content) = fs::read_to_string(&path) {
         if let Ok(profile) = serde_json::from_str::<PlayerProfile>(&content) {
@@ -76,10 +79,22 @@ pub fn load_or_create_profile_with_override(player_id_override: Option<String>) 
         PlayerProfile::default()
     };
 
+    // Check if any overrides will be used before moving values
+    let has_id_override = player_id_override.is_some();
+    let has_name_override = player_name_override.is_some();
+
     // Override player ID if provided
     if let Some(id) = player_id_override {
         profile.player_id = format!("player-{}", id); // Ensure it's properly formatted
-        // Don't save overridden profile to disk to avoid conflicts
+    }
+
+    // Override player name if provided
+    if let Some(name) = player_name_override {
+        profile.player_name = name;
+    }
+
+    // If any override was used, don't save to disk and return early
+    if has_id_override || has_name_override {
         log::info!(
             "Player profile override active: player_id={}, player_name={}",
             profile.player_id,
@@ -99,6 +114,12 @@ pub fn load_or_create_profile_with_override(player_id_override: Option<String>) 
         let _ = fs::write(path, json);
     }
     profile
+}
+
+// Backward-compatible wrapper
+#[cfg(not(target_arch = "wasm32"))]
+pub fn load_or_create_profile_with_override(player_id_override: Option<String>) -> PlayerProfile {
+    load_or_create_profile_with_override_full(player_id_override, None)
 }
 
 #[cfg(target_arch = "wasm32")]

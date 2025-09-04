@@ -11,6 +11,7 @@ use crate::{
 };
 use bevy::prelude::*;
 use bevy::tasks::AsyncComputeTaskPool;
+use chrono;
 use log::{debug, error, info};
 use serde_json::{Value, json};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -411,13 +412,13 @@ pub fn should_queue_as_command(tool_name: &str) -> bool {
             | "list_online_worlds"
             | "get_multiplayer_status"
             | "get_world_status"
-            | "player_move"
             | "wait_for_condition"
             | "get_client_info"
             | "get_game_state"
             | "health_check"
             | "get_system_info"
             | "get_sensor_data"
+            | "list_world_templates"
     )
 }
 
@@ -689,7 +690,33 @@ fn execute_mcp_commands(
     device_query: Query<(&DeviceEntity, &Transform), Without<Camera>>,
     mut create_world_events: EventWriter<CreateWorldEvent>,
     mut next_game_state: Option<ResMut<NextState<GameState>>>,
+    // Add multiplayer resources for better MCP responses
+    multiplayer_mode: Option<Res<crate::multiplayer::shared_world::MultiplayerMode>>,
+    online_worlds: Option<Res<crate::multiplayer::shared_world::OnlineWorlds>>,
+    player_positions: Option<Res<crate::multiplayer::shared_world::MultiplayerPlayerPositions>>,
+    mut player_move_events: EventWriter<crate::multiplayer::shared_world::PlayerMoveEvent>,
 ) {
+    // Add comprehensive debug logging
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static DEBUG_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    let counter = DEBUG_COUNTER.fetch_add(1, Ordering::Relaxed);
+    if counter % 300 == 0 {
+        // Log every 5 seconds at 60fps
+        info!(
+            "[DEBUG] execute_mcp_commands system running, tick {}, queue size: {}",
+            counter,
+            pending_executions.mcp_commands.len()
+        );
+    }
+
+    if !pending_executions.mcp_commands.is_empty() {
+        info!(
+            "[DEBUG] Processing {} MCP commands from queue",
+            pending_executions.mcp_commands.len()
+        );
+    }
+
     // Process all queued MCP commands
     for mcp_command in pending_executions.mcp_commands.drain(..) {
         info!(
@@ -706,6 +733,10 @@ fn execute_mcp_commands(
             &device_query,
             &mut create_world_events,
             &mut next_game_state,
+            multiplayer_mode.as_deref(),
+            online_worlds.as_deref(),
+            player_positions.as_deref(),
+            &mut player_move_events,
         );
 
         // Emit the result as CommandExecutedEvent
@@ -721,12 +752,18 @@ fn execute_mcp_command_directly(
     tool_name: &str,
     arguments: &serde_json::Value,
     temperature: &TemperatureResource,
-    mqtt_config: &MqttConfig,
+    _mqtt_config: &MqttConfig,
     voxel_world: &VoxelWorld,
     device_query: &Query<(&DeviceEntity, &Transform), Without<Camera>>,
     create_world_events: &mut EventWriter<CreateWorldEvent>,
     next_game_state: &mut Option<ResMut<NextState<GameState>>>,
+    multiplayer_mode: Option<&crate::multiplayer::shared_world::MultiplayerMode>,
+    online_worlds: Option<&crate::multiplayer::shared_world::OnlineWorlds>,
+    player_positions: Option<&crate::multiplayer::shared_world::MultiplayerPlayerPositions>,
+    player_move_events: &mut EventWriter<crate::multiplayer::shared_world::PlayerMoveEvent>,
 ) -> String {
+    use crate::multiplayer::shared_world::MultiplayerMode;
+
     match tool_name {
         "get_client_info" => json!({
             "client_id": crate::profile::load_or_create_profile_with_override(None).player_id,
@@ -777,20 +814,94 @@ fn execute_mcp_command_directly(
             "mqtt_connected": temperature.value.is_some()
         })
         .to_string(),
+        "list_world_templates" => {
+            // List available world templates from scripts/world_templates/
+            let templates_dir = std::path::Path::new("scripts/world_templates");
+            if templates_dir.exists() {
+                match std::fs::read_dir(templates_dir) {
+                    Ok(entries) => {
+                        let mut templates = Vec::new();
+                        for entry in entries.flatten() {
+                            let path = entry.path();
+                            if path.is_file()
+                                && path.extension().map(|ext| ext == "txt").unwrap_or(false)
+                            {
+                                if let Some(template_name) =
+                                    path.file_stem().and_then(|s| s.to_str())
+                                {
+                                    // Read first few lines to get description
+                                    let description = if let Ok(content) =
+                                        std::fs::read_to_string(&path)
+                                    {
+                                        content
+                                            .lines()
+                                            .find(|line| {
+                                                line.starts_with("# ") && !line.contains("Template")
+                                            })
+                                            .map(|line| line.trim_start_matches("# "))
+                                            .unwrap_or("World template")
+                                            .to_string()
+                                    } else {
+                                        "World template".to_string()
+                                    };
+
+                                    templates.push(json!({
+                                        "name": template_name,
+                                        "description": description,
+                                        "file": format!("{}.txt", template_name)
+                                    }));
+                                }
+                            }
+                        }
+                        templates.sort_by(|a, b| {
+                            a["name"]
+                                .as_str()
+                                .unwrap_or("")
+                                .cmp(b["name"].as_str().unwrap_or(""))
+                        });
+
+                        json!({
+                            "templates": templates,
+                            "count": templates.len()
+                        })
+                        .to_string()
+                    }
+                    Err(e) => format!("Error reading templates directory: {}", e),
+                }
+            } else {
+                "Error: templates directory not found at scripts/world_templates/".to_string()
+            }
+        }
         "create_world" => {
-            if let (Some(world_name), Some(description)) = (
-                arguments.get("world_name").and_then(|v| v.as_str()),
-                arguments.get("description").and_then(|v| v.as_str()),
-            ) {
+            if let Some(world_name) = arguments.get("world_name").and_then(|v| v.as_str()) {
+                let description = arguments
+                    .get("description")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("A new world created via MCP");
+                let template = arguments
+                    .get("template")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("default");
+
                 info!(
-                    "Creating world via MCP: name='{}', description='{}'",
-                    world_name, description
+                    "Creating world via MCP: name='{}', description='{}', template='{}'",
+                    world_name, description, template
                 );
 
-                // Send CreateWorldEvent to trigger world creation
+                // Validate template exists
+                let template_path = format!("scripts/world_templates/{}.txt", template);
+                if !std::path::Path::new(&template_path).exists() {
+                    return format!(
+                        "Error: Template '{}' not found. Available templates: default, medieval, modern, creative",
+                        template
+                    );
+                }
+
+                // Send CreateWorldEvent with template info to trigger world creation
                 create_world_events.write(CreateWorldEvent {
                     world_name: world_name.to_string(),
                     description: description.to_string(),
+                    template: Some(template.to_string()),
                 });
 
                 // Set game state to InGame to transition UI from main menu
@@ -800,11 +911,136 @@ fn execute_mcp_command_directly(
                 }
 
                 format!(
-                    "Created new world: {} ({}) and transitioned to InGame",
-                    world_name, description
+                    "Created new world: {} ({}) using template '{}' and transitioned to InGame",
+                    world_name, description, template
                 )
             } else {
-                "Error: world_name and description are required for create_world".to_string()
+                "Error: world_name is required for create_world".to_string()
+            }
+        }
+        "player_move" => {
+            if let (Some(x), Some(y), Some(z)) = (
+                arguments.get("x").and_then(|v| v.as_f64()),
+                arguments.get("y").and_then(|v| v.as_f64()),
+                arguments.get("z").and_then(|v| v.as_f64()),
+            ) {
+                // Emit PlayerMoveEvent for immediate processing
+                player_move_events.write(crate::multiplayer::shared_world::PlayerMoveEvent {
+                    x: x as f32,
+                    y: y as f32,
+                    z: z as f32,
+                });
+                format!("Player moved to ({}, {}, {})", x, y, z)
+            } else {
+                "Error: player_move requires x, y, z coordinates".to_string()
+            }
+        }
+        "list_online_worlds" => {
+            if let Some(worlds) = online_worlds {
+                if worlds.worlds.is_empty() {
+                    json!({
+                        "online_worlds": [],
+                        "message": "No online worlds found.",
+                        "timestamp": chrono::Utc::now().to_rfc3339()
+                    })
+                    .to_string()
+                } else {
+                    let world_list: Vec<serde_json::Value> = worlds
+                        .worlds
+                        .iter()
+                        .map(|(world_id, world_info)| {
+                            json!({
+                                "world_id": world_id,
+                                "world_name": world_info.world_name,
+                                "host_name": world_info.host_name,
+                                "player_count": world_info.player_count,
+                                "max_players": world_info.max_players,
+                                "is_public": world_info.is_public
+                            })
+                        })
+                        .collect();
+
+                    json!({
+                        "online_worlds": world_list,
+                        "timestamp": chrono::Utc::now().to_rfc3339()
+                    })
+                    .to_string()
+                }
+            } else {
+                json!({
+                    "online_worlds": [],
+                    "message": "Online worlds resource not available",
+                    "timestamp": chrono::Utc::now().to_rfc3339()
+                })
+                .to_string()
+            }
+        }
+        "get_multiplayer_status" => {
+            if let Some(mode) = multiplayer_mode {
+                let (multiplayer_mode_str, world_id, is_published, host_player) = match mode {
+                    MultiplayerMode::SinglePlayer => {
+                        ("SinglePlayer".to_string(), None, false, None)
+                    }
+                    MultiplayerMode::HostingWorld {
+                        world_id,
+                        is_published,
+                    } => (
+                        "HostingWorld".to_string(),
+                        Some(world_id.clone()),
+                        *is_published,
+                        None,
+                    ),
+                    MultiplayerMode::JoinedWorld {
+                        world_id,
+                        host_player,
+                    } => (
+                        "JoinedWorld".to_string(),
+                        Some(world_id.clone()),
+                        false,
+                        Some(host_player.clone()),
+                    ),
+                };
+
+                // Include player positions if available
+                let player_positions_json = if let Some(positions) = player_positions {
+                    let positions_list: Vec<serde_json::Value> = positions
+                        .positions
+                        .values()
+                        .map(|pos| {
+                            json!({
+                                "player_id": pos.player_id,
+                                "player_name": pos.player_name,
+                                "x": pos.x,
+                                "y": pos.y,
+                                "z": pos.z,
+                                "last_updated": pos.last_updated
+                            })
+                        })
+                        .collect();
+                    positions_list
+                } else {
+                    vec![]
+                };
+
+                json!({
+                    "multiplayer_mode": multiplayer_mode_str,
+                    "world_id": world_id,
+                    "is_published": is_published,
+                    "host_player": host_player,
+                    "player_positions": player_positions_json,
+                    "timestamp": chrono::Utc::now().to_rfc3339()
+                })
+                .to_string()
+            } else {
+                json!({
+                    "multiplayer_mode": "SinglePlayer",
+                    "world_id": null,
+                    "is_published": false,
+                    "host_player": null,
+                    "error": "Multiplayer mode resource not available",
+                    "timestamp": chrono::Utc::now().to_rfc3339()
+                })
+                .to_string()
             }
         }
         _ => {

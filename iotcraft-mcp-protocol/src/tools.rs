@@ -468,6 +468,15 @@ fn game_control_tools() -> Vec<McpTool> {
             }),
         },
         McpTool {
+            name: "list_world_templates".to_string(),
+            description: "List available world templates that can be used for world creation".to_string(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {},
+                "required": []
+            }),
+        },
+        McpTool {
             name: "create_world".to_string(),
             description: "Create a new world and set the game state to InGame to transition from menu to gameplay".to_string(),
             input_schema: json!({
@@ -480,6 +489,11 @@ fn game_control_tools() -> Vec<McpTool> {
                     "description": {
                         "type": "string",
                         "description": "Description for the new world (default: 'A new world created via MCP')"
+                    },
+                    "template": {
+                        "type": "string",
+                        "description": "Template to use for world generation (default: 'default'). Available: default, medieval, modern, creative",
+                        "enum": ["default", "medieval", "modern", "creative"]
                     }
                 },
                 "required": ["world_name"]
