@@ -1,0 +1,165 @@
+// Fast Create World MCP Command Scenario
+// Optimized version with minimal wait times for quick testing
+Scenario(
+    name: "test_create_world_fast",
+    description: "Fast MCP create_world test with minimal wait times for rapid development testing",
+    version: "1.0",
+    
+    // Infrastructure setup - MQTT server for full functionality
+    infrastructure: InfrastructureConfig(
+        mqtt_server: MqttServerConfig(
+            required: true,
+            port: 1883,
+            config_file: None,
+            options: None,
+        ),
+        mqtt_observer: None, // No observer for faster test
+        mcp_server: None,
+        services: None,
+    ),
+    
+    // Single test client
+    clients: [
+        ClientConfig(
+            id: "test_client",
+            player_id: "test_client", 
+            mcp_port: 3001,
+            client_type: "desktop",
+            name: Some("Test Client - Fast MCP Create World"),
+            config: None,
+        ),
+    ],
+    
+    // Fast test steps focused on create_world command
+    steps: [
+        // Step 1: Initialize MCP connection
+        Step(
+            name: "mcp_initialize",
+            description: "Initialize MCP connection",
+            client: "test_client",
+            action: (
+                type: "mcp_call",
+                tool: "initialize",
+                arguments: {
+                    "protocolVersion": "2024-11-05",
+                    "capabilities": {
+                        "tools": {}
+                    },
+                    "clientInfo": {
+                        "name": "mcplay-fast-world-test",
+                        "version": "1.0.0"
+                    }
+                },
+            ),
+            wait_before: 500,   // Reduced from 3000ms
+            wait_after: 100,    // Minimal wait
+            timeout: 10000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: [],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 2: Test the create_world MCP command
+        Step(
+            name: "test_create_world_command",
+            description: "Test create_world MCP command to verify state transition",
+            client: "test_client",
+            action: (
+                type: "mcp_call",
+                tool: "create_world",
+                arguments: {
+                    "world_name": "fast_mcp_test_world",
+                    "description": "Fast test world for development",
+                },
+            ),
+            wait_before: 100,    // Reduced from 3000ms
+            wait_after: 1000,    // Reduced from 5000ms
+            timeout: 15000,      // Reduced from 30000ms
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["mcp_initialize"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 3: Verify game state transition by placing a block
+        Step(
+            name: "verify_ingame_state",
+            description: "Verify the client is in InGame state by placing a block",
+            client: "test_client",
+            action: (
+                type: "mcp_call",
+                tool: "place_block",
+                arguments: {
+                    "block_type": "stone",
+                    "x": 0,
+                    "y": 1,
+                    "z": 0,
+                },
+            ),
+            wait_before: 200,    // Reduced from 1000ms
+            wait_after: 500,     // Reduced from 2000ms
+            timeout: 8000,       // Reduced from 15000ms
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["test_create_world_command"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 4: Check world status to confirm world creation
+        Step(
+            name: "check_world_status",
+            description: "Check world status to confirm the world was created properly",
+            client: "test_client",
+            action: (
+                type: "mcp_call",
+                tool: "get_world_status",
+                arguments: {},
+            ),
+            wait_before: 100,    // Reduced from 500ms
+            wait_after: 200,     // Reduced from 1000ms
+            timeout: 5000,       // Reduced from 10000ms
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["verify_ingame_state"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+    ],
+    
+    // Test configuration
+    config: Some(ScenarioConfig(
+        timeout_ms: Some(60000),  // Reduced from 120000 (1 minute total timeout)
+        logging: Some(LoggingConfig(
+            level: Some("info"),
+            log_mqtt: Some(false),    // Reduced logging for speed
+            log_client_actions: Some(true),
+            filters: Some(["world/*", "mcp/*", "create_world", "GameState"]),
+        )),
+        environment: Some({
+            "RUST_LOG": "info,iotcraft_desktop_client=info",
+            "SCENARIO_NAME": "test_create_world_fast",
+            "ENABLE_MCP": "true",
+        }),
+        settings: Some({
+            "auto_cleanup": true,
+            "preserve_logs": false,   // Skip log preservation for speed
+            "fail_fast": true,
+        }),
+    )),
+)

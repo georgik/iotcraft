@@ -1,10 +1,19 @@
+#[cfg(not(target_arch = "wasm32"))]
+use chrono;
+#[cfg(not(target_arch = "wasm32"))]
 use clap::{Parser, Subcommand};
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde_json::Value;
+#[cfg(not(target_arch = "wasm32"))]
+use serde_json::json;
 use std::collections::HashMap;
+#[cfg(not(target_arch = "wasm32"))]
 use std::fs;
+#[cfg(not(target_arch = "wasm32"))]
 use std::time::{Duration, Instant};
+#[cfg(not(target_arch = "wasm32"))]
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+#[cfg(not(target_arch = "wasm32"))]
 use tokio::net::TcpStream;
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -27,6 +36,7 @@ struct TestReport {
     results: Vec<TestResult>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(Parser)]
 #[command(name = "mcp_test_client")]
 #[command(about = "A CLI test client for IoTCraft MCP server")]
@@ -43,6 +53,7 @@ struct Cli {
     command: Commands,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(Subcommand)]
 enum Commands {
     /// Initialize the MCP connection
@@ -113,6 +124,7 @@ enum Commands {
     Interactive,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
@@ -153,6 +165,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+#[cfg(target_arch = "wasm32")]
+fn main() {
+    panic!("MCP test client is not supported on WASM target");
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 async fn connect_to_server(server_addr: &str) -> Result<TcpStream, Box<dyn std::error::Error>> {
     println!("Connecting to MCP server at {}...", server_addr);
     let stream = TcpStream::connect(server_addr).await?;
@@ -160,6 +178,7 @@ async fn connect_to_server(server_addr: &str) -> Result<TcpStream, Box<dyn std::
     Ok(stream)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 async fn send_request_and_get_response(
     reader: &mut BufReader<tokio::net::tcp::OwnedReadHalf>,
     writer: &mut tokio::net::tcp::OwnedWriteHalf,
@@ -189,6 +208,7 @@ async fn send_request_and_get_response(
     Ok(response)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 async fn test_init(server_addr: &str) -> Result<(), Box<dyn std::error::Error>> {
     let stream = connect_to_server(server_addr).await?;
     let (reader, mut writer) = stream.into_split();
@@ -220,6 +240,7 @@ async fn test_init(server_addr: &str) -> Result<(), Box<dyn std::error::Error>> 
     Ok(())
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 async fn test_list_tools(server_addr: &str) -> Result<(), Box<dyn std::error::Error>> {
     let stream = connect_to_server(server_addr).await?;
     let (reader, mut writer) = stream.into_split();
@@ -251,6 +272,7 @@ async fn test_list_tools(server_addr: &str) -> Result<(), Box<dyn std::error::Er
     Ok(())
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 async fn test_create_wall(
     server_addr: &str,
     block_type: &str,
@@ -293,6 +315,7 @@ async fn test_create_wall(
     Ok(())
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 async fn test_place_block(
     server_addr: &str,
     block_type: &str,
@@ -328,6 +351,7 @@ async fn test_place_block(
     Ok(())
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 async fn test_spawn_device(
     server_addr: &str,
     device_id: &str,
@@ -365,6 +389,7 @@ async fn test_spawn_device(
     Ok(())
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 async fn test_suite(server_addr: &str) -> Result<(), Box<dyn std::error::Error>> {
     println!("🧪 Running comprehensive MCP test suite...\n");
 
@@ -401,6 +426,7 @@ async fn test_suite(server_addr: &str) -> Result<(), Box<dyn std::error::Error>>
     Ok(())
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 async fn test_invalid_parameters(server_addr: &str) -> Result<(), Box<dyn std::error::Error>> {
     let stream = connect_to_server(server_addr).await?;
     let (reader, mut writer) = stream.into_split();
@@ -436,6 +462,7 @@ async fn test_invalid_parameters(server_addr: &str) -> Result<(), Box<dyn std::e
     Ok(())
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 async fn interactive_mode(server_addr: &str) -> Result<(), Box<dyn std::error::Error>> {
     println!("🔄 Entering interactive mode. Type 'help' for commands or 'quit' to exit.");
 
@@ -537,6 +564,7 @@ async fn interactive_mode(server_addr: &str) -> Result<(), Box<dyn std::error::E
     Ok(())
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 async fn run_comprehensive_tests(
     server_addr: &str,
     format: &str,
@@ -790,6 +818,7 @@ async fn run_comprehensive_tests(
     Ok(())
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 async fn run_single_test<F, Fut>(name: &str, test_fn: F) -> TestResult
 where
     F: FnOnce() -> Fut,
@@ -829,6 +858,7 @@ where
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 async fn test_tool_call(
     server_addr: &str,
     tool_name: &str,
@@ -871,6 +901,7 @@ async fn test_tool_call(
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 async fn send_request_quiet(
     reader: &mut BufReader<tokio::net::tcp::OwnedReadHalf>,
     writer: &mut tokio::net::tcp::OwnedWriteHalf,

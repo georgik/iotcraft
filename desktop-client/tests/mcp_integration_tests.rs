@@ -1,3 +1,5 @@
+#![cfg(not(target_arch = "wasm32"))]
+
 use serde_json::{Value, json};
 use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};

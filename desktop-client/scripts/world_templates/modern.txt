@@ -1,0 +1,129 @@
+# Modern City World Template
+# Creates a modern urban environment with buildings, roads, and city features
+
+# Set initial camera position for city overview
+tp -12 15 25
+look -30 -15
+
+# Create base terrain (concrete/urban ground)
+wall stone -35 0 -35 35 0 35
+
+# Create road network (using darker stone or different material)
+# Main street running North-South
+wall cyan_terracotta -2 1 -35 2 1 35
+
+# Cross street running East-West  
+wall cyan_terracotta -35 1 -2 35 1 2
+
+# Avenue parallel to main street
+wall cyan_terracotta -15 1 -35 -11 1 35
+wall cyan_terracotta 11 1 -35 15 1 35
+
+# Skyscraper 1 - Downtown center
+wall quartz_block -8 1 -15 -4 1 -11
+wall quartz_block -8 2 -15 -4 2 -11
+wall quartz_block -8 3 -15 -4 3 -11
+wall quartz_block -8 4 -15 -4 4 -11
+wall quartz_block -8 5 -15 -4 5 -11
+wall quartz_block -8 6 -15 -4 6 -11
+wall quartz_block -8 7 -15 -4 7 -11
+wall quartz_block -8 8 -15 -4 8 -11
+# Glass windows
+place glass_pane -7 3 -14
+place glass_pane -5 3 -14
+place glass_pane -7 5 -14
+place glass_pane -5 5 -14
+place glass_pane -7 7 -14
+place glass_pane -5 7 -14
+
+# Skyscraper 2 - Financial district
+wall quartz_block 5 1 -20 9 1 -16
+wall quartz_block 5 2 -20 9 2 -16
+wall quartz_block 5 3 -20 9 3 -16
+wall quartz_block 5 4 -20 9 4 -16  
+wall quartz_block 5 5 -20 9 5 -16
+wall quartz_block 5 6 -20 9 6 -16
+wall quartz_block 5 7 -20 9 7 -16
+wall quartz_block 5 8 -20 9 8 -16
+wall quartz_block 5 9 -20 9 9 -16
+wall quartz_block 5 10 -20 9 10 -16
+
+# Office Building 1
+wall stone 15 1 5 20 1 10
+wall stone 15 2 5 20 2 10
+wall stone 15 3 5 20 3 10
+wall stone 15 4 5 20 4 10
+wall stone 15 5 5 20 5 10
+# Windows
+place glass_pane 16 2 5
+place glass_pane 18 2 5  
+place glass_pane 16 4 5
+place glass_pane 18 4 5
+
+# Apartment Complex
+wall stone -25 1 8 -20 1 13
+wall stone -25 2 8 -20 2 13
+wall stone -25 3 8 -20 3 13
+wall stone -25 4 8 -20 4 13
+# Balconies
+place stone -19 2 9
+place stone -19 2 11
+place stone -19 4 10
+
+# Shopping Center  
+wall quartz_block -18 1 -8 -10 1 -3
+wall quartz_block -18 2 -8 -10 2 -3
+wall quartz_block -18 3 -8 -10 3 -3
+# Large windows for storefronts
+wall glass_pane -17 2 -3 -11 2 -3
+
+# City Park area
+wall grass 8 1 15 18 1 25
+place stone 13 2 20  # Park monument
+wall water 10 1 17 12 1 19  # Park pond
+
+# Industrial area
+wall stone -30 1 -25 -22 1 -18
+wall stone -30 2 -25 -22 2 -18
+wall stone -30 3 -25 -22 3 -18
+wall stone -30 4 -25 -22 4 -18
+# Smokestack
+place stone -26 5 -22
+place stone -26 6 -22
+place stone -26 7 -22
+
+# Residential suburb
+wall stone 22 1 -10 26 1 -6
+wall stone 22 2 -10 26 2 -6
+wall stone 22 3 -10 26 3 -10  # Front wall
+wall stone 22 3 -6 26 3 -6    # Back wall
+wall stone 22 3 -10 22 3 -6   # Left wall  
+wall stone 26 3 -10 26 3 -6   # Right wall
+
+# Another house
+wall stone 28 1 -8 32 1 -4
+wall stone 28 2 -8 32 2 -4
+wall stone 28 3 -8 32 3 -8    # Front wall
+wall stone 28 3 -4 32 3 -4    # Back wall
+wall stone 28 3 -8 28 3 -4    # Left wall
+wall stone 32 3 -8 32 3 -4    # Right wall
+
+# Urban decorations
+place glass_pane 0 3 0        # City center monument
+place cyan_terracotta 3 1 3   # Bus stop
+place cyan_terracotta -3 1 -3 # Subway entrance marker
+
+# Street lights (using glass panes on stone)
+place stone 10 1 -5
+place glass_pane 10 4 -5
+place stone -10 1 8  
+place glass_pane -10 4 8
+place stone 5 1 20
+place glass_pane 5 4 20
+
+# Give modern/urban starting items
+give quartz_block 64
+give stone 64
+give glass_pane 32
+give cyan_terracotta 24
+give water 8

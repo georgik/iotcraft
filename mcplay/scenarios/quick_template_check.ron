@@ -1,0 +1,112 @@
+// Quick Template Check Scenario
+Scenario(
+    name: "quick_template_check",
+    description: "Quick test to see template listing output",
+    version: "1.0",
+    
+    // Minimal infrastructure 
+    infrastructure: InfrastructureConfig(
+        mqtt_server: MqttServerConfig(
+            required: true,
+            port: 1883,
+            config_file: None,
+            options: None,
+        ),
+        mqtt_observer: None,
+        mcp_server: None,
+        services: None,
+    ),
+    
+    // Test client
+    clients: [
+        ClientConfig(
+            id: "test",
+            player_id: "test", 
+            mcp_port: 8081,
+            client_type: "desktop",
+            name: Some("Quick Test Client"),
+            config: None,
+        ),
+    ],
+    
+    // Test steps
+    steps: [
+        // Step 1: Initialize MCP connection
+        Step(
+            name: "mcp_initialize",
+            description: "Initialize MCP connection",
+            client: "test",
+            action: (
+                type: "mcp_call",
+                tool: "initialize",
+                arguments: {
+                    "protocolVersion": "2024-11-05",
+                    "capabilities": {
+                        "tools": {}
+                    },
+                    "clientInfo": {
+                        "name": "mcplay-quick-test",
+                        "version": "1.0.0"
+                    }
+                },
+            ),
+            wait_before: 1000,
+            wait_after: 500,
+            timeout: 10000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: [],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 2: List world templates
+        Step(
+            name: "list_templates",
+            description: "List available world templates",
+            client: "test",
+            action: (
+                type: "mcp_call",
+                tool: "list_world_templates",
+                arguments: {},
+            ),
+            wait_before: 200,
+            wait_after: 500,
+            timeout: 5000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["mcp_initialize"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+    ],
+    
+    // Test configuration
+    config: Some(ScenarioConfig(
+        timeout_ms: Some(30000),
+        logging: Some(LoggingConfig(
+            level: Some("info"),
+            log_mqtt: Some(false),
+            log_client_actions: Some(true),
+            filters: Some([
+                "list_world_templates", 
+                "mcp_call",
+            ]),
+        )),
+        environment: Some({
+            "RUST_LOG": "info",
+            "SCENARIO_NAME": "quick_template_check",
+        }),
+        settings: Some({
+            "auto_cleanup": true,
+            "preserve_logs": false,
+            "fail_fast": true,
+        }),
+    )),
+)

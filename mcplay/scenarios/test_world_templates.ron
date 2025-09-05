@@ -1,0 +1,169 @@
+// World Templates Test Scenario
+Scenario(
+    name: "test_world_templates",
+    description: "Test world template listing and creation via MCP",
+    version: "1.0",
+    
+    // Minimal infrastructure 
+    infrastructure: InfrastructureConfig(
+        mqtt_server: MqttServerConfig(
+            required: true,
+            port: 1883,
+            config_file: None,
+            options: None,
+        ),
+        mqtt_observer: None,
+        mcp_server: None,
+        services: None,
+    ),
+    
+    // Test client
+    clients: [
+        ClientConfig(
+            id: "alice",
+            player_id: "alice", 
+            mcp_port: 8080,
+            client_type: "desktop",
+            name: Some("Alice - Template Test Client"),
+            config: None,
+        ),
+    ],
+    
+    // Test steps
+    steps: [
+        // Step 1: Initialize MCP connection
+        Step(
+            name: "mcp_initialize",
+            description: "Initialize MCP connection",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "initialize",
+                arguments: {
+                    "protocolVersion": "2024-11-05",
+                    "capabilities": {
+                        "tools": {}
+                    },
+                    "clientInfo": {
+                        "name": "mcplay-template-test",
+                        "version": "1.0.0"
+                    }
+                },
+            ),
+            wait_before: 3000,
+            wait_after: 1000,
+            timeout: 10000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: [],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 2: List world templates
+        Step(
+            name: "list_world_templates",
+            description: "List available world templates",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "list_world_templates",
+                arguments: {},
+            ),
+            wait_before: 500,
+            wait_after: 1000,
+            timeout: 10000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["mcp_initialize"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 3: Create world with default template
+        Step(
+            name: "create_default_world",
+            description: "Create world with default template",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "create_world",
+                arguments: {
+                    "world_name": "TestDefaultWorld",
+                    "description": "Testing default template"
+                },
+            ),
+            wait_before: 500,
+            wait_after: 2000,
+            timeout: 15000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["list_world_templates"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 4: Create world with medieval template
+        Step(
+            name: "create_medieval_world",
+            description: "Create world with medieval template",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "create_world",
+                arguments: {
+                    "world_name": "TestMedievalWorld",
+                    "description": "Testing medieval template",
+                    "template": "medieval"
+                },
+            ),
+            wait_before: 500,
+            wait_after: 2000,
+            timeout: 15000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["create_default_world"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+    ],
+    
+    // Test configuration
+    config: Some(ScenarioConfig(
+        timeout_ms: Some(120000),  // 2 minute total timeout
+        logging: Some(LoggingConfig(
+            level: Some("debug"),
+            log_mqtt: Some(true),
+            log_client_actions: Some(true),
+            filters: Some([
+                "mcp/*", 
+                "list_world_templates", 
+                "create_world",
+                "execute_mcp_commands",
+                "CommandExecutedEvent"
+            ]),
+        )),
+        environment: Some({
+            "RUST_LOG": "debug,iotcraft_desktop_client=debug",
+            "SCENARIO_NAME": "test_world_templates",
+            "ENABLE_MCP": "true",
+        }),
+        settings: Some({
+            "auto_cleanup": true,
+            "preserve_logs": true,
+            "fail_fast": true,
+        }),
+    )),
+)

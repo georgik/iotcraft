@@ -1,0 +1,299 @@
+// Test Get Game State via MCP Scenario
+// This scenario spins up Alice client and retrieves game state via MCP
+Scenario(
+    name: "test_get_game_state",
+    description: "Test MCP game state retrieval with Alice client using medieval template - demonstrates proper world creation same as desktop UI",
+    version: "1.0",
+    
+    // Infrastructure setup - MQTT server for full functionality
+    infrastructure: InfrastructureConfig(
+        mqtt_server: MqttServerConfig(
+            required: true,
+            port: 1883,
+            config_file: None,
+            options: None,
+        ),
+        mqtt_observer: Some(MqttObserverConfig(
+            required: false,  // Optional for this test
+            topics: Some(["mcp/*", "world/*", "game/*"]),
+            client_id: Some("game_state_observer"),
+        )),
+        mcp_server: None,
+        services: None,
+    ),
+    
+    // Alice client for testing game state retrieval
+    clients: [
+        ClientConfig(
+            id: "alice",
+            player_id: "alice", 
+            mcp_port: 8080,
+            client_type: "desktop",
+            name: Some("Alice - Game State Test Client"),
+            config: None,
+        ),
+    ],
+    
+    // Test steps for comprehensive game state testing
+    steps: [
+        // Step 1: Initialize MCP connection
+        Step(
+            name: "mcp_initialize",
+            description: "Initialize MCP connection with proper handshake",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "initialize",
+                arguments: {
+                    "protocolVersion": "2024-11-05",
+                    "capabilities": {
+                        "tools": {}
+                    },
+                    "clientInfo": {
+                        "name": "mcplay-test-client",
+                        "version": "1.0.0"
+                    }
+                },
+            ),
+            wait_before: 3000,   // Wait for client to fully start
+            wait_after: 1000,    // Wait for initialization to complete
+            timeout: 10000,      // 10 second timeout for initialization
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: [],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 2: List available tools
+        Step(
+            name: "list_tools",
+            description: "List available MCP tools to verify connection",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "tools/list",
+                arguments: {},
+            ),
+            wait_before: 500,
+            wait_after: 1000,
+            timeout: 10000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["mcp_initialize"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 3: Get basic client info
+        Step(
+            name: "get_client_info",
+            description: "Retrieve basic client information via MCP",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "get_client_info",
+                arguments: {},
+            ),
+            wait_before: 500,
+            wait_after: 2000,    // Wait to process response
+            timeout: 15000,      // 15 second timeout
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["list_tools"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 4: Create medieval world with comprehensive template
+        Step(
+            name: "create_medieval_world",
+            description: "Create a medieval world using the comprehensive medieval template - same as desktop UI experience",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "create_world",
+                arguments: {
+                    "world_name": "alice_medieval_kingdom",
+                    "description": "A medieval kingdom with castle, village, and countryside for testing game state",
+                    "template": "medieval",
+                },
+            ),
+            wait_before: 1000,
+            wait_after: 8000,    // Extended wait for medieval template script execution (castle, village, etc.)
+            timeout: 45000,      // Longer timeout for complex template
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["get_client_info"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 5: Verify Alice is in the InGame state after world creation
+        Step(
+            name: "verify_alice_ingame_state",
+            description: "Verify Alice properly transitioned to InGame state after world creation",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "get_game_state",
+                arguments: {},
+            ),
+            wait_before: 2000,   // Wait for game state transition to complete
+            wait_after: 1000,
+            timeout: 10000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["create_medieval_world"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 6: Add a custom medieval decoration on top of template
+        Step(
+            name: "add_custom_medieval_decoration",
+            description: "Add a custom banner/decoration to the medieval world on top of the template",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "place_block",
+                arguments: {
+                    "block_type": "cyan_terracotta",
+                    "x": 0,
+                    "y": 6,
+                    "z": -12,
+                },
+            ),
+            wait_before: 1000,
+            wait_after: 2000,
+            timeout: 10000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["verify_alice_ingame_state"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 7: Get world status showing rich medieval content
+        Step(
+            name: "get_world_status_medieval",
+            description: "Retrieve world status showing the rich medieval world content (castle, village, etc.)",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "get_world_status",
+                arguments: {},
+            ),
+            wait_before: 1000,
+            wait_after: 2000,
+            timeout: 10000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["add_custom_medieval_decoration"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 8: Get detailed game state (if available)
+        Step(
+            name: "get_game_state_detailed",
+            description: "Attempt to get detailed game state information",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "get_client_info",
+                arguments: {
+                    "include_world": true,
+                    "include_devices": true,
+                },
+            ),
+            wait_before: 1000,
+            wait_after: 2000,
+            timeout: 10000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["get_world_status_medieval"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 9: Verify we can save the world state
+        Step(
+            name: "save_world_state",
+            description: "Save the world to verify state persistence",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "save_world",
+            arguments: {
+                "filename": "alice_medieval_kingdom_test.json",
+            },
+            ),
+            wait_before: 500,
+            wait_after: 2000,
+            timeout: 10000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["get_game_state_detailed"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+    ],
+    
+    // Test configuration
+    config: Some(ScenarioConfig(
+        timeout_ms: Some(180000),  // 3 minute total timeout
+        logging: Some(LoggingConfig(
+            level: Some("info"),
+            log_mqtt: Some(true),
+            log_client_actions: Some(true),
+            filters: Some([
+                "world/*", 
+                "mcp/*", 
+                "game/*", 
+                "ui/*", 
+                "get_client_info", 
+                "get_world_status",
+                "GameState",
+                "alice"
+            ]),
+        )),
+        environment: Some({
+            "RUST_LOG": "info,iotcraft_desktop_client=debug",
+            "SCENARIO_NAME": "test_get_game_state",
+            "ENABLE_MCP": "true",
+        }),
+        settings: Some({
+            "auto_cleanup": true,
+            "preserve_logs": true,
+            "fail_fast": true,  // Stop on first failure for debugging
+        }),
+    )),
+)

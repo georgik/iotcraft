@@ -1,0 +1,234 @@
+// Alice Medieval World Creation Test
+// Tests creating a medieval world and validates block count to ensure template execution
+Scenario(
+    name: "alice_medieval_world_test",
+    description: "Alice creates a medieval world and validates template was applied by checking block count",
+    version: "1.0",
+    
+    // Infrastructure setup
+    infrastructure: InfrastructureConfig(
+        mqtt_server: MqttServerConfig(
+            required: true,
+            port: 1883,
+            config_file: None,
+            options: None,
+        ),
+        mqtt_observer: None, // Skip observer for faster execution
+        mcp_server: None,
+        services: None,
+    ),
+    
+    // Alice client for testing
+    clients: [
+        ClientConfig(
+            id: "alice",
+            player_id: "alice", 
+            mcp_port: 8080,
+            client_type: "desktop",
+            name: Some("Alice - Medieval World Test"),
+            config: None,
+        ),
+    ],
+    
+    // Test steps
+    steps: [
+        // Step 1: Initialize MCP connection
+        Step(
+            name: "mcp_initialize",
+            description: "Initialize MCP connection",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "initialize",
+                arguments: {
+                    "protocolVersion": "2024-11-05",
+                    "capabilities": {
+                        "tools": {}
+                    },
+                    "clientInfo": {
+                        "name": "alice-medieval-test",
+                        "version": "1.0.0"
+                    }
+                },
+            ),
+            wait_before: 2000,
+            wait_after: 500,
+            timeout: 10000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: [],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 2: Check initial world status (should be empty)
+        Step(
+            name: "check_initial_world_status",
+            description: "Check initial world status before creating medieval world",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "get_world_status",
+                arguments: {},
+            ),
+            wait_before: 500,
+            wait_after: 500,
+            timeout: 10000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["mcp_initialize"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 3: List available templates (for reference)
+        Step(
+            name: "list_templates",
+            description: "List available world templates to confirm medieval is available",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "list_world_templates",
+                arguments: {},
+            ),
+            wait_before: 500,
+            wait_after: 500,
+            timeout: 10000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["check_initial_world_status"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 4: Create medieval world
+        Step(
+            name: "create_medieval_world",
+            description: "Create world with medieval template",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "create_world",
+                arguments: {
+                    "world_name": "AliceMedievalWorld",
+                    "description": "A medieval world for Alice to test template execution",
+                    "template": "medieval"
+                },
+            ),
+            wait_before: 1000,
+            wait_after: 3000, // Give time for world creation
+            timeout: 20000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["list_templates"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 5: Wait for template execution to complete
+        Step(
+            name: "wait_for_template_execution",
+            description: "Wait for medieval template commands to execute (12 seconds for full template)",
+            client: "orchestrator",
+            action: (
+                type: "delay",
+                duration: 12000, // 12 seconds for template execution
+            ),
+            wait_before: 0,
+            wait_after: 0,
+            timeout: 15000,
+            success_condition: None,
+            depends_on: ["create_medieval_world"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 6: Check world status after template execution (validate blocks were created)
+        Step(
+            name: "validate_medieval_world_blocks",
+            description: "Check world status to validate medieval template created blocks",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "get_world_status",
+                arguments: {},
+            ),
+            wait_before: 1000,
+            wait_after: 1000,
+            timeout: 10000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["wait_for_template_execution"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 7: Get game state to confirm InGame transition
+        Step(
+            name: "check_final_game_state",
+            description: "Check final game state to confirm successful transition to InGame",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "get_game_state",
+                arguments: {},
+            ),
+            wait_before: 500,
+            wait_after: 1000,
+            timeout: 10000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["validate_medieval_world_blocks"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+    ],
+    
+    // Test configuration
+    config: Some(ScenarioConfig(
+        timeout_ms: Some(120000),  // 2 minute total timeout
+        logging: Some(LoggingConfig(
+            level: Some("info"),
+            log_mqtt: Some(true),
+            log_client_actions: Some(true),
+            filters: Some([
+                "mcp/*", 
+                "world/*",
+                "medieval/*",
+                "template/*",
+                "create_world",
+                "get_world_status",
+                "execute_pending_commands",
+            ]),
+        )),
+        environment: Some({
+            "RUST_LOG": "info,iotcraft_desktop_client=debug",
+            "SCENARIO_NAME": "alice_medieval_world_test",
+            "ENABLE_MCP": "true",
+        }),
+        settings: Some({
+            "auto_cleanup": true,
+            "preserve_logs": true,
+            "fail_fast": true,
+        }),
+    )),
+)

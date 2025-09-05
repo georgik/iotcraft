@@ -1,0 +1,258 @@
+// Alice Medieval World Creation Debug Scenario
+// Focused debugging of world creation with template loading
+Scenario(
+    name: "alice_medieval_debug",
+    description: "Debug Alice creating medieval world - focused on template loading and execution",
+    version: "1.0",
+    
+    // Minimal infrastructure for debugging
+    infrastructure: InfrastructureConfig(
+        mqtt_server: MqttServerConfig(
+            required: true,
+            port: 1883,
+            config_file: None,
+            options: None,
+        ),
+        mqtt_observer: Some(MqttObserverConfig(
+            required: true, 
+            topics: Some(["#"]),
+            client_id: Some("medieval_debug_observer"),
+        )),
+        mcp_server: None,
+        services: None,
+    ),
+    
+    // Single Alice client for debugging
+    clients: [
+        ClientConfig(
+            id: "alice",
+            player_id: "alice_debug_host",
+            mcp_port: 3001,
+            client_type: "desktop",
+            name: Some("Alice - Medieval Debug Client"),
+            config: Some({
+                "enable_mcp": true,
+                "readiness_probe": {
+                    "type": "tcp_port", 
+                    "port": 3001,
+                    "initial_delay_seconds": 5,
+                    "timeout_seconds": 20
+                },
+                "liveness_probe": {
+                    "type": "mcp_ping",
+                    "interval_seconds": 120,  // Less frequent for debugging
+                    "timeout_seconds": 15,
+                    "failure_threshold": 10   // More tolerant for debugging
+                }
+            }),
+        ),
+    ],
+    
+    // Focused debugging steps
+    steps: [
+        // Step 1: Alice client ready check
+        Step(
+            name: "alice_client_ready",
+            description: "🔧 Alice client startup and readiness verification",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "get_client_info",
+                arguments: {},
+            ),
+            depends_on: [],
+            wait_before: 3000,
+            wait_after: 2000,
+            timeout: 15000,
+            success_condition: None,
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 2: List available world templates to verify they exist
+        Step(
+            name: "list_available_templates",
+            description: "📋 List all available world templates to verify template files",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "list_world_templates",
+                arguments: {},
+            ),
+            depends_on: ["alice_client_ready"],
+            wait_before: 1000,
+            wait_after: 2000,
+            timeout: 10000,
+            success_condition: None,
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 3: Create medieval world with detailed logging
+        Step(
+            name: "create_medieval_world_debug",
+            description: "🏰 Create medieval world with enhanced debugging - check template loading and execution",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "create_world",
+                arguments: {
+                    "world_name": "alice_medieval_debug_world",
+                    "description": "Medieval world for debugging template loading and script execution",
+                    "template": "medieval",
+                },
+            ),
+            depends_on: ["list_available_templates"],
+            wait_before: 2000,
+            wait_after: 15000,   // Extended wait to allow template script execution
+            timeout: 60000,      // 1 minute timeout for debugging
+            success_condition: None,
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 4: Verify game state transition
+        Step(
+            name: "verify_game_state_debug",
+            description: "🎮 Verify Alice transitioned to InGame state after world creation",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "get_game_state",
+                arguments: {},
+            ),
+            depends_on: ["create_medieval_world_debug"],
+            wait_before: 3000,   // Wait for state transition
+            wait_after: 2000,
+            timeout: 15000,
+            success_condition: None,
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 5: Check world status to see if blocks were created
+        Step(
+            name: "check_world_status_debug",
+            description: "🔍 Check world status to see if medieval template blocks were created",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "get_world_status",
+                arguments: {},
+            ),
+            depends_on: ["verify_game_state_debug"],
+            wait_before: 2000,
+            wait_after: 2000,
+            timeout: 15000,
+            success_condition: None,
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 6: Try to place a single block to verify world is interactive
+        Step(
+            name: "test_block_placement_debug",
+            description: "🧱 Test block placement to verify world is interactive and responsive",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "place_block",
+                arguments: {
+                    "block_type": "quartz_block",
+                    "x": 0,
+                    "y": 5,
+                    "z": 0,
+                },
+            ),
+            depends_on: ["check_world_status_debug"],
+            wait_before: 2000,
+            wait_after: 3000,   // Wait to see if block appears
+            timeout: 15000,
+            success_condition: None,
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 7: Final world status check after manual block placement
+        Step(
+            name: "final_world_status_debug",
+            description: "📊 Final world status check to see total blocks (template + manual)",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "get_world_status",
+                arguments: {},
+            ),
+            depends_on: ["test_block_placement_debug"],
+            wait_before: 2000,
+            wait_after: 5000,   // Extra time for observation
+            timeout: 15000,
+            success_condition: None,
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 8: Long-running observation for manual testing
+        Step(
+            name: "debug_observation_mode",
+            description: "🔬 DEBUG MODE: Alice world active for manual inspection - Press Ctrl+C to exit",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "get_multiplayer_status",
+                arguments: {},
+            ),
+            depends_on: ["final_world_status_debug"],
+            wait_before: 3000,
+            wait_after: 9999999,  // Wait indefinitely for manual testing
+            timeout: 0,           // No timeout
+            success_condition: None,
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+    ],
+    
+    // Enhanced debugging configuration
+    config: Some(ScenarioConfig(
+        timeout_ms: Some(0),  // No scenario timeout
+        logging: Some(LoggingConfig(
+            level: Some("debug"),  // More verbose logging
+            log_mqtt: Some(true),
+            log_client_actions: Some(true),
+            filters: Some([
+                "world/*", 
+                "mcp/*", 
+                "template/*",
+                "create_world",
+                "handle_create_world_events",
+                "pending_commands",
+                "script_commands",
+                "medieval",
+                "alice",
+                "get_world_status",
+                "place_block"
+            ]),
+        )),
+        environment: Some({
+            "RUST_LOG": "debug,iotcraft_desktop_client=debug",
+            "SCENARIO_NAME": "alice_medieval_debug",
+            "ENABLE_MCP": "true",
+            "DEBUG_WORLD_CREATION": "true",
+        }),
+        settings: Some({
+            "auto_cleanup": false,      // Don't auto-cleanup for debugging
+            "preserve_logs": true,
+            "fail_fast": false,         // Continue even on failures for debugging
+            "debug_mode": true,         // Enable debug-specific features
+            "verbose_output": true,
+        }),
+    )),
+)

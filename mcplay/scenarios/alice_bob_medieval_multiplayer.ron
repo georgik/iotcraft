@@ -1,0 +1,386 @@
+// Alice & Bob Medieval Multiplayer Scenario
+// Comprehensive cross-platform multiplayer testing with indefinite runtime for manual validation
+Scenario(
+    name: "alice_bob_medieval_multiplayer",
+    description: "Alice creates medieval world, Bob joins, both collaborate in building - runs indefinitely for manual playtesting",
+    version: "1.0",
+    
+    // Full infrastructure for multiplayer
+    infrastructure: InfrastructureConfig(
+        mqtt_server: MqttServerConfig(
+            required: true,
+            port: 1883,
+            config_file: None,
+            options: None,
+        ),
+        mqtt_observer: Some(MqttObserverConfig(
+            required: true, 
+            topics: Some(["#"]),
+            client_id: Some("medieval_multiplayer_observer"),
+        )),
+        mcp_server: None,
+        services: None,
+    ),
+    
+    // Two desktop clients for Alice and Bob
+    clients: [
+        ClientConfig(
+            id: "alice",
+            player_id: "alice_medieval_host",
+            mcp_port: 3001,
+            client_type: "desktop",
+            name: Some("Alice - Medieval World Host"),
+            config: Some({
+                "enable_mcp": true,
+                "readiness_probe": {
+                    "type": "tcp_port", 
+                    "port": 3001,
+                    "initial_delay_seconds": 5,
+                    "timeout_seconds": 20
+                },
+                "liveness_probe": {
+                    "type": "mcp_ping",
+                    "interval_seconds": 60,
+                    "timeout_seconds": 15,
+                    "failure_threshold": 5
+                }
+            }),
+        ),
+        ClientConfig(
+            id: "bob",
+            player_id: "bob_medieval_explorer",
+            mcp_port: 3002,
+            client_type: "desktop",
+            name: Some("Bob - Medieval World Explorer"),
+            config: Some({
+                "enable_mcp": true,
+                "readiness_probe": {
+                    "type": "tcp_port", 
+                    "port": 3002,
+                    "initial_delay_seconds": 5,
+                    "timeout_seconds": 20
+                },
+                "liveness_probe": {
+                    "type": "mcp_ping",
+                    "interval_seconds": 60,
+                    "timeout_seconds": 15,
+                    "failure_threshold": 5
+                }
+            }),
+        ),
+    ],
+    
+    // Comprehensive multiplayer workflow steps
+    steps: [
+        // === PHASE 1: ALICE WORLD SETUP ===
+        
+        // Step 1: Alice checks her client status
+        Step(
+            name: "alice_client_check",
+            description: "Alice verifies her desktop client is ready for multiplayer hosting",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "get_client_info",
+                arguments: {},
+            ),
+            depends_on: [],
+            wait_before: 3000,
+            wait_after: 2000,
+            timeout: 15000,
+            success_condition: None,
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 2: Alice creates medieval world with comprehensive template
+        Step(
+            name: "alice_create_medieval_world",
+            description: "Step 1: Alice creates a medieval world using the comprehensive medieval template",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "create_world",
+                arguments: {
+                    "world_name": "medieval_kingdom_coop",
+                    "description": "A medieval kingdom for Alice and Bob to explore and build together",
+                    "template": "medieval",
+                },
+            ),
+            depends_on: ["alice_client_check"],
+            wait_before: 2000,
+            wait_after: 10000,   // Extended wait for medieval template execution (castle, village, etc.)
+            timeout: 60000,      // 1 minute timeout for complex template
+            success_condition: None,
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 3: Alice verifies she's in gameplay (InGame state)
+        Step(
+            name: "alice_verify_ingame",
+            description: "Step 2: Alice verifies she entered gameplay successfully",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "get_game_state",
+                arguments: {},
+            ),
+            depends_on: ["alice_create_medieval_world"],
+            wait_before: 3000,   // Wait for template execution and state transition
+            wait_after: 2000,
+            timeout: 15000,
+            success_condition: None,
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 4: Alice publishes her medieval world for multiplayer
+        Step(
+            name: "alice_publish_world",
+            description: "Step 3: Alice shares her medieval world for multiplayer collaboration",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "publish_world",
+                arguments: {
+                    "world_name": "medieval_kingdom_coop",
+                    "max_players": 4,
+                    "is_public": true,
+                },
+            ),
+            depends_on: ["alice_verify_ingame"],
+            wait_before: 2000,
+            wait_after: 5000,    // Wait for MQTT world announcement
+            timeout: 30000,
+            success_condition: None,
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // === PHASE 2: BOB CLIENT SETUP ===
+        
+        // Step 5: Bob client startup and status check
+        Step(
+            name: "bob_client_check",
+            description: "Step 4: Bob starts his desktop client and verifies connection",
+            client: "bob",
+            action: (
+                type: "mcp_call",
+                tool: "get_client_info",
+                arguments: {},
+            ),
+            depends_on: [],  // Bob can start independently
+            wait_before: 3000,
+            wait_after: 2000,
+            timeout: 15000,
+            success_condition: None,
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 6: Bob checks list of available worlds
+        Step(
+            name: "bob_list_worlds",
+            description: "Step 5: Bob checks list of available multiplayer worlds",
+            client: "bob",
+            action: (
+                type: "mcp_call",
+                tool: "list_online_worlds",
+                arguments: {},
+            ),
+            depends_on: ["bob_client_check", "alice_publish_world"], // Wait for both Bob ready and Alice published
+            wait_before: 3000,   // Wait for world discovery
+            wait_after: 2000,
+            timeout: 20000,
+            success_condition: None,
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 7: Bob joins Alice's medieval world
+        Step(
+            name: "bob_join_world",
+            description: "Step 6: Bob joins Alice's medieval kingdom for cooperative play",
+            client: "bob",
+            action: (
+                type: "mcp_call",
+                tool: "join_world",
+                arguments: {
+                    "world_id": "medieval_kingdom_coop",
+                },
+            ),
+            depends_on: ["bob_list_worlds"],
+            wait_before: 2000,
+            wait_after: 8000,    // Extended wait for world sync and joining
+            timeout: 45000,
+            success_condition: None,
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // === PHASE 3: COOPERATIVE GAMEPLAY ===
+        
+        // Step 8: Alice moves forward to explore
+        Step(
+            name: "alice_move_forward",
+            description: "Step 7: Alice moves forward to explore the medieval world",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "player_move",
+                arguments: {
+                    "x": 5.0,
+                    "y": 2.0,
+                    "z": -10.0,
+                },
+            ),
+            depends_on: ["bob_join_world"],
+            wait_before: 3000,
+            wait_after: 3000,    // Give time for movement sync
+            timeout: 15000,
+            success_condition: None,
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 9: Bob moves backward to different area
+        Step(
+            name: "bob_move_backward",
+            description: "Step 8: Bob moves backward to explore different area of medieval world",
+            client: "bob",
+            action: (
+                type: "mcp_call",
+                tool: "player_move",
+                arguments: {
+                    "x": -8.0,
+                    "y": 2.0,
+                    "z": 12.0,
+                },
+            ),
+            depends_on: ["alice_move_forward"],
+            wait_before: 2000,
+            wait_after: 3000,    // Give time for movement sync
+            timeout: 15000,
+            success_condition: None,
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 10: Alice places a decorative block
+        Step(
+            name: "alice_place_block",
+            description: "Step 9: Alice places a decorative block in the medieval world",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "place_block",
+                arguments: {
+                    "block_type": "quartz_block",
+                    "x": 6,
+                    "y": 3,
+                    "z": -9,
+                },
+            ),
+            depends_on: ["bob_move_backward"],
+            wait_before: 2000,
+            wait_after: 3000,    // Give time for block sync across clients
+            timeout: 15000,
+            success_condition: None,
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 11: Bob places a block in response
+        Step(
+            name: "bob_place_block",
+            description: "Step 10: Bob places a block in his area of the medieval world",
+            client: "bob",
+            action: (
+                type: "mcp_call",
+                tool: "place_block",
+                arguments: {
+                    "block_type": "cyan_terracotta",
+                    "x": -7,
+                    "y": 2,
+                    "z": 13,
+                },
+            ),
+            depends_on: ["alice_place_block"],
+            wait_before: 2000,
+            wait_after: 3000,    // Give time for block sync across clients
+            timeout: 15000,
+            success_condition: None,
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // === PHASE 4: INDEFINITE VALIDATION PHASE ===
+        
+        // Step 12: Final status check and indefinite hold
+        Step(
+            name: "multiplayer_validation_mode",
+            description: "🎮 VALIDATION MODE: Both players active in medieval world - scenario runs indefinitely for manual testing",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "get_multiplayer_status",
+                arguments: {},
+            ),
+            depends_on: ["bob_place_block"],
+            wait_before: 5000,
+            wait_after: 999999999,  // Indefinite wait - runs until Ctrl+C
+            timeout: 0,             // No timeout - runs forever
+            success_condition: None,
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+    ],
+    
+    // Extended configuration for long-running validation
+    config: Some(ScenarioConfig(
+        timeout_ms: Some(0),  // No scenario timeout - runs indefinitely
+        logging: Some(LoggingConfig(
+            level: Some("info"),
+            log_mqtt: Some(true),
+            log_client_actions: Some(true),
+            filters: Some([
+                "multiplayer/*", 
+                "world/*", 
+                "mcp/*", 
+                "publish_world",
+                "join_world",
+                "player_move",
+                "place_block",
+                "get_multiplayer_status",
+                "alice",
+                "bob"
+            ]),
+        )),
+        environment: Some({
+            "RUST_LOG": "info,iotcraft_desktop_client=info",
+            "SCENARIO_NAME": "alice_bob_medieval_multiplayer",
+            "ENABLE_MCP": "true",
+            "MULTIPLAYER_MODE": "true",
+        }),
+        settings: Some({
+            "auto_cleanup": false,        // Don't auto-cleanup for manual testing
+            "preserve_logs": true,
+            "fail_fast": false,           // Continue on individual step failures
+            "interactive_mode": true,     // Enable manual testing mode
+            "indefinite_runtime": true,   // Runs until manual termination
+        }),
+    )),
+)

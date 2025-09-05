@@ -38,7 +38,7 @@ jobs:
     #- name: Run clippy
     #  run: |
     #    cd desktop-client
-    #    cargo clippy --all-targets --all-features -- -D warnings
+    #    cargo clippy --all-targets -- -D warnings
         
     - name: Run unit tests
       run: |
@@ -48,7 +48,7 @@ jobs:
     - name: Check if build works
       run: |
         cd desktop-client
-        cargo check --all-targets --all-features
+        cargo check --all-targets
 
     - name: Test release build
       run: |

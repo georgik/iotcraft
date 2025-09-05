@@ -1,10 +1,8 @@
-use crate::console::GiveCommand;
 use crate::environment::{BlockType, VoxelWorld};
 use crate::inventory::{
     BreakBlockEvent, GiveItemEvent, ItemType, PlaceBlockEvent, PlayerInventory,
 };
 use bevy::prelude::*;
-use bevy_console::{ConsoleCommand, reply};
 
 /// System to handle give item events
 pub fn give_item_system(
@@ -39,7 +37,7 @@ mod tests {
         world.init_resource::<Events<GiveItemEvent>>();
 
         let mut event_writer = world.resource_mut::<Events<GiveItemEvent>>();
-        event_writer.send(GiveItemEvent {
+        event_writer.write(GiveItemEvent {
             item_type: ItemType::Block(BlockType::Stone),
             count: 32,
         });
@@ -47,7 +45,7 @@ mod tests {
 
         let mut system = IntoSystem::into_system(give_item_system);
         system.initialize(&mut world);
-        system.run((), &mut world);
+        let _ = system.run((), &mut world);
 
         let inventory = world.resource::<PlayerInventory>();
         // Should have added items to inventory (first slot)
@@ -73,7 +71,7 @@ mod tests {
         world.init_resource::<Events<PlaceBlockEvent>>();
 
         let mut event_writer = world.resource_mut::<Events<PlaceBlockEvent>>();
-        event_writer.send(PlaceBlockEvent {
+        event_writer.write(PlaceBlockEvent {
             position: IVec3::new(1, 2, 3),
         });
         drop(event_writer);
@@ -98,7 +96,7 @@ mod tests {
 
         let mut system = IntoSystem::into_system(test_system);
         system.initialize(&mut world);
-        system.run((), &mut world);
+        let _ = system.run((), &mut world);
 
         let voxel_world = world.resource::<VoxelWorld>();
         let inventory = world.resource::<PlayerInventory>();
@@ -121,14 +119,14 @@ mod tests {
         world.init_resource::<Events<BreakBlockEvent>>();
 
         let mut event_writer = world.resource_mut::<Events<BreakBlockEvent>>();
-        event_writer.send(BreakBlockEvent {
+        event_writer.write(BreakBlockEvent {
             position: IVec3::new(5, 5, 5),
         });
         drop(event_writer);
 
         let mut system = IntoSystem::into_system(break_block_system);
         system.initialize(&mut world);
-        system.run((), &mut world);
+        let _ = system.run((), &mut world);
 
         let voxel_world = world.resource::<VoxelWorld>();
         // Block should be removed
@@ -198,6 +196,111 @@ pub fn place_block_system(
     }
 }
 
+/// System to handle multiplayer synchronization for UI block placement
+pub fn place_block_multiplayer_sync_system(
+    mut place_block_events: EventReader<PlaceBlockEvent>,
+    #[cfg(not(target_arch = "wasm32"))] mut block_change_events: EventWriter<
+        crate::multiplayer::BlockChangeEvent,
+    >,
+    #[cfg(target_arch = "wasm32")] mut block_change_events: EventWriter<
+        crate::multiplayer_web::BlockChangeEvent,
+    >,
+    #[cfg(not(target_arch = "wasm32"))] multiplayer_mode: Res<crate::multiplayer::MultiplayerMode>,
+    #[cfg(target_arch = "wasm32")] multiplayer_mode: Res<crate::multiplayer_web::MultiplayerMode>,
+    player_profile: Res<crate::profile::PlayerProfile>,
+    inventory: Res<PlayerInventory>,
+) {
+    for event in place_block_events.read() {
+        info!(
+            "🔄 Processing block placement event at {:?} - current multiplayer mode: {:?}",
+            event.position, &*multiplayer_mode
+        );
+
+        // Only send multiplayer events when in multiplayer mode
+        #[cfg(not(target_arch = "wasm32"))]
+        let is_multiplayer_with_world = matches!(
+            &*multiplayer_mode,
+            crate::multiplayer::MultiplayerMode::HostingWorld { world_id: _, .. }
+                | crate::multiplayer::MultiplayerMode::JoinedWorld { world_id: _, .. }
+        );
+
+        #[cfg(target_arch = "wasm32")]
+        let is_multiplayer_with_world = matches!(
+            &*multiplayer_mode,
+            crate::multiplayer_web::MultiplayerMode::HostingWorld { world_id: _, .. }
+                | crate::multiplayer_web::MultiplayerMode::JoinedWorld { world_id: _, .. }
+        );
+
+        if is_multiplayer_with_world {
+            let world_id = match &*multiplayer_mode {
+                #[cfg(not(target_arch = "wasm32"))]
+                crate::multiplayer::MultiplayerMode::HostingWorld { world_id, .. }
+                | crate::multiplayer::MultiplayerMode::JoinedWorld { world_id, .. } => world_id,
+                #[cfg(target_arch = "wasm32")]
+                crate::multiplayer_web::MultiplayerMode::HostingWorld { world_id, .. }
+                | crate::multiplayer_web::MultiplayerMode::JoinedWorld { world_id, .. } => world_id,
+                _ => unreachable!("We already checked for multiplayer mode"),
+            };
+
+            info!(
+                "✅ In multiplayer mode (world_id: {}), checking inventory for selected item",
+                world_id
+            );
+
+            // Get the block type from the player's selected inventory item
+            if let Some(selected_item) = inventory.get_selected_item() {
+                let ItemType::Block(block_type) = selected_item.item_type;
+
+                info!(
+                    "🧱 Found selected item: {:?}, generating MQTT event for player {} ({})",
+                    block_type, player_profile.player_name, player_profile.player_id
+                );
+
+                #[cfg(not(target_arch = "wasm32"))]
+                block_change_events.write(crate::multiplayer::BlockChangeEvent {
+                    world_id: world_id.clone(),
+                    player_id: player_profile.player_id.clone(),
+                    player_name: player_profile.player_name.clone(),
+                    change_type: crate::multiplayer::BlockChangeType::Placed {
+                        x: event.position.x,
+                        y: event.position.y,
+                        z: event.position.z,
+                        block_type,
+                    },
+                });
+
+                #[cfg(target_arch = "wasm32")]
+                block_change_events.write(crate::multiplayer_web::BlockChangeEvent {
+                    world_id: world_id.clone(),
+                    player_id: player_profile.player_id.clone(),
+                    player_name: player_profile.player_name.clone(),
+                    change_type: crate::multiplayer_web::BlockChangeType::Placed {
+                        x: event.position.x,
+                        y: event.position.y,
+                        z: event.position.z,
+                        block_type,
+                    },
+                });
+
+                info!(
+                    "📡 Sent multiplayer block change event: {:?} at {:?} for world {}",
+                    block_type, event.position, world_id
+                );
+            } else {
+                warn!(
+                    "❌ No selected item in inventory when placing block at {:?}",
+                    event.position
+                );
+            }
+        } else {
+            info!(
+                "🚫 Not in multiplayer mode, skipping MQTT publish for block at {:?}",
+                event.position
+            );
+        }
+    }
+}
+
 /// System to handle block breaking
 pub fn break_block_system(
     mut events: EventReader<BreakBlockEvent>,
@@ -205,43 +308,5 @@ pub fn break_block_system(
 ) {
     for event in events.read() {
         voxel_world.remove_block(&event.position);
-    }
-}
-
-/// Console command handler for giving items to player
-pub fn handle_give_command(
-    mut log: ConsoleCommand<GiveCommand>,
-    mut inventory: ResMut<PlayerInventory>,
-) {
-    if let Some(Ok(GiveCommand { item_type, count })) = log.take() {
-        let block_type = match item_type.as_str() {
-            "grass" => BlockType::Grass,
-            "dirt" => BlockType::Dirt,
-            "stone" => BlockType::Stone,
-            "quartz_block" => BlockType::QuartzBlock,
-            "glass_pane" => BlockType::GlassPane,
-            "cyan_terracotta" => BlockType::CyanTerracotta,
-            "water" => BlockType::Water,
-            _ => {
-                reply!(log, "Invalid item type: {}", item_type);
-                return;
-            }
-        };
-
-        let item_type = ItemType::Block(block_type);
-        let remainder = inventory.add_items(item_type, count);
-
-        if remainder == 0 {
-            reply!(log, "Gave {} {} to player", count, item_type.display_name());
-        } else {
-            let given = count - remainder;
-            reply!(
-                log,
-                "Gave {} {} to player ({} couldn't fit in inventory)",
-                given,
-                item_type.display_name(),
-                remainder
-            );
-        }
     }
 }

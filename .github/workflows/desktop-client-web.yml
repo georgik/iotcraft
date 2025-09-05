@@ -62,12 +62,12 @@ jobs:
       with:
         workspaces: |
           desktop-client
-          desktop-client/xtask
+          desktop-client/ctask
 
     - name: Build web version
       run: |
         cd desktop-client
-        cargo xtask web-build --release
+        cargo ctask web-build --release
 
     - name: List build outputs (for debugging)
       run: |

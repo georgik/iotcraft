@@ -1,0 +1,165 @@
+// Fast MCP Ping Test Scenario
+// Optimized version with minimal wait times for quick testing
+Scenario(
+    name: "test_mcp_ping_fast",
+    description: "Fast MCP ping test with minimal wait times for rapid development testing",
+    version: "1.0",
+    
+    // Minimal infrastructure - MQTT server for basic functionality
+    infrastructure: InfrastructureConfig(
+        mqtt_server: MqttServerConfig(
+            required: true,
+            port: 1883,
+            config_file: None,
+            options: None,
+        ),
+        mqtt_observer: None, // No observer needed for this simple test
+        mcp_server: None,
+        services: None,
+    ),
+    
+    // Alice client for testing
+    clients: [
+        ClientConfig(
+            id: "alice",
+            player_id: "alice", 
+            mcp_port: 8080,
+            client_type: "desktop",
+            name: Some("Alice - Fast Ping Test Client"),
+            config: None,
+        ),
+    ],
+    
+    // Fast test steps with minimal waits
+    steps: [
+        // Step 1: Initialize MCP connection
+        Step(
+            name: "mcp_initialize",
+            description: "Initialize MCP connection",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "initialize",
+                arguments: {
+                    "protocolVersion": "2024-11-05",
+                    "capabilities": {
+                        "tools": {}
+                    },
+                    "clientInfo": {
+                        "name": "mcplay-fast-test",
+                        "version": "1.0.0"
+                    }
+                },
+            ),
+            wait_before: 500,   // Reduced from 3000ms
+            wait_after: 100,    // Reduced from 1000ms
+            timeout: 10000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: [],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 2: Test direct ping tool call
+        Step(
+            name: "test_ping_tool_call",
+            description: "Test ping via tools/call (should work - handled directly)",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "ping",
+                arguments: {},
+            ),
+            wait_before: 50,    // Reduced from 500ms
+            wait_after: 100,    // Reduced from 1000ms
+            timeout: 5000,      // Reduced timeout
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["mcp_initialize"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 3: Test queued command (get_client_info)
+        Step(
+            name: "test_get_client_info",
+            description: "Test get_client_info (should queue and execute)",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "get_client_info",
+                arguments: {},
+            ),
+            wait_before: 50,    // Reduced from 500ms
+            wait_after: 100,    // Reduced from 1000ms
+            timeout: 8000,      // Reduced timeout
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["test_ping_tool_call"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 4: Test create_world command
+        Step(
+            name: "test_create_world",
+            description: "Test create_world command (simple case)",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "create_world",
+                arguments: {
+                    "world_name": "fast_test_world",
+                    "description": "Fast test world"
+                },
+            ),
+            wait_before: 50,    // Reduced from 500ms
+            wait_after: 500,    // Reduced from 2000ms
+            timeout: 8000,      // Reduced timeout
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["test_get_client_info"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+    ],
+    
+    // Test configuration
+    config: Some(ScenarioConfig(
+        timeout_ms: Some(30000),  // Reduced from 60000 (30s total timeout)
+        logging: Some(LoggingConfig(
+            level: Some("info"),      // Reduced from debug for less noise
+            log_mqtt: Some(false),    // Reduced logging
+            log_client_actions: Some(true),
+            filters: Some([
+                "mcp/*", 
+                "ping", 
+                "get_client_info",
+                "create_world",
+            ]),
+        )),
+        environment: Some({
+            "RUST_LOG": "info,iotcraft_desktop_client=info",
+            "SCENARIO_NAME": "test_mcp_ping_fast",
+            "ENABLE_MCP": "true",
+        }),
+        settings: Some({
+            "auto_cleanup": true,
+            "preserve_logs": false,   // Skip log preservation for speed
+            "fail_fast": true,
+        }),
+    )),
+)

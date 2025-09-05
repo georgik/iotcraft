@@ -1,20 +1,37 @@
 <!DOCTYPE html>
 <html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>IoTCraft Desktop Client - Web Version</title>
-    <style>
-        body {
+    <head>
+        <meta charset="UTF-8">
+        <!-- Cache-busting headers for Android/mobile browsers -->
+        <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+        <meta http-equiv="Pragma" content="no-cache">
+        <meta http-equiv="Expires" content="0">
+        <!-- iPad-optimized viewport settings -->
+        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+        <meta name="mobile-web-app-capable" content="yes">
+        <meta name="apple-mobile-web-app-capable" content="yes">
+        <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+        <meta name="apple-touch-fullscreen" content="yes">
+        <title>
+            IoTCraft Desktop Client - Web Version        </title>
+        <style>
+            body {
             margin: 0;
             padding: 0;
             background-color: #1a1a2e;
             color: #eee;
             font-family: 'Courier New', monospace;
             overflow: hidden;
-        }
-
-        .loading-container {
+            /* iPad-specific optimizations */
+            -webkit-touch-callout: none;
+            -webkit-user-select: none;
+            -khtml-user-select: none;
+            -moz-user-select: none;
+            -ms-user-select: none;
+            user-select: none;
+            -webkit-tap-highlight-color: transparent;
+            }
+            .loading-container {
             position: fixed;
             top: 0;
             left: 0;
@@ -26,9 +43,8 @@
             align-items: center;
             justify-content: center;
             z-index: 1000;
-        }
-
-        .loading-spinner {
+            }
+            .loading-spinner {
             width: 50px;
             height: 50px;
             border: 5px solid #333;
@@ -36,32 +52,47 @@
             border-radius: 50%;
             animation: spin 1s linear infinite;
             margin-bottom: 20px;
-        }
-
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
-
-        .loading-text {
+            }
+            @keyframes spin {
+            0% {
+            transform: rotate(0deg);
+            }
+            100% {
+            transform: rotate(360deg);
+            }
+            }
+            .loading-text {
             font-size: 18px;
             text-align: center;
             margin-bottom: 10px;
-        }
-
-        .loading-progress {
+            }
+            .loading-progress {
             font-size: 14px;
             color: #888;
-        }
-
-        #canvas {
+            }
+            #canvas {
             width: 100vw;
             height: 100vh;
             display: block;
             background: #0f0f23;
-        }
-
-        .error-container {
+            /* iPad-specific touch handling */
+            touch-action: none;
+            -webkit-touch-callout: none;
+            -webkit-user-select: none;
+            -khtml-user-select: none;
+            -moz-user-select: none;
+            -ms-user-select: none;
+            user-select: none;
+            /* Prevent iOS Safari bounce/zoom */
+            position: fixed;
+            top: 0;
+            left: 0;
+            /* High DPI support */
+            image-rendering: pixelated;
+            image-rendering: -moz-crisp-edges;
+            image-rendering: crisp-edges;
+            }
+            .error-container {
             position: fixed;
             top: 50%;
             left: 50%;
@@ -73,21 +104,18 @@
             max-width: 80%;
             text-align: center;
             z-index: 1001;
-        }
-
-        .error-title {
+            }
+            .error-title {
             color: #ff4444;
             font-size: 24px;
             margin-bottom: 10px;
-        }
-
-        .error-message {
+            }
+            .error-message {
             color: #eee;
             font-size: 16px;
             line-height: 1.4;
-        }
-
-        .controls {
+            }
+            .controls {
             position: fixed;
             top: 10px;
             right: 10px;
@@ -96,9 +124,8 @@
             border-radius: 5px;
             font-size: 12px;
             z-index: 100;
-        }
-
-        .status-indicator {
+            }
+            .status-indicator {
             position: fixed;
             bottom: 10px;
             left: 10px;
@@ -107,228 +134,274 @@
             border-radius: 5px;
             font-size: 12px;
             z-index: 100;
-        }
-
-        .status-connected {
+            }
+            .status-connected {
             color: #00ff88;
-        }
-
-        .status-disconnected {
+            }
+            .status-disconnected {
             color: #ff4444;
-        }
-
-        .status-connecting {
+            }
+            .status-connecting {
             color: #ffaa00;
-        }
-    </style>
-</head>
-<body>
-    <!-- Loading Screen -->
-    <div id="loading" class="loading-container">
-        <div class="loading-spinner"></div>
-        <div class="loading-text">Loading IoTCraft Desktop Client...</div>
-        <div class="loading-progress" id="loadingProgress">Initializing WASM module...</div>
-    </div>
-
-    <!-- Main Canvas -->
-    <canvas id="canvas" style="display: none;"></canvas>
-
-    <!-- Controls -->
-    <div class="controls">
-        <div>Controls:</div>
-        <div>WASD - Move Camera</div>
-        <div>Mouse - Look Around</div>
-        <div>ESC - Console</div>
-        <div>F11 - Fullscreen</div>
-    </div>
-
-    <!-- Status Indicator -->
-    <div id="status" class="status-indicator status-disconnected">
-        Status: Disconnected
-    </div>
-
-    <!-- Error Container (hidden by default) -->
-    <div id="error" class="error-container" style="display: none;">
-        <div class="error-title">Error Loading Application</div>
-        <div class="error-message" id="errorMessage"></div>
-    </div>
-
-    <script type="module">
-        let wasmModule = null;
-        let isInitialized = false;
-        let loadingElement = document.getElementById('loading');
-        let loadingProgress = document.getElementById('loadingProgress');
-        let canvas = document.getElementById('canvas');
-        let errorElement = document.getElementById('error');
-        let errorMessage = document.getElementById('errorMessage');
-        let statusElement = document.getElementById('status');
-
-        // Update loading progress
-        function updateProgress(message) {
+            }
+        </style>
+    </head>
+    <body>
+        <!-- Loading Screen -->
+        <div id="loading" class="loading-container">
+            <div class="loading-spinner"></div>
+            <div class="loading-text">
+                Loading IoTCraft Desktop Client...            </div>
+            <div class="loading-progress" id="loadingProgress">
+                Initializing WASM module...            </div>
+        </div>
+        <!-- Main Canvas -->
+        <canvas id="canvas" style="display: none"></canvas>
+        <!-- Controls -->
+        <div class="controls" id="controls">
+            <div>
+                Controls:            </div>
+            <div id="desktopControls">
+                <div>
+                    WASD - Move Camera                </div>
+                <div>
+                    Mouse - Look Around                </div>
+                <div>
+                    ESC - Console                </div>
+                <div>
+                    F11 - Fullscreen                </div>
+            </div>
+            <div id="mobileControls" style="display: none">
+                <div>
+                    Touch: Left = Move, Right = Look                </div>
+                <div>
+                    Tap anywhere to start                </div>
+                <div>
+                    Pinch to zoom (if available)                </div>
+            </div>
+        </div>
+        <!-- Status Indicator -->
+        <div id="status" class="status-indicator status-disconnected">
+            Status: Disconnected        </div>
+        <!-- Error Container (hidden by default) -->
+        <div id="error" class="error-container" style="display: none">
+            <div class="error-title">
+                Error Loading Application            </div>
+            <div class="error-message" id="errorMessage"></div>
+        </div>
+        <script type="module">
+            let wasmModule = null;
+            let isInitialized = false;
+            let loadingElement = document.getElementById('loading');
+            let loadingProgress = document.getElementById('loadingProgress');
+            let canvas = document.getElementById('canvas');
+            let errorElement = document.getElementById('error');
+            let errorMessage = document.getElementById('errorMessage');
+            let statusElement = document.getElementById('status');
+            // Update loading progress
+            function updateProgress(message) {
             console.log(`[IoTCraft] ${message}`);
             if (loadingProgress) {
-                loadingProgress.textContent = message;
+            loadingProgress.textContent = message;
             }
-        }
-
-        // Show error
-        function showError(message, details = null) {
+            }
+            // Show error
+            function showError(message, details = null) {
             console.error(`[IoTCraft Error] ${message}`, details);
             errorMessage.textContent = message;
             if (details) {
-                errorMessage.textContent += `\n\nDetails: ${details}`;
+            errorMessage.textContent += `\n\nDetails: ${details}`;
             }
             errorElement.style.display = 'block';
             if (loadingElement) {
-                loadingElement.style.display = 'none';
+            loadingElement.style.display = 'none';
             }
-        }
-
-        // Update connection status
-        function updateStatus(status, message) {
+            }
+            // Update connection status
+            function updateStatus(status, message) {
             const statusClasses = ['status-connected', 'status-disconnected', 'status-connecting'];
             statusElement.classList.remove(...statusClasses);
-            
-            switch(status) {
-                case 'connected':
-                    statusElement.classList.add('status-connected');
-                    break;
-                case 'connecting':
-                    statusElement.classList.add('status-connecting');
-                    break;
-                default:
-                    statusElement.classList.add('status-disconnected');
+            switch (status) {
+            case 'connected':
+            statusElement.classList.add('status-connected');
+            break;
+            case 'connecting':
+            statusElement.classList.add('status-connecting');
+            break;
+            default:
+            statusElement.classList.add('status-disconnected');
             }
-            
             statusElement.textContent = `Status: ${message}`;
-        }
-
-        // Hide loading screen and show canvas
-        function hideLoading() {
+            }
+            // Hide loading screen and show canvas
+            function hideLoading() {
             if (loadingElement) {
-                loadingElement.style.display = 'none';
+            loadingElement.style.display = 'none';
             }
             canvas.style.display = 'block';
             isInitialized = true;
-        }
-
-        // Initialize the WASM module
-        async function initWasm() {
-            try {
-                updateProgress('Loading WASM module...');
-                
-                // Import the WASM module
-                const wasmModule = await import('./iotcraft_web.js');
-                
-                updateProgress('Initializing WebAssembly...');
-                
-                // Initialize the WASM module
-                await wasmModule.default();
-                
-                updateProgress('Setting up panic hook...');
-                
-                // Set up panic hook for better error reporting
-                wasmModule.set_panic_hook();
-                
-                updateProgress('Starting IoTCraft client...');
-                
-                // Check if the run function exists (from wasm_bindgen)
-                if (typeof wasmModule.run === 'function') {
-                    // Call the run function (should initialize Bevy and start the app)
-                    wasmModule.run();
-                } else {
-                    console.warn('[IoTCraft] No run function found in WASM module');
-                }
-                
-                updateProgress('Application ready!');
-                updateStatus('connecting', 'Initializing...');
-                
-                // Give it a moment to initialize
-                setTimeout(() => {
-                    hideLoading();
-                    updateStatus('connected', 'Running');
-                }, 1000);
-                
-                console.log('[IoTCraft] WASM module loaded and initialized successfully');
-                
-            } catch (error) {
-                showError('Failed to load WASM module', error.message);
             }
-        }
-
-        // Keyboard event handling
-        document.addEventListener('keydown', (event) => {
+            // Initialize the WASM module
+            async function initWasm() {
+            try {
+            updateProgress('Loading WASM module...');
+            // Import the WASM module
+            const wasmModule = await import('./iotcraft_web.js');
+            updateProgress('Initializing WebAssembly...');
+            // Initialize the WASM module
+            await wasmModule.default();
+            updateProgress('Setting up panic hook...');
+            // Set up panic hook for better error reporting
+            wasmModule.set_panic_hook();
+            updateProgress('Starting IoTCraft client...');
+            // Check if the run function exists (from wasm_bindgen)
+            if (typeof wasmModule.run === 'function') {
+            // Call the run function (should initialize Bevy and start the app)
+            wasmModule.run();
+            } else {
+            console.warn('[IoTCraft] No run function found in WASM module');
+            }
+            updateProgress('Application ready!');
+            updateStatus('connecting', 'Initializing...');
+            // Give it a moment to initialize
+            setTimeout(() => {
+            hideLoading();
+            updateStatus('connected', 'Running');
+            }, 1000);
+            console.log('[IoTCraft] WASM module loaded and initialized successfully');
+            } catch (error) {
+            showError('Failed to load WASM module', error.message);
+            }
+            }
+            // Keyboard event handling
+            document.addEventListener('keydown', event => {
             if (!isInitialized) return;
-            
             // Handle fullscreen toggle
             if (event.key === 'F11') {
-                event.preventDefault();
-                if (!document.fullscreenElement) {
-                    document.documentElement.requestFullscreen();
-                } else {
-                    document.exitFullscreen();
-                }
+            event.preventDefault();
+            if (!document.fullscreenElement) {
+            document.documentElement.requestFullscreen();
+            } else {
+            document.exitFullscreen();
             }
-        });
-
-        // Handle window resize
-        window.addEventListener('resize', () => {
+            }
+            });
+            // Handle window resize
+            window.addEventListener('resize', () => {
             if (isInitialized && canvas) {
-                canvas.width = window.innerWidth;
-                canvas.height = window.innerHeight;
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
             }
-        });
-
-        // Handle visibility change (tab switching)
-        document.addEventListener('visibilitychange', () => {
+            });
+            // Handle visibility change (tab switching)
+            document.addEventListener('visibilitychange', () => {
             if (isInitialized) {
-                if (document.hidden) {
-                    console.log('[IoTCraft] Application paused (tab hidden)');
-                } else {
-                    console.log('[IoTCraft] Application resumed (tab visible)');
-                }
+            if (document.hidden) {
+            console.log('[IoTCraft] Application paused (tab hidden)');
+            } else {
+            console.log('[IoTCraft] Application resumed (tab visible)');
             }
-        });
-
-        // Global error handling
-        window.addEventListener('error', (event) => {
+            }
+            });
+            // Global error handling
+            window.addEventListener('error', event => {
             console.error('[IoTCraft] Global error:', event.error);
             if (!isInitialized) {
-                showError('Application failed to start', event.error?.message || 'Unknown error');
+            showError('Application failed to start', event.error?.message || 'Unknown error');
             }
-        });
-
-        window.addEventListener('unhandledrejection', (event) => {
+            });
+            window.addEventListener('unhandledrejection', event => {
             console.error('[IoTCraft] Unhandled promise rejection:', event.reason);
             if (!isInitialized) {
-                showError('Application failed to start', event.reason?.message || 'Promise rejection');
+            showError('Application failed to start', event.reason?.message || 'Promise rejection');
             }
-        });
-
-        // Add user interaction handler for audio context
-        document.addEventListener('click', function handleFirstClick() {
-            // Remove the handler after first click
-            document.removeEventListener('click', handleFirstClick);
-            console.log('[IoTCraft] User interaction detected, enabling audio context');
-        }, { once: true });
-
-        // Check WebAssembly support
-        if (typeof WebAssembly !== 'object') {
+            });
+            // Enhanced iPad-compatible user interaction handlers
+            let interactionDetected = false;
+            function handleFirstInteraction(eventType) {
+            if (interactionDetected) return;
+            interactionDetected = true;
+            console.log(`[IoTCraft] First user interaction detected via ${eventType}, enabling audio context`);
+            // Enable audio context and other web APIs that require user interaction
+            if (window.AudioContext || window.webkitAudioContext) {
+            try {
+            const AudioContext = window.AudioContext || window.webkitAudioContext;
+            const audioContext = new AudioContext();
+            if (audioContext.state === 'suspended') {
+            audioContext.resume();
+            console.log('[IoTCraft] Audio context resumed');
+            }
+            } catch (e) {
+            console.warn('[IoTCraft] Failed to initialize audio context:', e);
+            }
+            }
+            }
+            // Multiple interaction detection methods for maximum iPad compatibility
+            document.addEventListener('click', () => handleFirstInteraction('click'), { once: true });
+            document.addEventListener('touchstart', () => handleFirstInteraction('touchstart'), { once: true });
+            document.addEventListener('touchend', () => handleFirstInteraction('touchend'), { once: true });
+            document.addEventListener('pointerdown', () => handleFirstInteraction('pointerdown'), { once: true });
+            document.addEventListener('mousedown', () => handleFirstInteraction('mousedown'), { once: true });
+            // Detect mobile/tablet devices and show appropriate controls
+            function detectMobile() {
+            const userAgent = navigator.userAgent || navigator.vendor || window.opera;
+            const isMobile =
+            /android|iphone|ipad|ipod|blackberry|iemobile|opera mini/i.test(userAgent.toLowerCase()) ||
+            (navigator.platform && /iPad|iPhone|iPod/.test(navigator.platform)) ||
+            (navigator.maxTouchPoints && navigator.maxTouchPoints > 2);
+            console.log(
+            `[IoTCraft] Device detection - Mobile: ${isMobile}, Platform: ${navigator.platform}, UserAgent: ${userAgent}`
+            );
+            if (isMobile) {
+            // Show mobile controls, hide desktop controls
+            const desktopControls = document.getElementById('desktopControls');
+            const mobileControls = document.getElementById('mobileControls');
+            if (desktopControls) desktopControls.style.display = 'none';
+            if (mobileControls) mobileControls.style.display = 'block';
+            console.log('[IoTCraft] Switched to mobile control display');
+            }
+            return isMobile;
+            }
+            const isMobileDevice = detectMobile();
+            // Special iPad Safari handling
+            if (navigator.platform && navigator.platform.includes('iPad')) {
+            console.log('[IoTCraft] iPad detected, applying Safari-specific optimizations');
+            // Prevent iOS Safari from zooming on double-tap
+            let lastTouchEnd = 0;
+            document.addEventListener(
+            'touchend',
+            function (event) {
+            const now = new Date().getTime();
+            if (now - lastTouchEnd <= 300) {
+            event.preventDefault();
+            }
+            lastTouchEnd = now;
+            },
+            false
+            );
+            // Additional viewport lock for iPad
+            const metaViewport = document.querySelector('meta[name=viewport]');
+            if (metaViewport) {
+            metaViewport.content =
+            'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover, shrink-to-fit=no';
+            }
+            }
+            // Check WebAssembly support
+            if (typeof WebAssembly !== 'object') {
             showError('WebAssembly is not supported in this browser');
-        } else {
+            } else {
             // Start the application
             console.log('[IoTCraft] Starting IoTCraft Desktop Client (Web Version)');
             updateStatus('connecting', 'Loading...');
             initWasm();
-        }
-
-        // Expose some functions globally for debugging
-        window.iotcraft = {
+            }
+            // Expose some functions globally for debugging
+            window.iotcraft = {
             updateStatus,
             hideLoading,
             showError,
             isInitialized: () => isInitialized
-        };
-    </script>
-</body>
+            };
+        </script>
+    </body>
 </html>

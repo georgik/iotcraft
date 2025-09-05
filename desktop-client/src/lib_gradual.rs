@@ -1,11 +1,13 @@
 // IoTCraft Desktop Client - Web Version (Gradual Build)
+use crate::script::script_systems::ScriptPlugin;
+use crate::script::script_types::PendingCommands;
 use bevy::prelude::*;
 
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
 
-// Web menu system
-use crate::web_menu::{WebGameState, WebMenuPlugin};
+// Desktop UI system adapted for web
+use crate::ui::{GameState, MainMenuPlugin};
 
 // MQTT plugin and related modules
 use crate::config::MqttConfig;
@@ -65,7 +67,7 @@ impl DeviceType {
 
 /// Web-compatible device entity component
 #[derive(Component)]
-struct DeviceEntity {
+pub struct DeviceEntity {
     pub device_id: String,
     pub device_type: String,
 }
@@ -74,19 +76,19 @@ struct DeviceEntity {
 
 /// Component to mark remote player entities
 #[derive(Component)]
-struct RemotePlayer;
+pub struct RemotePlayer;
 
 // Multiplayer types are imported from either web MQTT or desktop multiplayer modules
 
 /// Multiplayer connection status
 #[derive(Resource, Default)]
-struct MultiplayerConnectionStatus {
+pub struct MultiplayerConnectionStatus {
     pub connection_available: bool,
 }
 
 /// Timer for position updates (10 Hz)
 #[derive(Resource)]
-struct PositionTimer {
+pub struct PositionTimer {
     timer: Timer,
     last_position: Option<Vec3>,
 }
@@ -102,7 +104,7 @@ impl Default for PositionTimer {
 
 /// World ID resource
 #[derive(Resource, Debug, Clone)]
-struct WorldId(pub String);
+pub struct WorldId(pub String);
 
 impl Default for WorldId {
     fn default() -> Self {
@@ -110,10 +112,14 @@ impl Default for WorldId {
     }
 }
 
+/// Guard to prevent duplicate scene setup
+#[derive(Resource)]
+pub struct SceneSetupGuard(pub bool);
+
 // ============ TOUCH CONTROL SYSTEMS ============
 
 /// Setup touch control areas based on screen size
-fn setup_touch_areas(mut touch_state: ResMut<TouchInputState>, windows: Query<&Window>) {
+pub fn setup_touch_areas(mut touch_state: ResMut<TouchInputState>, windows: Query<&Window>) {
     if let Ok(window) = windows.single() {
         let window_width = window.resolution.width();
         let window_height = window.resolution.height();
@@ -138,9 +144,9 @@ fn setup_touch_areas(mut touch_state: ResMut<TouchInputState>, windows: Query<&W
 }
 
 /// Enhanced camera control system with continuous touch support for mobile devices
-fn touch_camera_control_system(
+pub fn touch_camera_control_system(
     time: Res<Time>,
-    mut camera_controller: ResMut<CameraController>,
+    mut camera_controller: Option<ResMut<CameraController>>,
     keyboard_input: Res<ButtonInput<KeyCode>>,
     mut camera_query: Query<&mut Transform, With<Camera3d>>,
     mut windows: Query<&mut Window>,
@@ -149,7 +155,12 @@ fn touch_camera_control_system(
     mut touch_events: EventReader<TouchInput>,
     mut touch_state: ResMut<TouchInputState>,
 ) {
-    if !camera_controller.enabled {
+    // Check if camera controller exists and is enabled
+    let Some(ref controller) = camera_controller else {
+        return; // No camera controller resource available
+    };
+
+    if !controller.enabled {
         return;
     }
 
@@ -325,46 +336,48 @@ fn touch_camera_control_system(
     // ============ CONTINUOUS LOOK ROTATION ============
 
     if touch_state.look_delta_accumulator != Vec2::ZERO {
-        let sensitivity = camera_controller.touch_sensitivity * 0.0025; // Reduced sensitivity by 75% total
+        if let Some(ref mut controller) = camera_controller {
+            let sensitivity = controller.touch_sensitivity * 0.0025; // Reduced sensitivity by 75% total
 
-        // Apply accumulated rotation to camera controller
-        let old_yaw = camera_controller.yaw;
-        let old_pitch = camera_controller.pitch;
+            // Apply accumulated rotation to camera controller
+            let old_yaw = controller.yaw;
+            let old_pitch = controller.pitch;
 
-        camera_controller.yaw -= touch_state.look_delta_accumulator.x * sensitivity;
-        camera_controller.pitch -= touch_state.look_delta_accumulator.y * sensitivity;
+            controller.yaw -= touch_state.look_delta_accumulator.x * sensitivity;
+            controller.pitch -= touch_state.look_delta_accumulator.y * sensitivity;
 
-        // Clamp pitch to prevent over-rotation
-        camera_controller.pitch = camera_controller.pitch.clamp(
-            -std::f32::consts::FRAC_PI_2 * 0.9,
-            std::f32::consts::FRAC_PI_2 * 0.9,
-        );
+            // Clamp pitch to prevent over-rotation
+            controller.pitch = controller.pitch.clamp(
+                -std::f32::consts::FRAC_PI_2 * 0.9,
+                std::f32::consts::FRAC_PI_2 * 0.9,
+            );
 
-        // Smooth decay of accumulated delta for natural feel
-        touch_state.look_delta_accumulator *= 0.7; // Faster decay for better responsiveness
+            // Smooth decay of accumulated delta for natural feel
+            touch_state.look_delta_accumulator *= 0.7; // Faster decay for better responsiveness
 
-        // Clear very small deltas to prevent jitter
-        if touch_state.look_delta_accumulator.length() < 0.1 {
-            touch_state.look_delta_accumulator = Vec2::ZERO;
+            // Clear very small deltas to prevent jitter
+            if touch_state.look_delta_accumulator.length() < 0.1 {
+                touch_state.look_delta_accumulator = Vec2::ZERO;
+            }
+
+            info!(
+                "🎮 Look control: yaw={:.3} (Δ{:.3}), pitch={:.3} (Δ{:.3}), delta={:?}",
+                controller.yaw,
+                controller.yaw - old_yaw,
+                controller.pitch,
+                controller.pitch - old_pitch,
+                touch_state.look_delta_accumulator
+            );
+
+            #[cfg(target_arch = "wasm32")]
+            web_sys::console::log_1(
+                &format!(
+                    "🎮 Camera rotation: yaw={:.3}, pitch={:.3}",
+                    controller.yaw, controller.pitch
+                )
+                .into(),
+            );
         }
-
-        info!(
-            "🎮 Look control: yaw={:.3} (Δ{:.3}), pitch={:.3} (Δ{:.3}), delta={:?}",
-            camera_controller.yaw,
-            camera_controller.yaw - old_yaw,
-            camera_controller.pitch,
-            camera_controller.pitch - old_pitch,
-            touch_state.look_delta_accumulator
-        );
-
-        #[cfg(target_arch = "wasm32")]
-        web_sys::console::log_1(
-            &format!(
-                "🎮 Camera rotation: yaw={:.3}, pitch={:.3}",
-                camera_controller.yaw, camera_controller.pitch
-            )
-            .into(),
-        );
     }
 
     // ============ KEYBOARD INPUT (for desktop compatibility) ============
@@ -389,9 +402,11 @@ fn touch_camera_control_system(
 
     // Apply arrow key rotation
     if yaw_change != 0.0 || pitch_change != 0.0 {
-        camera_controller.yaw += yaw_change.to_radians() * dt;
-        camera_controller.pitch = (camera_controller.pitch + pitch_change.to_radians() * dt)
-            .clamp(-std::f32::consts::PI / 2.0, std::f32::consts::PI / 2.0);
+        if let Some(ref mut controller) = camera_controller {
+            controller.yaw += yaw_change.to_radians() * dt;
+            controller.pitch = (controller.pitch + pitch_change.to_radians() * dt)
+                .clamp(-std::f32::consts::PI / 2.0, std::f32::consts::PI / 2.0);
+        }
     }
 
     // Handle WASD movement (desktop)
@@ -419,40 +434,40 @@ fn touch_camera_control_system(
     // Handle mouse look (only if we have delta information)
     for cursor_event in cursor_moved_events.read() {
         if let Some(delta) = cursor_event.delta {
-            let delta_x = delta.x * camera_controller.sensitivity * dt;
-            let delta_y = delta.y * camera_controller.sensitivity * dt;
+            if let Some(ref mut controller) = camera_controller {
+                let delta_x = delta.x * controller.sensitivity * dt;
+                let delta_y = delta.y * controller.sensitivity * dt;
 
-            camera_controller.yaw -= delta_x * 0.01;
-            camera_controller.pitch -= delta_y * 0.01;
+                controller.yaw -= delta_x * 0.01;
+                controller.pitch -= delta_y * 0.01;
 
-            // Clamp pitch
-            camera_controller.pitch = camera_controller.pitch.clamp(
-                -std::f32::consts::FRAC_PI_2 * 0.9,
-                std::f32::consts::FRAC_PI_2 * 0.9,
-            );
+                // Clamp pitch
+                controller.pitch = controller.pitch.clamp(
+                    -std::f32::consts::FRAC_PI_2 * 0.9,
+                    std::f32::consts::FRAC_PI_2 * 0.9,
+                );
+            }
         }
     }
 
     // ============ APPLY TRANSFORMS ============
 
     // Apply rotation changes from all input sources
-    camera_transform.rotation = Quat::from_euler(
-        EulerRot::ZYX,
-        0.0,
-        camera_controller.yaw,
-        camera_controller.pitch,
-    );
+    if let Some(ref controller) = camera_controller {
+        camera_transform.rotation =
+            Quat::from_euler(EulerRot::ZYX, 0.0, controller.yaw, controller.pitch);
+    }
 
     // Apply movement
     if velocity != Vec3::ZERO {
-        camera_transform.translation += velocity.normalize() * camera_controller.speed * dt;
+        let speed = camera_controller.as_ref().map(|c| c.speed).unwrap_or(5.0);
+        camera_transform.translation += velocity.normalize() * speed * dt;
     }
 
     // Handle mouse capture (escape key is handled by menu system)
-    for mut window in &mut windows {
+    // Note: Cursor options are now managed separately, web version doesn't need active cursor management
+    for window in &windows {
         if mouse_button_input.just_pressed(MouseButton::Left) && window.focused {
-            window.cursor_options.grab_mode = bevy::window::CursorGrabMode::Locked;
-            window.cursor_options.visible = false;
             info!(
                 "Mouse captured for camera control. Use WASD to move, mouse to look around. Touch controls: left side = move, right side = look."
             );
@@ -475,12 +490,116 @@ fn now_ts() -> u64 {
     }
 }
 
-/// Set up panic hook for better error reporting in web console
+/// Detect if we're running on a mobile/touch device
+#[cfg(target_arch = "wasm32")]
+fn is_mobile_device() -> bool {
+    if let Some(window) = web_sys::window() {
+        let navigator = window.navigator();
+        if let Ok(user_agent) = navigator.user_agent() {
+            let ua = user_agent.to_lowercase();
+            let is_mobile = ua.contains("mobile")
+                || ua.contains("android")
+                || ua.contains("iphone")
+                || ua.contains("ipad")
+                || ua.contains("ipod")
+                || ua.contains("blackberry")
+                || ua.contains("webos");
+            if is_mobile {
+                return true;
+            }
+        }
+
+        // Also check for touch support
+        if let Ok(has_touch) = js_sys::Reflect::has(&window, &"ontouchstart".into()) {
+            if has_touch {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn is_mobile_device() -> bool {
+    false // Desktop platforms are never mobile
+}
+
+/// Safely set cursor grab mode, avoiding requestPointerLock on mobile devices
+pub fn safe_set_cursor_grab_mode(
+    _window: &mut Window,
+    cursor_options: Option<&mut bevy::window::CursorOptions>,
+    grab_mode: bevy::window::CursorGrabMode,
+    visible: bool,
+) {
+    if grab_mode == bevy::window::CursorGrabMode::Locked && is_mobile_device() {
+        info!("📱 Skipping cursor lock on mobile device - using touch controls instead");
+        #[cfg(target_arch = "wasm32")]
+        web_sys::console::log_1(
+            &"📱 Skipping cursor lock on mobile device - using touch controls instead".into(),
+        );
+        return;
+    }
+
+    if let Some(cursor_opts) = cursor_options {
+        cursor_opts.grab_mode = grab_mode;
+        cursor_opts.visible = visible;
+    }
+
+    match grab_mode {
+        bevy::window::CursorGrabMode::Locked => {
+            info!("🖱️ Mouse cursor locked for camera control");
+        }
+        bevy::window::CursorGrabMode::None => {
+            info!("🖱️ Mouse cursor released");
+        }
+        _ => {}
+    }
+}
+
+/// Set up enhanced panic hook for better error reporting in web console
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn set_panic_hook() {
-    console_error_panic_hook::set_once();
-    web_sys::console::log_1(&"Panic hook initialized for IoTCraft".into());
+    std::panic::set_hook(Box::new(|info| {
+        let mut msg = String::new();
+
+        if let Some(payload) = info.payload().downcast_ref::<&str>() {
+            msg.push_str(&format!("💥 PANIC: {}", payload));
+        } else if let Some(payload) = info.payload().downcast_ref::<String>() {
+            msg.push_str(&format!("💥 PANIC: {}", payload));
+        } else {
+            msg.push_str("💥 PANIC: (no message)");
+        }
+
+        if let Some(location) = info.location() {
+            msg.push_str(&format!(
+                " at {}:{}:{}",
+                location.file(),
+                location.line(),
+                location.column()
+            ));
+        }
+
+        // Log to both console and web_sys
+        eprintln!("{}", msg);
+        web_sys::console::error_1(&msg.clone().into());
+
+        // Try to show error in the UI if possible
+        if let Some(window) = web_sys::window() {
+            if let Some(document) = window.document() {
+                if let Some(element) = document.get_element_by_id("errorMessage") {
+                    element.set_text_content(Some(&format!("WASM Panic: {}", msg)));
+                }
+                if let Some(error_div) = document.get_element_by_id("error") {
+                    if let Some(html_element) = error_div.dyn_ref::<web_sys::HtmlElement>() {
+                        let _ = html_element.style().set_property("display", "block");
+                    }
+                }
+            }
+        }
+    }));
+
+    web_sys::console::log_1(&"Enhanced panic hook initialized for IoTCraft".into());
 }
 
 /// Manual initialization function for WASM
@@ -521,10 +640,10 @@ pub fn start() {
                 .set(WindowPlugin {
                     primary_window: Some(Window {
                         title: "IoTCraft Desktop Client - Web Version".to_string(),
-                        resolution: (1280.0, 720.0).into(),
+                        resolution: bevy::window::WindowResolution::new(1280, 720),
                         canvas: Some("#canvas".to_owned()),
                         fit_canvas_to_parent: true,
-                        prevent_default_event_handling: true, // Prevent browser touch conflicts
+                        prevent_default_event_handling: false, // Allow browser events for better iPad compatibility
                         ..default()
                     }),
                     ..default()
@@ -537,20 +656,40 @@ pub fn start() {
         // Insert resources BEFORE adding plugins that depend on them
         .insert_resource(MqttConfig::from_web_env())
         .insert_resource(crate::profile::load_or_create_profile_with_override(None))
-        .add_plugins(WebMenuPlugin)
+        // Add desktop fonts and localization systems
+        .add_plugins(crate::fonts::FontPlugin)
+        .add_plugins(crate::localization::LocalizationPlugin)
+        // Add desktop UI system
+        .add_plugins(MainMenuPlugin)
         .add_plugins(MqttPlugin) // MQTT connection working!
         .add_plugins(crate::player_avatar::PlayerAvatarPlugin) // Add avatar animations
+        .add_plugins(crate::console::ConsolePlugin) // Add full desktop console (with T key)
+        .add_plugins(crate::web_player_controller::WebPlayerControllerPlugin) // Add web player controller with gravity and fly mode
+        .add_plugins(crate::inventory::InventoryPlugin) // Add inventory system
+        // Note: EnvironmentPlugin disabled for web - comprehensive scene handled by setup_basic_scene_once
+        .add_plugins(crate::multiplayer_web::WebMultiplayerPlugin) // Add web multiplayer for block sync
+        // Add script system for unified world creation
+        .add_plugins(ScriptPlugin)
+        // Add desktop camera controller and player controller plugins
+        .add_plugins(crate::camera_controllers::CameraControllerPlugin)
+        .add_plugins(crate::player_controller::PlayerControllerPlugin)
         .insert_resource(ClearColor(Color::srgb(0.53, 0.81, 0.92)))
-        .insert_resource(CameraController::new())
         .insert_resource(TouchInputState::default())
         // Multiplayer resources
         .insert_resource(WorldId::default())
         .insert_resource(MultiplayerConnectionStatus::default())
         .insert_resource(PositionTimer::default())
+        // VoxelWorld resource needed for multiplayer block synchronization
+        .insert_resource(crate::environment::VoxelWorld::default())
+        // Console resources for desktop console integration
+        .insert_resource(crate::console::BlinkState::default())
+        // MCP event needed by execute_pending_commands
+        // Prevent duplicate scene setup - only one startup system should handle it
+        .insert_resource(SceneSetupGuard(false))
         .add_systems(
             Startup,
             (
-                setup_basic_scene,
+                setup_basic_scene_once, // Use guarded version to prevent duplicates
                 setup_multiplayer_connections,
                 setup_touch_areas,
                 setup_touch_ui,
@@ -560,12 +699,14 @@ pub fn start() {
             Update,
             (
                 rotate_cube,
-                touch_camera_control_system.run_if(in_state(WebGameState::InGame)),
-                update_touch_ui.run_if(in_state(WebGameState::InGame)),
+                manage_camera_controller_based_on_player_mode.run_if(in_state(GameState::InGame)),
+                touch_camera_control_system.run_if(in_state(GameState::InGame)),
+                update_touch_ui.run_if(in_state(GameState::InGame)),
                 process_device_announcements,
                 update_position_timer,
                 publish_local_pose,
                 apply_remote_poses,
+                execute_pending_commands_web_wrapper, // Execute script commands to populate VoxelWorld
                 log_fps,
             ),
         )
@@ -574,7 +715,7 @@ pub fn start() {
 
 /// Basic scene components
 #[derive(Component)]
-struct DemoCube;
+pub struct DemoCube;
 
 #[derive(Component)]
 struct Ground;
@@ -588,7 +729,7 @@ struct WebMqttDevice {
 }
 
 /// Simple camera controller for web
-#[derive(Resource, Default)]
+#[derive(Component, Resource, Default)]
 pub struct CameraController {
     pub enabled: bool,
     pub sensitivity: f32,
@@ -600,7 +741,7 @@ pub struct CameraController {
 
 /// Touch input state for mobile controls with joystick behavior
 #[derive(Resource, Default)]
-struct TouchInputState {
+pub struct TouchInputState {
     /// Current touch for look control (camera rotation)
     look_touch_id: Option<u64>,
     last_look_position: Option<Vec2>,
@@ -626,10 +767,10 @@ struct TouchInputState {
 struct TouchControlsUI;
 
 #[derive(Component)]
-struct JoystickBase;
+pub struct JoystickBase;
 
 #[derive(Component)]
-struct JoystickKnob;
+pub struct JoystickKnob;
 
 #[derive(Component)]
 struct TouchZoneIndicator;
@@ -638,7 +779,7 @@ struct TouchZoneIndicator;
 struct TouchInstructions;
 
 impl CameraController {
-    fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             enabled: false, // Start disabled - menu system will enable it
             sensitivity: 2.0,
@@ -650,15 +791,17 @@ impl CameraController {
     }
 }
 
-fn setup_basic_scene(
+pub fn setup_basic_scene(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     asset_server: Res<AssetServer>,
+    mut voxel_world: ResMut<crate::environment::VoxelWorld>,
 ) {
     info!("Setting up enhanced IoTCraft world scene...");
 
     // Add a camera positioned like in the original desktop client with explicit order 0
+    // Use the desktop camera controller component instead of simplified resource
     commands.spawn((
         Camera3d::default(),
         Camera {
@@ -666,6 +809,10 @@ fn setup_basic_scene(
             ..default()
         },
         Transform::from_xyz(-8.0, 3.0, 15.0).looking_at(Vec3::new(0.0, 1.0, 0.0), Vec3::Y),
+        crate::camera_controllers::CameraController {
+            enabled: false, // Start disabled - only enable in Flying mode
+            ..Default::default()
+        }, // Add desktop camera controller component
     ));
 
     // Add a directional light with shadows like the original
@@ -740,10 +887,15 @@ fn setup_basic_scene(
     info!("Building grass terrain...");
     for x in -15..=15 {
         for z in -15..=15 {
+            let position = IVec3::new(x, 0, z);
+            // Add to VoxelWorld for collision detection
+            voxel_world.set_block(position, crate::environment::BlockType::Grass);
+
             commands.spawn((
                 Mesh3d(cube_mesh.clone()),
                 MeshMaterial3d(grass_material.clone()),
                 Transform::from_translation(Vec3::new(x as f32, 0.0, z as f32)),
+                crate::environment::VoxelBlock { position },
                 Ground,
             ));
         }
@@ -754,10 +906,15 @@ fn setup_basic_scene(
     for x in -10..=-5 {
         for y in 1..=2 {
             for z in -10..=-5 {
+                let position = IVec3::new(x, y, z);
+                // Add to VoxelWorld for collision detection
+                voxel_world.set_block(position, crate::environment::BlockType::Dirt);
+
                 commands.spawn((
                     Mesh3d(cube_mesh.clone()),
                     MeshMaterial3d(dirt_material.clone()),
                     Transform::from_translation(Vec3::new(x as f32, y as f32, z as f32)),
+                    crate::environment::VoxelBlock { position },
                 ));
             }
         }
@@ -765,10 +922,17 @@ fn setup_basic_scene(
     // Grass top of hill 1
     for x in -10..=-5 {
         for z in -10..=-5 {
+            let position = IVec3::new(x, 0, z); // Note: y=0 for the grass top since it replaces ground
+            // Add to VoxelWorld for collision detection
+            voxel_world.set_block(position, crate::environment::BlockType::Grass);
+
             commands.spawn((
                 Mesh3d(cube_mesh.clone()),
                 MeshMaterial3d(grass_material.clone()),
                 Transform::from_translation(Vec3::new(x as f32, 3.0, z as f32)),
+                crate::environment::VoxelBlock {
+                    position: IVec3::new(x, 3, z),
+                },
             ));
         }
     }
@@ -777,10 +941,15 @@ fn setup_basic_scene(
     for x in 5..=10 {
         for y in 1..=3 {
             for z in 5..=10 {
+                let position = IVec3::new(x, y, z);
+                // Add to VoxelWorld for collision detection
+                voxel_world.set_block(position, crate::environment::BlockType::Dirt);
+
                 commands.spawn((
                     Mesh3d(cube_mesh.clone()),
                     MeshMaterial3d(dirt_material.clone()),
                     Transform::from_translation(Vec3::new(x as f32, y as f32, z as f32)),
+                    crate::environment::VoxelBlock { position },
                 ));
             }
         }
@@ -788,10 +957,15 @@ fn setup_basic_scene(
     // Grass top of hill 2
     for x in 5..=10 {
         for z in 5..=10 {
+            let position = IVec3::new(x, 4, z);
+            // Add to VoxelWorld for collision detection
+            voxel_world.set_block(position, crate::environment::BlockType::Grass);
+
             commands.spawn((
                 Mesh3d(cube_mesh.clone()),
                 MeshMaterial3d(grass_material.clone()),
                 Transform::from_translation(Vec3::new(x as f32, 4.0, z as f32)),
+                crate::environment::VoxelBlock { position },
             ));
         }
     }
@@ -922,7 +1096,47 @@ fn setup_basic_scene(
         "IoTCraft Enhanced Web Scene completed! Total blocks: ~700+ | Features: Terrain, Hills, Water, Devices, Tower"
     );
 }
-fn rotate_cube(time: Res<Time>, mut query: Query<&mut Transform, With<DemoCube>>) {
+
+/// Enable camera controller when entering the game
+pub fn enable_camera_controller(
+    mut camera_query: Query<&mut crate::camera_controllers::CameraController, With<Camera>>,
+) {
+    if let Ok(mut camera_controller) = camera_query.single_mut() {
+        camera_controller.enabled = true;
+        info!("📹 Desktop camera controller enabled for game");
+
+        #[cfg(target_arch = "wasm32")]
+        web_sys::console::log_1(
+            &"📹 Desktop camera controller enabled - WASD, mouse and touch controls ready".into(),
+        );
+    }
+}
+
+/// Guarded version of scene setup to prevent duplicates
+pub fn setup_basic_scene_once(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    asset_server: Res<AssetServer>,
+    mut setup_guard: ResMut<SceneSetupGuard>,
+    voxel_world: ResMut<crate::environment::VoxelWorld>,
+) {
+    // Only set up scene once
+    if setup_guard.0 {
+        info!("Scene already set up, skipping duplicate setup");
+        #[cfg(target_arch = "wasm32")]
+        web_sys::console::log_1(&"🚫 Scene already set up, skipping duplicate setup".into());
+        return;
+    }
+
+    setup_guard.0 = true;
+    info!("🎬 Setting up scene (guarded) - first time only");
+    #[cfg(target_arch = "wasm32")]
+    web_sys::console::log_1(&"🎬 Setting up scene (guarded) - first time only".into());
+
+    setup_basic_scene(commands, meshes, materials, asset_server, voxel_world);
+}
+pub fn rotate_cube(time: Res<Time>, mut query: Query<&mut Transform, With<DemoCube>>) {
     for mut transform in &mut query {
         transform.rotate_y(time.delta_secs() * 0.5);
     }
@@ -1032,10 +1246,12 @@ fn camera_control_system(
     }
 
     // Handle mouse capture (escape key is handled by menu system)
-    for mut window in &mut windows {
+    // Note: Cursor options are now managed separately, web version doesn't need active cursor management
+    for window in &windows {
         if mouse_button_input.just_pressed(MouseButton::Left) && window.focused {
-            window.cursor_options.grab_mode = bevy::window::CursorGrabMode::Locked;
-            window.cursor_options.visible = false;
+            info!(
+                "Mouse captured for camera control. Use WASD to move, mouse to look around. Press Escape to open menu."
+            );
             info!(
                 "Mouse captured for camera control. Use WASD to move, mouse to look around. Press Escape to open menu."
             );
@@ -1044,7 +1260,7 @@ fn camera_control_system(
 }
 
 /// Process device announcements received via MQTT and spawn devices visually
-fn process_device_announcements(
+pub fn process_device_announcements(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
@@ -1203,7 +1419,7 @@ fn process_device_announcements(
 
 /// Web-compatible FPS logging
 #[cfg(target_arch = "wasm32")]
-fn log_fps(time: Res<Time>, mut timer: Local<Timer>) {
+pub fn log_fps(time: Res<Time>, mut timer: Local<Timer>) {
     // Initialize timer to log every 10 seconds (less frequent for web)
     if timer.duration() == std::time::Duration::ZERO {
         *timer = Timer::from_seconds(10.0, TimerMode::Repeating);
@@ -1220,10 +1436,341 @@ fn log_fps(_time: Res<Time>) {
     // No-op for non-wasm targets
 }
 
+/// Web wrapper for execute_pending_commands that handles missing resources gracefully
+fn execute_pending_commands_web_wrapper(
+    mut pending_commands: ResMut<PendingCommands>,
+    mut blink_state: ResMut<crate::console::BlinkState>,
+    temperature: Res<crate::mqtt::TemperatureResource>,
+    mqtt_config: Res<MqttConfig>,
+    mut voxel_world: ResMut<crate::environment::VoxelWorld>,
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    asset_server: Res<AssetServer>,
+    query: Query<(Entity, &crate::environment::VoxelBlock)>,
+    device_query: Query<(&DeviceEntity, &Transform), Without<Camera>>,
+    mut inventory: ResMut<crate::inventory::PlayerInventory>,
+    mut camera_query: Query<
+        (
+            &mut Transform,
+            &mut crate::camera_controllers::CameraController,
+        ),
+        With<Camera>,
+    >,
+    setup_guard: Res<SceneSetupGuard>,
+) {
+    // If the hardcoded scene has been set up, don't execute scripts to avoid conflicts
+    if setup_guard.0 {
+        // Clear commands to prevent accumulation, but don't execute them
+        if !pending_commands.commands.is_empty() {
+            info!(
+                "Web: Skipping {} script commands because hardcoded scene is active",
+                pending_commands.commands.len()
+            );
+            #[cfg(target_arch = "wasm32")]
+            web_sys::console::log_1(
+                &format!(
+                    "Web: Skipping {} script commands because hardcoded scene is active",
+                    pending_commands.commands.len()
+                )
+                .into(),
+            );
+            pending_commands.commands.clear();
+        }
+        return;
+    }
+
+    // Simplified web implementation of command execution
+    // Process pending commands with basic functionality for web client
+
+    for command in pending_commands.commands.drain(..) {
+        info!("Web: Executing queued command: {}", command);
+
+        #[cfg(target_arch = "wasm32")]
+        web_sys::console::log_1(&format!("Web: Executing command: {}", command).into());
+
+        // Parse command string and dispatch to appropriate handler
+        let parts: Vec<&str> = command.split_whitespace().collect();
+        if parts.is_empty() {
+            continue;
+        }
+
+        match parts[0] {
+            "blink" => {
+                if parts.len() == 2 {
+                    let action = parts[1];
+                    match action {
+                        "start" => {
+                            blink_state.blinking = true;
+                            info!("Web: Blink started via script");
+                        }
+                        "stop" => {
+                            blink_state.blinking = false;
+                            info!("Web: Blink stopped via script");
+                        }
+                        _ => {
+                            info!("Web: Usage: blink [start|stop]");
+                        }
+                    }
+                }
+            }
+            "mqtt" => {
+                if parts.len() == 2 {
+                    let action = parts[1];
+                    match action {
+                        "status" => {
+                            let status = if temperature.value.is_some() {
+                                "Connected to MQTT broker"
+                            } else {
+                                "Connecting to MQTT broker..."
+                            };
+                            info!("Web: MQTT status: {}", status);
+                        }
+                        "temp" => {
+                            let temp_msg = if let Some(val) = temperature.value {
+                                format!("Current temperature: {:.1}°C", val)
+                            } else {
+                                "No temperature data available".to_string()
+                            };
+                            info!("Web: {}", temp_msg);
+                        }
+                        _ => {
+                            info!("Web: Usage: mqtt [status|temp]");
+                        }
+                    }
+                }
+            }
+            "place" => {
+                if parts.len() == 5 {
+                    if let (Ok(x), Ok(y), Ok(z)) = (
+                        parts[2].parse::<i32>(),
+                        parts[3].parse::<i32>(),
+                        parts[4].parse::<i32>(),
+                    ) {
+                        let block_type_str = parts[1];
+                        if let Some(block_type) = parse_block_type(block_type_str) {
+                            place_block_web(
+                                IVec3::new(x, y, z),
+                                block_type,
+                                block_type_str,
+                                &mut voxel_world,
+                                &mut commands,
+                                &mut meshes,
+                                &mut materials,
+                                &asset_server,
+                            );
+                        }
+                    }
+                }
+            }
+            "wall" => {
+                if parts.len() == 8 {
+                    if let (Ok(x1), Ok(y1), Ok(z1), Ok(x2), Ok(y2), Ok(z2)) = (
+                        parts[2].parse::<i32>(),
+                        parts[3].parse::<i32>(),
+                        parts[4].parse::<i32>(),
+                        parts[5].parse::<i32>(),
+                        parts[6].parse::<i32>(),
+                        parts[7].parse::<i32>(),
+                    ) {
+                        let block_type_str = parts[1];
+                        if let Some(block_type) = parse_block_type(block_type_str) {
+                            // Create wall by filling area between two points
+                            let min_x = x1.min(x2);
+                            let max_x = x1.max(x2);
+                            let min_y = y1.min(y2);
+                            let max_y = y1.max(y2);
+                            let min_z = z1.min(z2);
+                            let max_z = z1.max(z2);
+
+                            let mut blocks_added = 0;
+                            for x in min_x..=max_x {
+                                for y in min_y..=max_y {
+                                    for z in min_z..=max_z {
+                                        place_block_web(
+                                            IVec3::new(x, y, z),
+                                            block_type,
+                                            block_type_str,
+                                            &mut voxel_world,
+                                            &mut commands,
+                                            &mut meshes,
+                                            &mut materials,
+                                            &asset_server,
+                                        );
+                                        blocks_added += 1;
+                                    }
+                                }
+                            }
+
+                            info!(
+                                "Web: Created {} wall from ({},{},{}) to ({},{},{}) with {} blocks",
+                                block_type_str, x1, y1, z1, x2, y2, z2, blocks_added
+                            );
+                        }
+                    }
+                }
+            }
+            "tp" | "teleport" => {
+                if parts.len() == 4 {
+                    if let (Ok(x), Ok(y), Ok(z)) = (
+                        parts[1].parse::<f32>(),
+                        parts[2].parse::<f32>(),
+                        parts[3].parse::<f32>(),
+                    ) {
+                        // Teleport camera to position
+                        for (mut camera_transform, _) in camera_query.iter_mut() {
+                            camera_transform.translation = Vec3::new(x, y, z);
+                            info!("Web: Teleported camera to ({}, {}, {})", x, y, z);
+                            break; // Only teleport the first camera
+                        }
+                    }
+                }
+            }
+            "look" => {
+                if parts.len() == 3 {
+                    if let (Ok(yaw), Ok(pitch)) = (parts[1].parse::<f32>(), parts[2].parse::<f32>())
+                    {
+                        // Set camera rotation
+                        for (mut camera_transform, _) in camera_query.iter_mut() {
+                            let yaw_rad = yaw.to_radians();
+                            let pitch_rad = pitch.to_radians();
+                            camera_transform.rotation =
+                                Quat::from_euler(EulerRot::YXZ, yaw_rad, pitch_rad, 0.0);
+                            info!("Web: Set camera look to yaw={}, pitch={}", yaw, pitch);
+                            break; // Only affect the first camera
+                        }
+                    }
+                }
+            }
+            "give" => {
+                if parts.len() == 3 {
+                    if let Ok(count) = parts[2].parse::<u32>() {
+                        let item_type = parts[1];
+                        if let Some(block_type) = parse_block_type(item_type) {
+                            let item_type = crate::inventory::ItemType::Block(block_type);
+                            let remaining = inventory.add_items(item_type, count);
+                            if remaining > 0 {
+                                info!(
+                                    "Web: Gave {} {} to player inventory ({} couldn't fit)",
+                                    count - remaining,
+                                    parts[1],
+                                    remaining
+                                );
+                            } else {
+                                info!("Web: Gave {} {} to player inventory", count, parts[1]);
+                            }
+                        }
+                    }
+                }
+            }
+            _ => {
+                info!("Web: Unknown command: {}", parts[0]);
+            }
+        }
+    }
+}
+
+/// Parse block type from string
+fn parse_block_type(block_type_str: &str) -> Option<crate::environment::BlockType> {
+    match block_type_str {
+        "grass" => Some(crate::environment::BlockType::Grass),
+        "dirt" => Some(crate::environment::BlockType::Dirt),
+        "stone" => Some(crate::environment::BlockType::Stone),
+        "quartz_block" => Some(crate::environment::BlockType::QuartzBlock),
+        "glass_pane" => Some(crate::environment::BlockType::GlassPane),
+        "cyan_terracotta" => Some(crate::environment::BlockType::CyanTerracotta),
+        "water" => Some(crate::environment::BlockType::Water),
+        _ => None,
+    }
+}
+
+/// Place a block in both VoxelWorld and create visual representation
+fn place_block_web(
+    position: IVec3,
+    block_type: crate::environment::BlockType,
+    block_type_str: &str,
+    voxel_world: &mut ResMut<crate::environment::VoxelWorld>,
+    commands: &mut Commands,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    materials: &mut ResMut<Assets<StandardMaterial>>,
+    asset_server: &AssetServer,
+) {
+    // Add block to VoxelWorld for collision detection
+    voxel_world.set_block(position, block_type);
+
+    // Create visual representation
+    let cube_mesh = meshes.add(Cuboid::new(1.0, 1.0, 1.0));
+    let material = create_block_material_web(block_type, asset_server, materials);
+
+    commands.spawn((
+        Mesh3d(cube_mesh),
+        MeshMaterial3d(material),
+        Transform::from_translation(Vec3::new(
+            position.x as f32,
+            position.y as f32,
+            position.z as f32,
+        )),
+        crate::environment::VoxelBlock { position },
+        Name::new(format!(
+            "ScriptBlock-{}-{}-{}",
+            position.x, position.y, position.z
+        )),
+    ));
+
+    info!(
+        "Web: Placed {} block at ({}, {}, {}) - added to both VoxelWorld and visual scene",
+        block_type_str, position.x, position.y, position.z
+    );
+
+    #[cfg(target_arch = "wasm32")]
+    web_sys::console::log_1(
+        &format!(
+            "Web: Placed {} block at ({}, {}, {}) - VoxelWorld has {} blocks",
+            block_type_str,
+            position.x,
+            position.y,
+            position.z,
+            voxel_world.blocks.len()
+        )
+        .into(),
+    );
+}
+
+/// Create block material for web version
+fn create_block_material_web(
+    block_type: crate::environment::BlockType,
+    asset_server: &AssetServer,
+    materials: &mut ResMut<Assets<StandardMaterial>>,
+) -> Handle<StandardMaterial> {
+    match block_type {
+        crate::environment::BlockType::Water => materials.add(StandardMaterial {
+            base_color: Color::srgba(0.0, 0.35, 0.9, 0.6),
+            alpha_mode: AlphaMode::Blend,
+            ..default()
+        }),
+        _ => {
+            let texture_path = match block_type {
+                crate::environment::BlockType::Grass => "textures/grass.webp",
+                crate::environment::BlockType::Dirt => "textures/dirt.webp",
+                crate::environment::BlockType::Stone => "textures/stone.webp",
+                crate::environment::BlockType::QuartzBlock => "textures/quartz_block.webp",
+                crate::environment::BlockType::GlassPane => "textures/glass_pane.webp",
+                crate::environment::BlockType::CyanTerracotta => "textures/cyan_terracotta.webp",
+                _ => "textures/stone.webp", // fallback
+            };
+            let texture: Handle<Image> = asset_server.load(texture_path);
+            materials.add(StandardMaterial {
+                base_color_texture: Some(texture),
+                ..default()
+            })
+        }
+    }
+}
+
 // ============ MULTIPLAYER SYSTEMS ============
 
 /// Setup multiplayer connections (simplified for web)
-fn setup_multiplayer_connections(
+pub fn setup_multiplayer_connections(
     mut commands: Commands,
     profile: Res<crate::profile::PlayerProfile>,
 ) {
@@ -1249,12 +1796,12 @@ fn setup_multiplayer_connections(
 }
 
 /// Update position timer
-fn update_position_timer(mut timer: ResMut<PositionTimer>, time: Res<Time>) {
+pub fn update_position_timer(mut timer: ResMut<PositionTimer>, time: Res<Time>) {
     timer.timer.tick(time.delta());
 }
 
 /// Publish local player pose (simplified for web)
-fn publish_local_pose(
+pub fn publish_local_pose(
     profile: Res<crate::profile::PlayerProfile>,
     mut timer: ResMut<PositionTimer>,
     pose_sender: Option<Res<PoseSender>>,
@@ -1320,7 +1867,7 @@ fn publish_local_pose(
 }
 
 /// Apply remote poses to spawn/update player avatars
-fn apply_remote_poses(
+pub fn apply_remote_poses(
     profile: Res<crate::profile::PlayerProfile>,
     pose_receiver: Option<Res<PoseReceiver>>,
     mut commands: Commands,
@@ -1412,7 +1959,7 @@ fn apply_remote_poses(
 // ============ TOUCH UI SYSTEMS ============
 
 /// Setup touch control UI with virtual joystick and touch areas
-fn setup_touch_ui(
+pub fn setup_touch_ui(
     mut commands: Commands,
     mut touch_state: ResMut<TouchInputState>,
     windows: Query<&Window>,
@@ -1496,7 +2043,7 @@ fn setup_touch_ui(
                             ..default()
                         },
                         BackgroundColor(Color::srgba(0.3, 0.3, 0.3, 0.4)),
-                        BorderColor(Color::srgba(0.8, 0.8, 0.8, 0.6)),
+                        BorderColor::all(Color::srgba(0.8, 0.8, 0.8, 0.6)),
                         BorderRadius::all(Val::Px(60.0)), // Circular
                         Visibility::Hidden,               // Start hidden
                         JoystickBase,
@@ -1526,8 +2073,50 @@ fn setup_touch_ui(
     }
 }
 
+/// Manage camera controller enabled state based on player mode
+pub fn manage_camera_controller_based_on_player_mode(
+    current_mode: Option<Res<crate::player_controller::PlayerMode>>,
+    mut camera_controller_query: Query<
+        &mut crate::camera_controllers::CameraController,
+        With<Camera3d>,
+    >,
+) {
+    let Some(player_mode) = current_mode else {
+        return; // No player mode resource available yet
+    };
+
+    if let Ok(mut camera_controller) = camera_controller_query.single_mut() {
+        let should_be_enabled =
+            matches!(*player_mode, crate::player_controller::PlayerMode::Flying);
+
+        if camera_controller.enabled != should_be_enabled {
+            camera_controller.enabled = should_be_enabled;
+
+            let mode_name = match *player_mode {
+                crate::player_controller::PlayerMode::Flying => "Flying",
+                crate::player_controller::PlayerMode::Walking => "Walking",
+            };
+
+            if should_be_enabled {
+                info!("📹 Camera controller enabled for {} mode", mode_name);
+                #[cfg(target_arch = "wasm32")]
+                web_sys::console::log_1(
+                    &format!("📹 Camera controller enabled for {} mode", mode_name).into(),
+                );
+            } else {
+                info!(
+                    "📹 Camera controller disabled for {} mode - player controller handling movement",
+                    mode_name
+                );
+                #[cfg(target_arch = "wasm32")]
+                web_sys::console::log_1(&format!("📹 Camera controller disabled for {} mode - player controller handling movement", mode_name).into());
+            }
+        }
+    }
+}
+
 /// Update touch UI based on current touch state
-fn update_touch_ui(
+pub fn update_touch_ui(
     touch_state: Res<TouchInputState>,
     mut joystick_base_query: Query<
         (&mut Node, &mut Visibility),
@@ -1540,7 +2129,7 @@ fn update_touch_ui(
         let window_height = window.resolution.height();
 
         // Update joystick base position and visibility
-        if let Ok((mut base_style, mut base_visibility)) = joystick_base_query.get_single_mut() {
+        if let Ok((mut base_style, mut base_visibility)) = joystick_base_query.single_mut() {
             if touch_state.joystick_active {
                 // Show joystick and position it at touch center
                 *base_visibility = Visibility::Visible;
@@ -1548,7 +2137,7 @@ fn update_touch_ui(
                 base_style.bottom = Val::Px(window_height - touch_state.joystick_center.y - 60.0); // Flip Y coordinate
 
                 // Update knob position within base
-                if let Ok(mut knob_style) = joystick_knob_query.get_single_mut() {
+                if let Ok(mut knob_style) = joystick_knob_query.single_mut() {
                     // Clamp joystick offset to base radius (60px)
                     let max_offset = 35.0; // Half the base radius minus knob radius
                     let clamped_offset = if touch_state.joystick_offset.length() > max_offset {

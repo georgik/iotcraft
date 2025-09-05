@@ -1,3 +1,14 @@
+/// A simple WASM-compatible client ID generator
+fn generate_unique_client_id(prefix: &str) -> String {
+    let random_suffix = js_sys::Math::random() * 1_000_000_000.0;
+    format!(
+        "{}-{}-{}",
+        prefix,
+        js_sys::Date::now() as u64,
+        random_suffix as u64
+    )
+}
+
 use bevy::prelude::*;
 use js_sys::Uint8Array;
 use std::cell::RefCell;
@@ -315,7 +326,7 @@ pub fn spawn_web_mqtt_subscriber(
     commands.insert_resource(PoseReceiver(Mutex::new(pose_rx)));
     commands.insert_resource(PoseSender(Mutex::new(outgoing_pose_tx)));
 
-    let client_id = format!("web-{}", profile.player_id);
+    let client_id = generate_unique_client_id("web-mqtt-client");
     let world_id = "default"; // Use default world for web client
     let pose_subscribe_topic = format!("iotcraft/worlds/{}/players/+/pose", world_id);
 

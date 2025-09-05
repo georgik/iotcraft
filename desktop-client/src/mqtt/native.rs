@@ -8,6 +8,7 @@ use std::time::Duration;
 use super::mqtt_types::*;
 use crate::config::MqttConfig;
 use crate::devices::DeviceAnnouncementReceiver;
+use crate::multiplayer::mqtt_utils::generate_unique_client_id;
 use crate::profile::PlayerProfile;
 
 /// Native MQTT implementation for desktop using rumqttc
@@ -25,12 +26,12 @@ impl Plugin for NativeMqttPlugin {
 pub fn spawn_native_mqtt_subscriber(
     mut commands: Commands,
     mqtt_config: Res<MqttConfig>,
-    profile: Res<PlayerProfile>,
+    _profile: Res<PlayerProfile>,
 ) {
     let (tx, rx) = mpsc::channel::<f32>();
     let mqtt_host = mqtt_config.host.clone();
     let mqtt_port = mqtt_config.port;
-    let temp_client_id = format!("desktop-{}-temp", profile.player_id);
+    let temp_client_id = generate_unique_client_id("temperature-sensor-sub");
 
     thread::spawn(move || {
         info!(
@@ -82,7 +83,7 @@ pub fn spawn_native_mqtt_subscriber(
     // Subscribe to device announcements
     let mqtt_host2 = mqtt_config.host.clone();
     let mqtt_port2 = mqtt_config.port;
-    let device_client_id = format!("desktop-{}-devices", profile.player_id);
+    let device_client_id = generate_unique_client_id("device-announcements-sub");
 
     thread::spawn(move || {
         info!(

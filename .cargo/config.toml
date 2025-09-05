@@ -1,0 +1,8 @@
+[alias]
+xtask = "run --package xtask --"
+ctask = "run --package ctask --"
+fmt-all = "run --package xtask -- format"
+fmt-check = "run --package xtask -- format --check"
+
+# Workspace-level configuration
+# This allows `cargo xtask` to work from anywhere in the workspace

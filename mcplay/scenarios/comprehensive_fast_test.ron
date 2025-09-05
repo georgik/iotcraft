@@ -1,0 +1,239 @@
+// Comprehensive Fast MCP Test Scenario
+// Tests all major MCP functionality with minimal wait times
+Scenario(
+    name: "comprehensive_fast_test",
+    description: "Comprehensive fast test of MCP functionality - world creation, state transition, and block operations",
+    version: "1.0",
+    
+    // Infrastructure setup
+    infrastructure: InfrastructureConfig(
+        mqtt_server: MqttServerConfig(
+            required: true,
+            port: 1883,
+            config_file: None,
+            options: None,
+        ),
+        mqtt_observer: None, // No observer for speed
+        mcp_server: None,
+        services: None,
+    ),
+    
+    // Single test client
+    clients: [
+        ClientConfig(
+            id: "player1",
+            player_id: "player1", 
+            mcp_port: 8080,
+            client_type: "desktop",
+            name: Some("Player 1 - Comprehensive Test"),
+            config: None,
+        ),
+    ],
+    
+    // Comprehensive test steps
+    steps: [
+        // Step 1: Initialize MCP connection
+        Step(
+            name: "mcp_initialize",
+            description: "Initialize MCP connection",
+            client: "player1",
+            action: (
+                type: "mcp_call",
+                tool: "initialize",
+                arguments: {
+                    "protocolVersion": "2024-11-05",
+                    "capabilities": {
+                        "tools": {}
+                    },
+                    "clientInfo": {
+                        "name": "comprehensive-test",
+                        "version": "1.0.0"
+                    }
+                },
+            ),
+            wait_before: 200,
+            wait_after: 50,
+            timeout: 10000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: [],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 2: Test direct commands
+        Step(
+            name: "test_ping",
+            description: "Test ping (direct command)",
+            client: "player1",
+            action: (
+                type: "mcp_call",
+                tool: "ping",
+                arguments: {},
+            ),
+            wait_before: 50,
+            wait_after: 50,
+            timeout: 5000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["mcp_initialize"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 3: Test queued commands
+        Step(
+            name: "test_get_client_info",
+            description: "Test get_client_info (queued command)",
+            client: "player1",
+            action: (
+                type: "mcp_call",
+                tool: "get_client_info",
+                arguments: {},
+            ),
+            wait_before: 50,
+            wait_after: 50,
+            timeout: 8000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["test_ping"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 4: Create world (state transition)
+        Step(
+            name: "create_world",
+            description: "Create a new world and transition to InGame state",
+            client: "player1",
+            action: (
+                type: "mcp_call",
+                tool: "create_world",
+                arguments: {
+                    "world_name": "comprehensive_test_world",
+                    "description": "World for comprehensive testing"
+                },
+            ),
+            wait_before: 100,
+            wait_after: 500,
+            timeout: 15000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["test_get_client_info"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 5: Place some blocks
+        Step(
+            name: "place_stone_block",
+            description: "Place a stone block",
+            client: "player1",
+            action: (
+                type: "mcp_call",
+                tool: "place_block",
+                arguments: {
+                    "block_type": "stone",
+                    "x": 0,
+                    "y": 1,
+                    "z": 0,
+                },
+            ),
+            wait_before: 100,
+            wait_after: 200,
+            timeout: 8000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["create_world"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 6: Place another block
+        Step(
+            name: "place_stone_block_2",
+            description: "Place a second stone block",
+            client: "player1",
+            action: (
+                type: "mcp_call",
+                tool: "place_block",
+                arguments: {
+                    "block_type": "stone",
+                    "x": 1,
+                    "y": 1,
+                    "z": 0,
+                },
+            ),
+            wait_before: 100,
+            wait_after: 200,
+            timeout: 8000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["place_stone_block"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 7: Check world status
+        Step(
+            name: "check_final_status",
+            description: "Check final world status",
+            client: "player1",
+            action: (
+                type: "mcp_call",
+                tool: "get_world_status",
+                arguments: {},
+            ),
+            wait_before: 100,
+            wait_after: 100,
+            timeout: 5000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["place_stone_block_2"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+    ],
+    
+    // Test configuration
+    config: Some(ScenarioConfig(
+        timeout_ms: Some(45000),  // 45 seconds total
+        logging: Some(LoggingConfig(
+            level: Some("info"),
+            log_mqtt: Some(false),
+            log_client_actions: Some(true),
+            filters: Some(["mcp/*", "world/*", "GameState"]),
+        )),
+        environment: Some({
+            "RUST_LOG": "info,iotcraft_desktop_client=info",
+            "SCENARIO_NAME": "comprehensive_fast_test",
+            "ENABLE_MCP": "true",
+        }),
+        settings: Some({
+            "auto_cleanup": true,
+            "preserve_logs": false,
+            "fail_fast": true,
+        }),
+    )),
+)

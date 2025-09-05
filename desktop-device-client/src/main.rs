@@ -63,6 +63,18 @@ struct Args {
     /// Movement pattern for player emulation (static, circle, random)
     #[arg(long, default_value = "static")]
     movement_pattern: String,
+    
+    /// Enable world publishing (publishes world info to MQTT)
+    #[arg(long)]
+    publish_world: bool,
+    
+    /// World name (if different from ID)
+    #[arg(long)]
+    world_name: Option<String>,
+    
+    /// World description
+    #[arg(long, default_value = "A new world")]
+    world_description: String,
 }
 
 /// Device properties structure matching ESP32-C6 implementation
@@ -135,6 +147,48 @@ struct PlayerState {
     yaw: f32,
     pitch: f32,
     movement_time: f32,
+}
+
+/// World info message structure matching desktop client world discovery system
+#[derive(Serialize, Deserialize, Debug, Clone)]
+struct WorldInfoMessage {
+    world_id: String,
+    world_name: String,
+    description: String,
+    host_player: String,
+    host_name: String,
+    created_at: String,
+    last_updated: String,
+    player_count: u32,
+    max_players: u32,
+    is_public: bool,
+    version: String,
+}
+
+/// Block data for world data message
+#[derive(Serialize, Deserialize, Debug, Clone)]
+struct BlockData {
+    x: i32,
+    y: i32,
+    z: i32,
+    block_type: String,
+}
+
+/// World data message structure matching desktop client world discovery system
+#[derive(Serialize, Deserialize, Debug, Clone)]
+struct WorldDataMessage {
+    metadata: WorldMetadata,
+    blocks: Vec<BlockData>,
+}
+
+/// World metadata for world data message
+#[derive(Serialize, Deserialize, Debug, Clone)]
+struct WorldMetadata {
+    name: String,
+    description: String,
+    created_at: String,
+    last_played: String,
+    version: String,
 }
 
 impl Default for PlayerState {
@@ -275,6 +329,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if args.emulate_player {
         info!("👤 Player emulation enabled");
     }
+    
+    if args.publish_world {
+        info!("🌍 World publishing enabled for world: {}", args.world_id);
+    }
 
     // Initialize device state with provided position
     let initial_state = DeviceState {
@@ -298,10 +356,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let (client, eventloop) = AsyncClient::new(mqttoptions, 10);
 
+    // Extract player info that might be needed for both player emulation and world publishing
+    let player_id_for_emulation = args.player_id.clone();
+    let player_name_for_emulation = args.player_name.clone();
+    
     // Spawn player emulation if enabled
     if args.emulate_player {
-        let player_id = args.player_id.unwrap_or_else(generate_player_id);
-        let player_name = args.player_name.unwrap_or_else(|| whoami::username());
+        let player_id = player_id_for_emulation.unwrap_or_else(generate_player_id);
+        let player_name = player_name_for_emulation.unwrap_or_else(|| whoami::username());
         let initial_position = [args.x, args.y, args.z];
 
         info!(
@@ -324,6 +386,27 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             initial_position,
             player_client,
             player_shutdown_rx,
+        ));
+    }
+
+    // Spawn world publishing task if enabled
+    if args.publish_world {
+        let world_client = client.clone();
+        let world_id = args.world_id.clone();
+        let world_name = args.world_name.unwrap_or_else(|| args.world_id.clone());
+        let world_description = args.world_description.clone();
+        let player_id = args.player_id.unwrap_or_else(generate_player_id);
+        let player_name = args.player_name.unwrap_or_else(|| whoami::username());
+        let world_shutdown_rx = shutdown_tx.subscribe();
+
+        tokio::spawn(run_world_publisher(
+            world_id,
+            world_name,
+            world_description,
+            player_id,
+            player_name,
+            world_client,
+            world_shutdown_rx,
         ));
     }
 
@@ -431,6 +514,145 @@ async fn run_minimal_mqtt_client(
             }
         }
     }
+}
+
+async fn run_world_publisher(
+    world_id: String,
+    world_name: String,
+    world_description: String,
+    host_player_id: String,
+    host_player_name: String,
+    client: AsyncClient,
+    mut shutdown_rx: broadcast::Receiver<()>,
+) {
+    info!("🌍 Starting world publisher for world: {}", world_id);
+    
+    // Create timestamps
+    let created_at = chrono::Utc::now().to_rfc3339();
+    let last_played = created_at.clone();
+    
+    // Create world info message
+    let world_info = WorldInfoMessage {
+        world_id: format!("{}_", world_id) + &now_ts().to_string(),
+        world_name: world_name.clone(),
+        description: world_description.clone(),
+        host_player: host_player_id.clone(),
+        host_name: host_player_name.clone(),
+        created_at: created_at.clone(),
+        last_updated: created_at.clone(),
+        player_count: 1,
+        max_players: 10,
+        is_public: true,
+        version: "1.0.0".to_string(),
+    };
+    
+    // Create world data message with some sample blocks
+    let world_data = WorldDataMessage {
+        metadata: WorldMetadata {
+            name: world_name,
+            description: world_description,
+            created_at: created_at.clone(),
+            last_played,
+            version: "1.0.0".to_string(),
+        },
+        blocks: generate_sample_blocks(100),
+    };
+    
+    // Topic for world info
+    let info_topic = format!("iotcraft/worlds/{}/info", world_id);
+    
+    // Topic for world data
+    let data_topic = format!("iotcraft/worlds/{}/data", world_id);
+    
+    // Serialize messages to JSON
+    let info_payload = match serde_json::to_string(&world_info) {
+        Ok(payload) => payload,
+        Err(e) => {
+            error!("Failed to serialize world info: {}", e);
+            return;
+        }
+    };
+    
+    let data_payload = match serde_json::to_string(&world_data) {
+        Ok(payload) => payload,
+        Err(e) => {
+            error!("Failed to serialize world data: {}", e);
+            return;
+        }
+    };
+    
+    // Publish world info and data - retain flag set to true for discovery
+    if let Err(e) = client.publish(&info_topic, QoS::AtLeastOnce, true, info_payload.clone()).await {
+        error!("Failed to publish world info: {}", e);
+    } else {
+        info!("✅ Published world info to {}", info_topic);
+    }
+    
+    if let Err(e) = client.publish(&data_topic, QoS::AtLeastOnce, true, data_payload.clone()).await {
+        error!("Failed to publish world data: {}", e);
+    } else {
+        info!("✅ Published world data to {}", data_topic);
+    }
+    
+    // Set up interval to periodically update world info (last_updated field)
+    let mut update_interval = interval(Duration::from_secs(30)); // Update every 30 seconds
+    update_interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
+    
+    loop {
+        tokio::select! {
+            _ = update_interval.tick() => {
+                // Update the last_updated timestamp
+                let mut updated_info = world_info.clone();
+                updated_info.last_updated = chrono::Utc::now().to_rfc3339();
+                
+                if let Ok(payload) = serde_json::to_string(&updated_info) {
+                    if let Err(e) = client.publish(&info_topic, QoS::AtLeastOnce, true, payload).await {
+                        warn!("Failed to update world info: {}", e);
+                    } else {
+                        info!("🔄 Updated world info for {}", world_id);
+                    }
+                }
+            }
+            _ = shutdown_rx.recv() => {
+                info!("🛑 Shutting down world publisher for {}", world_id);
+                
+                // Attempt to clean up by publishing empty messages with retain flag
+                // This is optional but helps clean up retained messages
+                if let Err(e) = client.publish(&info_topic, QoS::AtLeastOnce, true, "").await {
+                    warn!("Failed to clean up retained world info: {}", e);
+                }
+                
+                if let Err(e) = client.publish(&data_topic, QoS::AtLeastOnce, true, "").await {
+                    warn!("Failed to clean up retained world data: {}", e);
+                }
+                
+                break;
+            }
+        }
+    }
+}
+
+// Generate sample blocks for the world
+fn generate_sample_blocks(count: usize) -> Vec<BlockData> {
+    let mut blocks = Vec::with_capacity(count);
+    let mut rng = rand::thread_rng();
+    
+    // Block types to randomly choose from
+    let block_types = ["Grass", "Stone", "Dirt", "Water"];
+    
+    for _ in 0..count {
+        // Generate random positions between -40 and 40
+        let x = rng.gen_range(-40..41);
+        let y = rng.gen_range(0..5); // Height between 0 and 4
+        let z = rng.gen_range(-40..41);
+        
+        // Randomly select a block type
+        let block_type = block_types[rng.gen_range(0..block_types.len())].to_string();
+        
+        blocks.push(BlockData { x, y, z, block_type });
+    }
+    
+    blocks
 }
 
 async fn run_device_client(

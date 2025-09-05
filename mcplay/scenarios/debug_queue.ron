@@ -1,0 +1,103 @@
+// Debug Queue Test Scenario
+// This scenario tests if commands get queued and processed at all
+Scenario(
+    name: "debug_queue",
+    description: "Debug test - single get_client_info to check command queueing",
+    version: "1.0",
+    
+    infrastructure: InfrastructureConfig(
+        mqtt_server: MqttServerConfig(
+            required: true,
+            port: 1883,
+            config_file: None,
+            options: None,
+        ),
+        mqtt_observer: None,
+        mcp_server: None,
+        services: None,
+    ),
+    
+    clients: [
+        ClientConfig(
+            id: "alice",
+            player_id: "alice", 
+            mcp_port: 8080,
+            client_type: "desktop",
+            name: Some("Alice - Debug Client"),
+            config: None,
+        ),
+    ],
+    
+    steps: [
+        Step(
+            name: "mcp_initialize",
+            description: "Initialize MCP connection",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "initialize",
+                arguments: {},
+            ),
+            wait_before: 3000,
+            wait_after: 1000,
+            timeout: 10000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: [],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        Step(
+            name: "debug_get_client_info",
+            description: "Single get_client_info test with extended timeout",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "get_client_info",
+                arguments: {},
+            ),
+            wait_before: 1000,
+            wait_after: 5000, // Long wait to see all logs
+            timeout: 60000,   // Very long timeout to see what happens
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["mcp_initialize"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+    ],
+    
+    config: Some(ScenarioConfig(
+        timeout_ms: Some(120000),  // 2 minute total timeout
+        logging: Some(LoggingConfig(
+            level: Some("debug"),
+            log_mqtt: Some(false), // Disable MQTT noise
+            log_client_actions: Some(true),
+            filters: Some([
+                "mcp/*", 
+                "execute_pending_commands",
+                "Executing queued command",
+                "CommandExecutedEvent",
+                "Queueing MCP command",
+                "Added command to queue"
+            ]),
+        )),
+        environment: Some({
+            "RUST_LOG": "debug,iotcraft_desktop_client=debug,rumqttc=warn",
+            "SCENARIO_NAME": "debug_queue",
+            "ENABLE_MCP": "true",
+        }),
+        settings: Some({
+            "auto_cleanup": true,
+            "preserve_logs": true,
+            "fail_fast": true,
+        }),
+    )),
+)

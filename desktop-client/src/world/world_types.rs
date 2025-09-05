@@ -59,26 +59,27 @@ pub struct WorldInfo {
 }
 
 /// Event to request world loading
-#[derive(Event)]
+#[derive(Event, BufferedEvent)]
 pub struct LoadWorldEvent {
     pub world_name: String,
 }
 
 /// Event to request world saving
-#[derive(Event)]
+#[derive(Event, BufferedEvent)]
 pub struct SaveWorldEvent {
     pub world_name: String,
 }
 
 /// Event to request creating a new world
-#[derive(Event)]
+#[derive(Event, BufferedEvent)]
 pub struct CreateWorldEvent {
     pub world_name: String,
     pub description: String,
+    pub template: Option<String>,
 }
 
 /// Event to request deleting a world
-#[derive(Event)]
+#[derive(Event, BufferedEvent)]
 pub struct DeleteWorldEvent {
     pub world_name: String,
 }

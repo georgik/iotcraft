@@ -1,0 +1,258 @@
+// Step 1: Alice creates world, publishes it, Bob joins
+// This tests basic multiplayer world sharing functionality
+Scenario(
+    name: "step1_alice_bob_world_share",
+    description: "Step 1: Alice creates and publishes a world, Bob joins it - tests basic multiplayer setup",
+    version: "1.0",
+    
+    // Full infrastructure with MQTT observer for debugging
+    infrastructure: InfrastructureConfig(
+        mqtt_server: MqttServerConfig(
+            required: true,
+            port: 1883,
+            config_file: None,
+            options: None,
+        ),
+        mqtt_observer: Some(MqttObserverConfig(
+            required: true,
+            topics: Some(["#"]), // Monitor all MQTT topics for debugging
+            client_id: Some("step1_observer"),
+        )),
+        mcp_server: None,
+        services: None,
+    ),
+    
+    // Two clients: Alice (world creator) and Bob (joiner)
+    clients: [
+        ClientConfig(
+            id: "alice",
+            player_id: "alice", 
+            mcp_port: 8080,
+            client_type: "desktop",
+            name: Some("Alice - World Creator"),
+            config: None,
+        ),
+        ClientConfig(
+            id: "bob",
+            player_id: "bob", 
+            mcp_port: 8081,
+            client_type: "desktop",
+            name: Some("Bob - World Joiner"),
+            config: None,
+        ),
+    ],
+    
+    // Scenario steps
+    steps: [
+        // Step 1: Initialize Alice's MCP connection
+        Step(
+            name: "alice_mcp_initialize",
+            description: "Initialize Alice's MCP connection",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "initialize",
+                arguments: {
+                    "protocolVersion": "2024-11-05",
+                    "capabilities": { "tools": {} },
+                    "clientInfo": {
+                        "name": "alice-world-creator",
+                        "version": "1.0.0"
+                    }
+                },
+            ),
+            wait_before: 1000,
+            wait_after: 200,
+            timeout: 10000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: [],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 2: Initialize Bob's MCP connection
+        Step(
+            name: "bob_mcp_initialize",
+            description: "Initialize Bob's MCP connection",
+            client: "bob",
+            action: (
+                type: "mcp_call",
+                tool: "initialize",
+                arguments: {
+                    "protocolVersion": "2024-11-05",
+                    "capabilities": { "tools": {} },
+                    "clientInfo": {
+                        "name": "bob-world-joiner",
+                        "version": "1.0.0"
+                    }
+                },
+            ),
+            wait_before: 500,
+            wait_after: 200,
+            timeout: 10000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["alice_mcp_initialize"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 3: Alice creates a new world
+        Step(
+            name: "alice_create_world",
+            description: "Alice creates a new world for multiplayer testing",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "create_world",
+                arguments: {
+                    "world_name": "alice_shared_world",
+                    "description": "Alice's world for multiplayer testing"
+                },
+            ),
+            wait_before: 500,
+            wait_after: 2000, // Wait for world creation to complete
+            timeout: 20000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["bob_mcp_initialize"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 4: Verify Alice is in InGame state
+        Step(
+            name: "verify_alice_ingame",
+            description: "Verify Alice is now in InGame state after world creation",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "get_game_state",
+                arguments: {},
+            ),
+            wait_before: 500,
+            wait_after: 300,
+            timeout: 8000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["alice_create_world"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 5: Alice publishes the world for sharing
+        Step(
+            name: "alice_publish_world",
+            description: "Alice publishes her world to make it available for multiplayer",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "publish_world",
+                arguments: {
+                    "world_name": "alice_shared_world",
+                    "max_players": 4,
+                    "is_public": true
+                },
+            ),
+            wait_before: 1000,
+            wait_after: 2000, // Wait for world to be published and discoverable
+            timeout: 15000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["verify_alice_ingame"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 6: Bob lists available online worlds to discover Alice's world
+        Step(
+            name: "bob_list_worlds",
+            description: "Bob discovers available shared worlds (should find Alice's world)",
+            client: "bob",
+            action: (
+                type: "mcp_call",
+                tool: "list_online_worlds",
+                arguments: {},
+            ),
+            wait_before: 500,
+            wait_after: 500,
+            timeout: 10000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["alice_publish_world"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 7: Get Alice's multiplayer status to find the world_id
+        Step(
+            name: "alice_get_multiplayer_status",
+            description: "Get Alice's multiplayer status to find the world_id for Bob to join",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "get_multiplayer_status",
+                arguments: {},
+            ),
+            wait_before: 500,
+            wait_after: 500,
+            timeout: 10000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["bob_list_worlds"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+    ],
+    
+    // Configuration
+    config: Some(ScenarioConfig(
+        timeout_ms: Some(120000), // 2 minutes total timeout
+        logging: Some(LoggingConfig(
+            level: Some("info"),
+            log_mqtt: Some(true),
+            log_client_actions: Some(true),
+            filters: Some([
+                "world/*", 
+                "mcp/*", 
+                "multiplayer/*", 
+                "GameState", 
+                "publish_world",
+                "join_world",
+                "list_online_worlds"
+            ]),
+        )),
+        environment: Some({
+            "RUST_LOG": "info,iotcraft_desktop_client=info",
+            "SCENARIO_NAME": "step1_alice_bob_world_share",
+            "ENABLE_MCP": "true",
+        }),
+        settings: Some({
+            "auto_cleanup": true,
+            "preserve_logs": true,
+            "fail_fast": true,
+        }),
+    )),
+)

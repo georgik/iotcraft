@@ -311,6 +311,7 @@ fn handle_load_world_events(
                     &mut voxel_world,
                     &mut commands,
                     &world_info.path,
+                    &existing_blocks_query,
                 );
             }
         } else {
@@ -403,6 +404,7 @@ fn handle_create_world_events(
     mut commands: Commands,
     mut discovered_worlds: ResMut<DiscoveredWorlds>,
     mut pending_commands: ResMut<PendingCommands>,
+    existing_blocks_query: Query<Entity, With<crate::environment::VoxelBlock>>,
 ) {
     for event in create_events.read() {
         info!("Creating new world: {}", event.world_name);
@@ -453,6 +455,7 @@ fn handle_create_world_events(
             &mut voxel_world,
             &mut commands,
             &world_path,
+            &existing_blocks_query,
         );
 
         // Add to discovered worlds
@@ -462,10 +465,17 @@ fn handle_create_world_events(
             metadata,
         });
 
-        // Execute new world script if it exists
-        let new_world_script_path = "scripts/new_world.txt";
-        if std::path::Path::new(new_world_script_path).exists() {
-            match fs::read_to_string(new_world_script_path) {
+        // Execute world template script based on event template or default
+        let template_name = event.template.as_deref().unwrap_or("default");
+        let template_path = format!("scripts/world_templates/{}.txt", template_name);
+
+        info!(
+            "Loading world template '{}' from path: {}",
+            template_name, template_path
+        );
+
+        if std::path::Path::new(&template_path).exists() {
+            match fs::read_to_string(&template_path) {
                 Ok(content) => {
                     let script_commands = content
                         .lines()
@@ -475,21 +485,51 @@ fn handle_create_world_events(
                         .collect::<Vec<String>>();
 
                     info!(
-                        "Executing new world script with {} commands for world {}",
+                        "Executing world template '{}' with {} commands for world {}",
+                        template_name,
                         script_commands.len(),
                         event.world_name
                     );
                     pending_commands.commands.extend(script_commands);
                 }
                 Err(e) => {
-                    error!("Failed to read new world script: {}", e);
+                    error!("Failed to read world template '{}': {}", template_name, e);
                 }
             }
         } else {
-            info!(
-                "New world script not found at {}, world will be empty",
-                new_world_script_path
-            );
+            // Fallback to legacy path if template doesn't exist
+            let fallback_path = "scripts/new_world.txt";
+            if std::path::Path::new(fallback_path).exists() {
+                info!(
+                    "Template '{}' not found, falling back to legacy script: {}",
+                    template_name, fallback_path
+                );
+                match fs::read_to_string(fallback_path) {
+                    Ok(content) => {
+                        let script_commands = content
+                            .lines()
+                            .map(|line| line.trim())
+                            .filter(|line| !line.is_empty() && !line.starts_with('#'))
+                            .map(|line| line.to_string())
+                            .collect::<Vec<String>>();
+
+                        info!(
+                            "Executing fallback world script with {} commands for world {}",
+                            script_commands.len(),
+                            event.world_name
+                        );
+                        pending_commands.commands.extend(script_commands);
+                    }
+                    Err(e) => {
+                        error!("Failed to read fallback world script: {}", e);
+                    }
+                }
+            } else {
+                warn!(
+                    "Neither template '{}' at '{}' nor fallback script at '{}' found, world will be empty",
+                    template_name, template_path, fallback_path
+                );
+            }
         }
 
         info!("Successfully created new world: {}", event.world_name);
@@ -503,8 +543,20 @@ fn create_empty_world(
     voxel_world: &mut VoxelWorld,
     commands: &mut Commands,
     world_path: &Path,
+    existing_blocks_query: &Query<Entity, With<crate::environment::VoxelBlock>>,
 ) {
-    // Clear existing blocks
+    // Clear existing 3D block entities from the scene
+    let mut cleared_entities = 0usize;
+    for entity in existing_blocks_query.iter() {
+        commands.entity(entity).despawn();
+        cleared_entities += 1;
+    }
+    info!(
+        "Cleared {} existing block entities before creating new world",
+        cleared_entities
+    );
+
+    // Clear existing blocks in voxel storage
     voxel_world.blocks.clear();
 
     // Set current world
@@ -526,7 +578,7 @@ fn handle_delete_world_events(
     mut delete_events: EventReader<DeleteWorldEvent>,
     mut discovered_worlds: ResMut<DiscoveredWorlds>,
     _commands: Commands,
-    mut game_state: ResMut<NextState<crate::ui::main_menu::GameState>>,
+    mut game_state: ResMut<NextState<crate::ui::GameState>>,
 ) {
     for event in delete_events.read() {
         info!("Deleting world: {}", event.world_name);
@@ -553,7 +605,7 @@ fn handle_delete_world_events(
 
                     // Refresh the world selection menu by going back to main menu and returning
                     // This ensures the UI updates immediately
-                    game_state.set(crate::ui::main_menu::GameState::MainMenu);
+                    game_state.set(crate::ui::GameState::MainMenu);
                 }
                 Err(e) => {
                     error!("Failed to delete world directory {:?}: {}", world_path, e);
