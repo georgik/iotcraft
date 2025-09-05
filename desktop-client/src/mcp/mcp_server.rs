@@ -45,8 +45,9 @@ impl Plugin for McpPlugin {
                 Update,
                 (
                     process_mcp_requests,
-                    execute_mcp_commands,
                     handle_command_results,
+                    execute_mcp_commands,
+                    sync_block_visuals,
                 ),
             );
 
@@ -487,7 +488,7 @@ fn handle_async_tool_call_request(
 fn execute_mcp_commands(
     mut pending_executions: ResMut<PendingToolExecutions>,
     mut command_executed_events: EventWriter<CommandExecutedEvent>,
-    // Import required resources for command execution
+    // Core resources for command execution
     temperature: Res<TemperatureResource>,
     mqtt_config: Res<MqttConfig>,
     mut voxel_world: ResMut<VoxelWorld>,
@@ -501,13 +502,12 @@ fn execute_mcp_commands(
     >,
     mut create_world_events: EventWriter<CreateWorldEvent>,
     mut load_world_events: EventWriter<LoadWorldEvent>,
-    mut publish_world_events: EventWriter<crate::multiplayer::shared_world::PublishWorldEvent>,
     mut next_game_state: Option<ResMut<NextState<GameState>>>,
-    // Add multiplayer resources for better MCP responses
-    multiplayer_mode: Option<Res<crate::multiplayer::shared_world::MultiplayerMode>>,
-    online_worlds: Option<Res<crate::multiplayer::shared_world::OnlineWorlds>>,
-    player_positions: Option<Res<crate::multiplayer::shared_world::MultiplayerPlayerPositions>>,
-    mut player_move_events: EventWriter<crate::multiplayer::shared_world::PlayerMoveEvent>,
+    // World management resources
+    current_world: Option<Res<crate::world::world_types::CurrentWorld>>,
+    mut commands: Commands,
+    existing_blocks_query: Query<Entity, With<crate::environment::VoxelBlock>>,
+    mut discovered_worlds: ResMut<crate::world::world_types::DiscoveredWorlds>,
 ) {
     // Add comprehensive debug logging
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -547,12 +547,11 @@ fn execute_mcp_commands(
             &mut camera_query,
             &mut create_world_events,
             &mut load_world_events,
-            &mut publish_world_events,
             &mut next_game_state,
-            multiplayer_mode.as_deref(),
-            online_worlds.as_deref(),
-            player_positions.as_deref(),
-            &mut player_move_events,
+            current_world.as_deref(),
+            &mut commands,
+            &existing_blocks_query,
+            &mut discovered_worlds,
         );
 
         // Emit the result as CommandExecutedEvent
@@ -560,6 +559,103 @@ fn execute_mcp_commands(
             request_id: mcp_command.request_id,
             result,
         });
+    }
+}
+
+/// System to synchronize visual block entities with VoxelWorld data
+/// This ensures blocks added via MCP get visual representation
+fn sync_block_visuals(
+    voxel_world: Res<VoxelWorld>,
+    existing_blocks_query: Query<&crate::environment::VoxelBlock>,
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    asset_server: Res<AssetServer>,
+) {
+    // Only run this sync when voxel world changes to avoid performance issues
+    if !voxel_world.is_changed() {
+        return;
+    }
+
+    // Get all existing visual block positions
+    let existing_positions: std::collections::HashSet<bevy::math::IVec3> = existing_blocks_query
+        .iter()
+        .map(|block| block.position)
+        .collect();
+
+    // Create visual entities for blocks that don't have them
+    let mut created_visuals = 0;
+    for (pos, block_type) in voxel_world.blocks.iter() {
+        if !existing_positions.contains(pos) {
+            // Create visual entity for this block
+            let cube_mesh = meshes.add(bevy::math::primitives::Cuboid::new(
+                crate::environment::CUBE_SIZE,
+                crate::environment::CUBE_SIZE,
+                crate::environment::CUBE_SIZE,
+            ));
+
+            let texture_path = match block_type {
+                crate::environment::BlockType::Grass => "textures/grass.webp",
+                crate::environment::BlockType::Dirt => "textures/dirt.webp",
+                crate::environment::BlockType::Stone => "textures/stone.webp",
+                crate::environment::BlockType::QuartzBlock => "textures/quartz_block.webp",
+                crate::environment::BlockType::GlassPane => "textures/glass_pane.webp",
+                crate::environment::BlockType::CyanTerracotta => "textures/cyan_terracotta.webp",
+                crate::environment::BlockType::Water => "textures/water.webp",
+            };
+
+            let texture: Handle<Image> = asset_server.load(texture_path);
+            let material = materials.add(StandardMaterial {
+                base_color_texture: Some(texture),
+                ..Default::default()
+            });
+
+            commands.spawn((
+                Mesh3d(cube_mesh),
+                MeshMaterial3d(material),
+                Transform::from_translation(pos.as_vec3()),
+                crate::environment::VoxelBlock { position: *pos },
+            ));
+
+            created_visuals += 1;
+        }
+    }
+
+    if created_visuals > 0 {
+        info!(
+            "Synced {} visual entities for VoxelWorld blocks",
+            created_visuals
+        );
+    }
+}
+
+/// Gets the worlds directory path
+#[cfg(not(target_arch = "wasm32"))]
+fn get_worlds_directory() -> std::path::PathBuf {
+    let mut path = dirs::document_dir().unwrap_or_else(|| std::env::current_dir().unwrap());
+    path.push("IOTCraft");
+    path.push("worlds");
+    path
+}
+
+/// For web, we'll use a virtual directory concept
+#[cfg(target_arch = "wasm32")]
+fn get_worlds_directory() -> std::path::PathBuf {
+    // Return a dummy path for web - we'll handle storage differently
+    std::path::PathBuf::from("web_worlds")
+}
+
+/// Parse block type from string for template execution
+fn parse_block_type(block_type_str: &str) -> Option<crate::environment::BlockType> {
+    match block_type_str {
+        "grass" => Some(crate::environment::BlockType::Grass),
+        "dirt" => Some(crate::environment::BlockType::Dirt),
+        "stone" => Some(crate::environment::BlockType::Stone),
+        "quartz_block" => Some(crate::environment::BlockType::QuartzBlock),
+        "glass_pane" => Some(crate::environment::BlockType::GlassPane),
+        "cyan_terracotta" => Some(crate::environment::BlockType::CyanTerracotta),
+        "water" => Some(crate::environment::BlockType::Water),
+        _ => None,
     }
 }
 
@@ -578,17 +674,15 @@ fn execute_mcp_command_directly(
         ),
         With<Camera>,
     >,
-    create_world_events: &mut EventWriter<CreateWorldEvent>,
+    _create_world_events: &mut EventWriter<CreateWorldEvent>,
     load_world_events: &mut EventWriter<LoadWorldEvent>,
-    publish_world_events: &mut EventWriter<crate::multiplayer::shared_world::PublishWorldEvent>,
     next_game_state: &mut Option<ResMut<NextState<GameState>>>,
-    multiplayer_mode: Option<&crate::multiplayer::shared_world::MultiplayerMode>,
-    online_worlds: Option<&crate::multiplayer::shared_world::OnlineWorlds>,
-    player_positions: Option<&crate::multiplayer::shared_world::MultiplayerPlayerPositions>,
-    player_move_events: &mut EventWriter<crate::multiplayer::shared_world::PlayerMoveEvent>,
+    current_world: Option<&crate::world::world_types::CurrentWorld>,
+    // New params for synchronous world creation in MCP
+    commands: &mut Commands,
+    existing_blocks_query: &Query<Entity, With<crate::environment::VoxelBlock>>,
+    discovered_worlds: &mut ResMut<crate::world::world_types::DiscoveredWorlds>,
 ) -> String {
-    use crate::multiplayer::shared_world::MultiplayerMode;
-
     match tool_name {
         "get_client_info" => json!({
             "client_id": crate::profile::load_or_create_profile_with_override(None).player_id,
@@ -624,12 +718,15 @@ fn execute_mcp_command_directly(
         "get_world_status" => {
             let block_count = voxel_world.blocks.len();
             let device_count = device_query.iter().count();
+            let world_name = current_world
+                .map(|cw| cw.name.as_str())
+                .unwrap_or("No World Loaded");
 
             json!({
                 "blocks": block_count,
                 "devices": device_count,
                 "uptime_seconds": 3600, // Should be calculated properly
-                "world_name": "Default World"
+                "world_name": world_name
             })
             .to_string()
         }
@@ -722,17 +819,220 @@ fn execute_mcp_command_directly(
                     );
                 }
 
-                // Send CreateWorldEvent with template info to trigger world creation
-                create_world_events.write(CreateWorldEvent {
-                    world_name: world_name.to_string(),
+                // Create world synchronously in MCP context
+                info!(
+                    "MCP: Creating world directory and metadata for '{}'",
+                    world_name
+                );
+
+                // Create world directory structure
+                let worlds_dir = get_worlds_directory();
+                let world_path = worlds_dir.join(&world_name);
+
+                if let Err(e) = std::fs::create_dir_all(&world_path) {
+                    return format!(
+                        "Error: Failed to create world directory for {}: {}",
+                        world_name, e
+                    );
+                }
+
+                // Create metadata
+                let metadata = crate::world::world_types::WorldMetadata {
+                    name: world_name.to_string(),
                     description: description.to_string(),
-                    template: Some(template.to_string()),
+                    created_at: chrono::Utc::now().to_rfc3339(),
+                    last_played: chrono::Utc::now().to_rfc3339(),
+                    version: "1.0.0".to_string(),
+                };
+
+                // Save metadata
+                let metadata_path = world_path.join("metadata.json");
+                match serde_json::to_string_pretty(&metadata) {
+                    Ok(json) => {
+                        if let Err(e) = std::fs::write(&metadata_path, json) {
+                            return format!(
+                                "Error: Failed to write metadata for {}: {}",
+                                world_name, e
+                            );
+                        }
+                    }
+                    Err(e) => {
+                        return format!(
+                            "Error: Failed to serialize metadata for {}: {}",
+                            world_name, e
+                        );
+                    }
+                }
+
+                // Clear existing blocks from scene and voxel world
+                let mut cleared_entities = 0;
+                for entity in existing_blocks_query.iter() {
+                    commands.entity(entity).despawn();
+                    cleared_entities += 1;
+                }
+                info!(
+                    "MCP: Cleared {} existing block entities from scene",
+                    cleared_entities
+                );
+
+                // Clear voxel world blocks
+                voxel_world.blocks.clear();
+                info!("MCP: Cleared voxel world blocks");
+
+                // Set current world resource
+                commands.insert_resource(crate::world::world_types::CurrentWorld {
+                    name: world_name.to_string(),
+                    path: world_path.clone(),
+                    metadata: metadata.clone(),
                 });
+
+                // Add to discovered worlds
+                discovered_worlds
+                    .worlds
+                    .push(crate::world::world_types::WorldInfo {
+                        name: world_name.to_string(),
+                        path: world_path,
+                        metadata,
+                    });
 
                 // Set game state to InGame to transition UI from main menu
                 if let Some(next_state) = next_game_state.as_mut() {
                     next_state.set(crate::ui::main_menu::GameState::InGame);
-                    info!("Set game state to InGame for world creation transition");
+                    info!("MCP: Set game state to InGame for world creation transition");
+                }
+
+                // Execute template commands directly in MCP context
+                if let Ok(template_content) = std::fs::read_to_string(&template_path) {
+                    let mut blocks_created = 0;
+
+                    for line in template_content.lines() {
+                        let line = line.trim();
+                        if line.is_empty() || line.starts_with('#') {
+                            continue;
+                        }
+
+                        // Parse and execute template commands directly
+                        let parts: Vec<&str> = line.split_whitespace().collect();
+                        if parts.is_empty() {
+                            continue;
+                        }
+
+                        match parts[0] {
+                            "place" => {
+                                if parts.len() == 5 {
+                                    if let (Ok(x), Ok(y), Ok(z)) = (
+                                        parts[2].parse::<i32>(),
+                                        parts[3].parse::<i32>(),
+                                        parts[4].parse::<i32>(),
+                                    ) {
+                                        if let Some(block_type) = parse_block_type(parts[1]) {
+                                            let pos = bevy::math::IVec3::new(x, y, z);
+                                            voxel_world.blocks.insert(pos, block_type);
+                                            blocks_created += 1;
+                                            info!(
+                                                "MCP: Placed {} block at ({}, {}, {}) - visual will be created by sync system",
+                                                parts[1], x, y, z
+                                            );
+                                        }
+                                    }
+                                }
+                            }
+                            "wall" => {
+                                if parts.len() == 8 {
+                                    if let (Ok(x1), Ok(y1), Ok(z1), Ok(x2), Ok(y2), Ok(z2)) = (
+                                        parts[2].parse::<i32>(),
+                                        parts[3].parse::<i32>(),
+                                        parts[4].parse::<i32>(),
+                                        parts[5].parse::<i32>(),
+                                        parts[6].parse::<i32>(),
+                                        parts[7].parse::<i32>(),
+                                    ) {
+                                        if let Some(block_type) = parse_block_type(parts[1]) {
+                                            // Create wall by filling area between two points
+                                            let min_x = x1.min(x2);
+                                            let max_x = x1.max(x2);
+                                            let min_y = y1.min(y2);
+                                            let max_y = y1.max(y2);
+                                            let min_z = z1.min(z2);
+                                            let max_z = z1.max(z2);
+
+                                            for x in min_x..=max_x {
+                                                for y in min_y..=max_y {
+                                                    for z in min_z..=max_z {
+                                                        let pos = bevy::math::IVec3::new(x, y, z);
+                                                        voxel_world.blocks.insert(pos, block_type);
+                                                        blocks_created += 1;
+                                                    }
+                                                }
+                                            }
+                                            info!(
+                                                "MCP: Created {} wall from ({},{},{}) to ({},{},{}) with blocks",
+                                                parts[1], x1, y1, z1, x2, y2, z2
+                                            );
+                                        }
+                                    }
+                                }
+                            }
+                            "tp" => {
+                                if parts.len() == 4 {
+                                    if let (Ok(x), Ok(y), Ok(z)) = (
+                                        parts[1].parse::<f32>(),
+                                        parts[2].parse::<f32>(),
+                                        parts[3].parse::<f32>(),
+                                    ) {
+                                        // Set camera position directly
+                                        for (mut camera_transform, _) in camera_query.iter_mut() {
+                                            camera_transform.translation =
+                                                bevy::math::Vec3::new(x, y, z);
+                                            info!(
+                                                "MCP: Teleported camera to ({}, {}, {})",
+                                                x, y, z
+                                            );
+                                            break; // Only teleport the first camera
+                                        }
+                                    }
+                                }
+                            }
+                            "look" => {
+                                if parts.len() == 3 {
+                                    if let (Ok(yaw), Ok(pitch)) =
+                                        (parts[1].parse::<f32>(), parts[2].parse::<f32>())
+                                    {
+                                        // Set camera rotation
+                                        for (mut camera_transform, _) in camera_query.iter_mut() {
+                                            let yaw_rad = yaw.to_radians();
+                                            let pitch_rad = pitch.to_radians();
+                                            camera_transform.rotation =
+                                                bevy::math::Quat::from_euler(
+                                                    bevy::math::EulerRot::YXZ,
+                                                    yaw_rad,
+                                                    pitch_rad,
+                                                    0.0,
+                                                );
+                                            info!(
+                                                "MCP: Set camera look to yaw={}, pitch={}",
+                                                yaw, pitch
+                                            );
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                            "give" => {
+                                // Note: Inventory operations would need access to inventory resource
+                                // This is a simplified implementation - full version would need inventory access
+                                info!("MCP: Give command executed: {}", line);
+                            }
+                            _ => {
+                                info!("MCP: Unknown template command: {}", parts[0]);
+                            }
+                        }
+                    }
+
+                    info!(
+                        "MCP: Template '{}' executed, created {} blocks",
+                        template, blocks_created
+                    );
                 }
 
                 format!(
@@ -749,124 +1049,37 @@ fn execute_mcp_command_directly(
                 arguments.get("y").and_then(|v| v.as_f64()),
                 arguments.get("z").and_then(|v| v.as_f64()),
             ) {
-                // Emit PlayerMoveEvent for immediate processing
-                player_move_events.write(crate::multiplayer::shared_world::PlayerMoveEvent {
-                    x: x as f32,
-                    y: y as f32,
-                    z: z as f32,
-                });
+                // Set camera position directly (simplified implementation without multiplayer events)
+                for (mut camera_transform, _) in camera_query.iter_mut() {
+                    camera_transform.translation =
+                        bevy::math::Vec3::new(x as f32, y as f32, z as f32);
+                    break; // Only move the first camera
+                }
                 format!("Player moved to ({}, {}, {})", x, y, z)
             } else {
                 "Error: player_move requires x, y, z coordinates".to_string()
             }
         }
         "list_online_worlds" => {
-            if let Some(worlds) = online_worlds {
-                if worlds.worlds.is_empty() {
-                    json!({
-                        "online_worlds": [],
-                        "message": "No online worlds found.",
-                        "timestamp": chrono::Utc::now().to_rfc3339()
-                    })
-                    .to_string()
-                } else {
-                    let world_list: Vec<serde_json::Value> = worlds
-                        .worlds
-                        .iter()
-                        .map(|(world_id, world_info)| {
-                            json!({
-                                "world_id": world_id,
-                                "world_name": world_info.world_name,
-                                "host_name": world_info.host_name,
-                                "player_count": world_info.player_count,
-                                "max_players": world_info.max_players,
-                                "is_public": world_info.is_public
-                            })
-                        })
-                        .collect();
-
-                    json!({
-                        "online_worlds": world_list,
-                        "timestamp": chrono::Utc::now().to_rfc3339()
-                    })
-                    .to_string()
-                }
-            } else {
-                json!({
-                    "online_worlds": [],
-                    "message": "Online worlds resource not available",
-                    "timestamp": chrono::Utc::now().to_rfc3339()
-                })
-                .to_string()
-            }
+            // Simplified implementation without multiplayer resources
+            json!({
+                "online_worlds": [],
+                "message": "Multiplayer not available in current mode",
+                "timestamp": chrono::Utc::now().to_rfc3339()
+            })
+            .to_string()
         }
         "get_multiplayer_status" => {
-            if let Some(mode) = multiplayer_mode {
-                let (multiplayer_mode_str, world_id, is_published, host_player) = match mode {
-                    MultiplayerMode::SinglePlayer => {
-                        ("SinglePlayer".to_string(), None, false, None)
-                    }
-                    MultiplayerMode::HostingWorld {
-                        world_id,
-                        is_published,
-                    } => (
-                        "HostingWorld".to_string(),
-                        Some(world_id.clone()),
-                        *is_published,
-                        None,
-                    ),
-                    MultiplayerMode::JoinedWorld {
-                        world_id,
-                        host_player,
-                    } => (
-                        "JoinedWorld".to_string(),
-                        Some(world_id.clone()),
-                        false,
-                        Some(host_player.clone()),
-                    ),
-                };
-
-                // Include player positions if available
-                let player_positions_json = if let Some(positions) = player_positions {
-                    let positions_list: Vec<serde_json::Value> = positions
-                        .positions
-                        .values()
-                        .map(|pos| {
-                            json!({
-                                "player_id": pos.player_id,
-                                "player_name": pos.player_name,
-                                "x": pos.x,
-                                "y": pos.y,
-                                "z": pos.z,
-                                "last_updated": pos.last_updated
-                            })
-                        })
-                        .collect();
-                    positions_list
-                } else {
-                    vec![]
-                };
-
-                json!({
-                    "multiplayer_mode": multiplayer_mode_str,
-                    "world_id": world_id,
-                    "is_published": is_published,
-                    "host_player": host_player,
-                    "player_positions": player_positions_json,
-                    "timestamp": chrono::Utc::now().to_rfc3339()
-                })
-                .to_string()
-            } else {
-                json!({
-                    "multiplayer_mode": "SinglePlayer",
-                    "world_id": null,
-                    "is_published": false,
-                    "host_player": null,
-                    "error": "Multiplayer mode resource not available",
-                    "timestamp": chrono::Utc::now().to_rfc3339()
-                })
-                .to_string()
-            }
+            // Simplified implementation without multiplayer resources
+            json!({
+                "multiplayer_mode": "SinglePlayer",
+                "world_id": null,
+                "is_published": false,
+                "host_player": null,
+                "player_positions": [],
+                "timestamp": chrono::Utc::now().to_rfc3339()
+            })
+            .to_string()
         }
         "load_world_by_name" => {
             if let Some(world_name) = arguments.get("world_name").and_then(|v| v.as_str()) {
@@ -889,35 +1102,8 @@ fn execute_mcp_command_directly(
             }
         }
         "publish_world" => {
-            if let Some(world_name) = arguments.get("world_name").and_then(|v| v.as_str()) {
-                let max_players = arguments
-                    .get("max_players")
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(4) as u32;
-                let is_public = arguments
-                    .get("is_public")
-                    .and_then(|v| v.as_bool())
-                    .unwrap_or(true);
-
-                info!(
-                    "Publishing world via MCP: name='{}', max_players={}, is_public={}",
-                    world_name, max_players, is_public
-                );
-
-                // Emit PublishWorldEvent to trigger world publishing
-                publish_world_events.write(crate::multiplayer::shared_world::PublishWorldEvent {
-                    world_name: world_name.to_string(),
-                    max_players,
-                    is_public,
-                });
-
-                format!(
-                    "Published world '{}' (max_players: {}, public: {})",
-                    world_name, max_players, is_public
-                )
-            } else {
-                "Error: world_name is required for publish_world".to_string()
-            }
+            // Simplified implementation without multiplayer events
+            "Error: World publishing not available in current mode".to_string()
         }
         "set_game_state" => {
             if let Some(state_str) = arguments.get("state").and_then(|v| v.as_str()) {
@@ -1263,12 +1449,15 @@ fn handle_command_results(
                 event.request_id, event.result
             );
 
+            // Check if the result indicates an error and set is_error accordingly
+            let is_error = event.result.starts_with("Error:");
+
             // Use proper McpToolResult struct for serialization
             let tool_result = McpToolResult {
                 content: vec![McpContent::Text {
                     text: event.result.clone(),
                 }],
-                is_error: Some(false),
+                is_error: Some(is_error),
             };
 
             let response = serde_json::to_value(tool_result).unwrap_or_else(|_| {

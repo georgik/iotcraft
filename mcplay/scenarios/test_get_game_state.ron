@@ -2,7 +2,7 @@
 // This scenario spins up Alice client and retrieves game state via MCP
 Scenario(
     name: "test_get_game_state",
-    description: "Test MCP game state retrieval with Alice client - covers get_client_info, get_world_status, and game state inspection",
+    description: "Test MCP game state retrieval with Alice client using medieval template - demonstrates proper world creation same as desktop UI",
     version: "1.0",
     
     // Infrastructure setup - MQTT server for full functionality
@@ -114,22 +114,23 @@ Scenario(
             expectations: None,
         ),
         
-        // Step 4: Create a test world to get meaningful state
+        // Step 4: Create medieval world with comprehensive template
         Step(
-            name: "create_test_world",
-            description: "Create a test world to have interesting game state",
+            name: "create_medieval_world",
+            description: "Create a medieval world using the comprehensive medieval template - same as desktop UI experience",
             client: "alice",
             action: (
                 type: "mcp_call",
                 tool: "create_world",
                 arguments: {
-                    "world_name": "alice_state_test_world",
-                    "description": "World for testing game state retrieval",
+                    "world_name": "alice_medieval_kingdom",
+                    "description": "A medieval kingdom with castle, village, and countryside for testing game state",
+                    "template": "medieval",
                 },
             ),
             wait_before: 1000,
-            wait_after: 3000,    // Wait for world creation to complete
-            timeout: 20000,
+            wait_after: 8000,    // Extended wait for medieval template script execution (castle, village, etc.)
+            timeout: 45000,      // Longer timeout for complex template
             success_condition: Some((
                 type: "mcp_response",
                 expected: "success",
@@ -140,69 +141,61 @@ Scenario(
             expectations: None,
         ),
         
-        // Step 5: Place some blocks to create interesting world state
+        // Step 5: Verify Alice is in the InGame state after world creation
         Step(
-            name: "add_world_content",
-            description: "Place blocks to create interesting world state for testing",
+            name: "verify_alice_ingame_state",
+            description: "Verify Alice properly transitioned to InGame state after world creation",
             client: "alice",
             action: (
                 type: "mcp_call",
-                tool: "place_block",
-                arguments: {
-                    "block_type": "grass",
-                    "x": 0,
-                    "y": 0,
-                    "z": 0,
-                },
+                tool: "get_game_state",
+                arguments: {},
             ),
-            wait_before: 1000,
+            wait_before: 2000,   // Wait for game state transition to complete
             wait_after: 1000,
             timeout: 10000,
             success_condition: Some((
                 type: "mcp_response",
                 expected: "success",
             )),
-            depends_on: ["create_test_world"],
+            depends_on: ["create_medieval_world"],
             timing: None,
             conditions: None,
             expectations: None,
         ),
         
-        // Step 6: Create a wall to add more content
+        // Step 6: Add a custom medieval decoration on top of template
         Step(
-            name: "create_wall_structure",
-            description: "Create a wall structure to enrich the world state",
+            name: "add_custom_medieval_decoration",
+            description: "Add a custom banner/decoration to the medieval world on top of the template",
             client: "alice",
             action: (
                 type: "mcp_call",
-                tool: "create_wall",
+                tool: "place_block",
                 arguments: {
-                    "block_type": "stone",
-                    "x1": 2,
-                    "y1": 0,
-                    "z1": 0,
-                    "x2": 5,
-                    "y2": 2,
-                    "z2": 0,
+                    "block_type": "cyan_terracotta",
+                    "x": 0,
+                    "y": 6,
+                    "z": -12,
                 },
             ),
-            wait_before: 500,
-            wait_after: 2000,    // Wait for wall creation
-            timeout: 15000,
+            wait_before: 1000,
+            wait_after: 2000,
+            timeout: 10000,
             success_condition: Some((
                 type: "mcp_response",
                 expected: "success",
             )),
-            depends_on: ["add_world_content"],
+            depends_on: ["verify_alice_ingame_state"],
             timing: None,
             conditions: None,
             expectations: None,
         ),
         
-        // Step 7: Get world status after modifications
+        // Step 7: Get world status showing rich medieval content
         Step(
-            name: "get_world_status",
-            description: "Retrieve world status showing the created content",
+            name: "get_world_status_medieval",
+            description: "Retrieve world status showing the rich medieval world content (castle, village, etc.)",
             client: "alice",
             action: (
                 type: "mcp_call",
@@ -216,7 +209,7 @@ Scenario(
                 type: "mcp_response",
                 expected: "success",
             )),
-            depends_on: ["create_wall_structure"],
+            depends_on: ["add_custom_medieval_decoration"],
             timing: None,
             conditions: None,
             expectations: None,
@@ -242,7 +235,7 @@ Scenario(
                 type: "mcp_response",
                 expected: "success",
             )),
-            depends_on: ["get_world_status"],
+            depends_on: ["get_world_status_medieval"],
             timing: None,
             conditions: None,
             expectations: None,
@@ -256,9 +249,9 @@ Scenario(
             action: (
                 type: "mcp_call",
                 tool: "save_world",
-                arguments: {
-                    "filename": "alice_game_state_test.json",
-                },
+            arguments: {
+                "filename": "alice_medieval_kingdom_test.json",
+            },
             ),
             wait_before: 500,
             wait_after: 2000,

@@ -18,7 +18,6 @@ use tokio::sync::{broadcast, Mutex};
 use tokio::time::sleep;
 
 // Add chrono for timestamps
-#[cfg(feature = "tui")]
 use chrono;
 
 /// Strip ANSI escape codes from text for clean log files while preserving emojis
@@ -1195,10 +1194,51 @@ struct OrchestratorState {
     completed_steps: Vec<String>,
     step_results: HashMap<String, StepResult>,
     start_time: Instant,
+    log_files: HashMap<String, PathBuf>, // Track log files in non-TUI mode too
 }
 
 impl OrchestratorState {
     fn new(scenario: Scenario, scenario_file_path: Option<PathBuf>) -> Self {
+        // Create log files directory
+        let log_dir = PathBuf::from("logs");
+        let _ = std::fs::create_dir_all(&log_dir);
+
+        // Create log files for each service/client with timestamp
+        let mut log_files = HashMap::new();
+        let timestamp = chrono::Utc::now().format("%Y%m%d_%H%M%S");
+
+        log_files.insert(
+            "Orchestrator".to_string(),
+            log_dir.join(format!("orchestrator_{}.log", timestamp)),
+        );
+
+        if scenario.infrastructure.mqtt_server.required {
+            log_files.insert(
+                "MQTT Server".to_string(),
+                log_dir.join(format!("mqtt_server_{}.log", timestamp)),
+            );
+        }
+
+        if scenario
+            .infrastructure
+            .mqtt_observer
+            .as_ref()
+            .map(|obs| obs.required)
+            .unwrap_or(false)
+        {
+            log_files.insert(
+                "MQTT Observer".to_string(),
+                log_dir.join(format!("mqtt_observer_{}.log", timestamp)),
+            );
+        }
+
+        for client in &scenario.clients {
+            log_files.insert(
+                client.id.clone(),
+                log_dir.join(format!("client_{}_{}.log", client.id, timestamp)),
+            );
+        }
+
         Self {
             scenario,
             scenario_file_path,
@@ -1208,6 +1248,31 @@ impl OrchestratorState {
             completed_steps: Vec::new(),
             step_results: HashMap::new(),
             start_time: Instant::now(),
+            log_files,
+        }
+    }
+
+    /// Write a log message to the appropriate log file in non-TUI mode
+    fn write_to_log_file(&self, source: &LogSource, message: &str) {
+        let pane_name = match source {
+            LogSource::Orchestrator => "Orchestrator".to_string(),
+            LogSource::MqttServer => "MQTT Server".to_string(),
+            LogSource::MqttObserver => "MQTT Observer".to_string(),
+            LogSource::Client(id) => id.clone(),
+        };
+
+        if let Some(log_file_path) = self.log_files.get(&pane_name) {
+            let timestamp = chrono::Utc::now().format("%H:%M:%S%.3f");
+            let clean_message = strip_ansi_colors(message);
+            let log_entry = format!("[{}] {}\n", timestamp, clean_message);
+            let _ = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(log_file_path)
+                .and_then(|mut file| {
+                    use std::io::Write;
+                    file.write_all(log_entry.as_bytes())
+                });
         }
     }
 }
@@ -1454,6 +1519,28 @@ async fn run_scenario(
         println!();
     }
 
+    // Log initial scenario information to files
+    {
+        let state = state.lock().await;
+        state.write_to_log_file(
+            &LogSource::Orchestrator,
+            &format!("🚀 Starting scenario: {}", state.scenario.name),
+        );
+        state.write_to_log_file(
+            &LogSource::Orchestrator,
+            &format!("📖 Description: {}", state.scenario.description),
+        );
+        state.write_to_log_file(
+            &LogSource::Orchestrator,
+            &format!("👥 Clients: {}", state.scenario.clients.len()),
+        );
+        state.write_to_log_file(
+            &LogSource::Orchestrator,
+            &format!("📋 Steps: {}", state.scenario.steps.len()),
+        );
+        state.write_to_log_file(&LogSource::Orchestrator, "");
+    }
+
     // Execute scenario with proper cleanup handling
     let result = run_scenario_inner(Arc::clone(&state), verbose).await;
 
@@ -1461,6 +1548,8 @@ async fn run_scenario(
     {
         let mut state = state.lock().await;
         cleanup(&mut state, verbose).await?;
+        // Show log summary for non-TUI mode after cleanup
+        show_log_summary_non_tui(&*state);
     }
 
     result
@@ -1521,6 +1610,7 @@ async fn start_infrastructure(
     verbose: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     println!("🔧 Starting infrastructure...");
+    state.write_to_log_file(&LogSource::Orchestrator, "🔧 Starting infrastructure...");
 
     // Check if MQTT port is already in use before starting
     if state.scenario.infrastructure.mqtt_server.required {
@@ -1631,11 +1721,15 @@ async fn start_clients(
     verbose: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     if state.scenario.clients.is_empty() {
-        println!("👥 No clients to start (orchestrator-only scenario)");
+        let msg = "👥 No clients to start (orchestrator-only scenario)";
+        println!("{}", msg);
+        state.write_to_log_file(&LogSource::Orchestrator, msg);
         return Ok(());
     }
 
-    println!("👥 Starting {} clients...", state.scenario.clients.len());
+    let msg = format!("👥 Starting {} clients...", state.scenario.clients.len());
+    println!("{}", msg);
+    state.write_to_log_file(&LogSource::Orchestrator, &msg);
 
     // Start each client directly instead of relying on xtask
     for client in &state.scenario.clients {
@@ -1747,7 +1841,9 @@ async fn execute_steps(
     state: &mut OrchestratorState,
     verbose: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    println!("🎬 Executing {} steps...", state.scenario.steps.len());
+    let msg = format!("🎬 Executing {} steps...", state.scenario.steps.len());
+    println!("{}", msg);
+    state.write_to_log_file(&LogSource::Orchestrator, &msg);
     println!();
 
     // Clone the steps to avoid borrow checker issues
@@ -2069,12 +2165,56 @@ async fn execute_mcp_call(
 
     // Log MCP response content for debugging, especially for data-rich commands
     if let Some(ref result) = response.result {
+        // Check for MCP tool-level errors (is_error flag)
+        if let Some(is_error) = result.get("is_error").and_then(|v| v.as_bool()) {
+            if is_error {
+                // Extract error message from content if available
+                let error_message =
+                    if let Some(content) = result.get("content").and_then(|c| c.as_array()) {
+                        if let Some(first_content) = content.first() {
+                            if let Some(text) = first_content.get("text").and_then(|t| t.as_str()) {
+                                text.to_string()
+                            } else {
+                                "MCP tool reported error (no text content)".to_string()
+                            }
+                        } else {
+                            "MCP tool reported error (no content)".to_string()
+                        }
+                    } else {
+                        "MCP tool reported error".to_string()
+                    };
+
+                // Log the error
+                state.write_to_log_file(
+                    &LogSource::Client(client_id.to_string()),
+                    &format!("❌ MCP Error for '{}': {}", tool, error_message),
+                );
+                println!("❌ MCP Error for '{}': {}", tool, error_message);
+
+                return Err(format!("MCP tool error: {}", error_message).into());
+            }
+        }
+
+        // Log MCP responses to file for non-TUI mode
+        state.write_to_log_file(
+            &LogSource::Client(client_id.to_string()),
+            &format!(
+                "🔧 MCP Response for '{}': {}",
+                tool,
+                serde_json::to_string_pretty(result)
+                    .unwrap_or_else(|_| "<invalid json>".to_string())
+            ),
+        );
+
         match tool {
-            "list_online_worlds"
+            "list_world_templates"
+            | "create_world"
+            | "list_online_worlds"
             | "get_multiplayer_status"
             | "get_client_info"
             | "get_world_status"
             | "tools/list" => {
+                // Always show detailed responses for important commands
                 println!(
                     "🔍 MCP Response for '{}': {}",
                     tool,
@@ -2083,7 +2223,7 @@ async fn execute_mcp_call(
                 );
             }
             _ => {
-                // For other commands, just log a brief summary to avoid spam
+                // For other commands, show a brief summary but also the full response if verbose
                 let summary =
                     if result.is_object() && result.as_object().unwrap().contains_key("content") {
                         format!("has content field")
@@ -2102,6 +2242,13 @@ async fn execute_mcp_call(
                 println!("📋 MCP Response for '{}': {}", tool, summary);
             }
         }
+    } else {
+        // Log when there's no result
+        state.write_to_log_file(
+            &LogSource::Client(client_id.to_string()),
+            &format!("⚠️ MCP Response for '{}': No result returned", tool),
+        );
+        println!("⚠️ MCP Response for '{}': No result returned", tool);
     }
 
     Ok(response
@@ -2423,6 +2570,43 @@ async fn cleanup(
     }
 
     Ok(())
+}
+
+/// Show log file summary for non-TUI mode
+fn show_log_summary_non_tui(state: &OrchestratorState) {
+    println!("\n📁 Log Files Summary");
+    println!("====================");
+
+    // Show scenario file information
+    if let Some(file_path) = &state.scenario_file_path {
+        println!("📋 Scenario file: {}", file_path.display());
+        println!();
+    }
+
+    for (pane_name, log_file_path) in &state.log_files {
+        if log_file_path.exists() {
+            match std::fs::metadata(log_file_path) {
+                Ok(metadata) => {
+                    let size_kb = metadata.len() / 1024;
+                    println!(
+                        "{}: {} ({} KB)",
+                        pane_name,
+                        log_file_path.display(),
+                        size_kb
+                    );
+                }
+                Err(_) => {
+                    println!("{}: {} (size unknown)", pane_name, log_file_path.display());
+                }
+            }
+        } else {
+            println!(
+                "{}: {} (file not created)",
+                pane_name,
+                log_file_path.display()
+            );
+        }
+    }
 }
 
 // TUI Implementation
