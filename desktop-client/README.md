@@ -21,49 +21,49 @@ cargo run --release
 
 ### Web Version
 
-We now use a Rust-based build system (xtask) instead of shell scripts for better maintainability and portability.
+We now use a Rust-based build system (ctask) instead of shell scripts for better maintainability and portability.
 
 #### Build web version
 ```bash
-cargo xtask web-build --release
+cargo ctask web-build --release
 ```
 
 #### Serve web version locally
 ```bash
-cargo xtask web-serve --port 8000
+cargo ctask web-serve --port 8000
 ```
 
 #### Build and serve (development)
 ```bash
-cargo xtask web-dev --port 8000
+cargo ctask web-dev --port 8000
 ```
 
-#### Available xtask commands:
-- `cargo xtask web-build [--release] [--output dist]` - Build the web version
-- `cargo xtask web-serve [--port 8000] [--dir dist]` - Serve the built web version  
-- `cargo xtask web-dev [--port 8000]` - Build and serve in one command
-- `cargo xtask multi-client` - Run multiple desktop and web clients for testing
-- `cargo xtask test unit` - Run unit tests only
-- `cargo xtask test integration` - Run integration tests only
-- `cargo xtask test mqtt` - Run MQTT-specific tests only
-- `cargo xtask test wasm-unit` - Run WASM unit tests
-- `cargo xtask test wasm-integration` - Run WASM integration tests
-- `cargo xtask test all` - Run all tests (desktop + WASM)
+#### Available ctask commands:
+- `cargo ctask web-build [--release] [--output dist]` - Build the web version
+- `cargo ctask web-serve [--port 8000] [--dir dist]` - Serve the built web version  
+- `cargo ctask web-dev [--port 8000]` - Build and serve in one command
+- `cargo ctask multi-client` - Run multiple desktop and web clients for testing
+- `cargo ctask test unit` - Run unit tests only
+- `cargo ctask test integration` - Run integration tests only
+- `cargo ctask test mqtt` - Run MQTT-specific tests only
+- `cargo ctask test wasm-unit` - Run WASM unit tests
+- `cargo ctask test wasm-integration` - Run WASM integration tests
+- `cargo ctask test all` - Run all tests (desktop + WASM)
 
 ## Testing
 
 ### Running Tests
 
-The project uses `xtask` for comprehensive testing with automatic MQTT server management:
+The project uses `ctask` for comprehensive testing with automatic MQTT server management:
 
 ```bash
 # Run all tests (recommended)
-cargo xtask test all
+cargo ctask test all
 
 # Run specific test suites
-cargo xtask test unit        # Unit tests only
-cargo xtask test integration # Integration tests with MQTT server
-cargo xtask test mqtt        # MQTT-specific tests
+cargo ctask test unit        # Unit tests only
+cargo ctask test integration # Integration tests with MQTT server
+cargo ctask test mqtt        # MQTT-specific tests
 ```
 
 The test system automatically:
@@ -74,21 +74,21 @@ The test system automatically:
 
 ### Multi-Client Development Environment
 
-The xtask system now supports running multiple desktop and web clients simultaneously for comprehensive multiplayer testing:
+The ctask system now supports running multiple desktop and web clients simultaneously for comprehensive multiplayer testing:
 
 #### Option 1: Automated Multi-Client (Recommended)
 ```bash
 # Run 2 desktop + 2 web clients with full infrastructure
-cargo xtask multi-client --count 2 --web-clients 2 --full-env
+cargo ctask multi-client --count 2 --web-clients 2 --full-env
 
 # Run desktop clients only
-cargo xtask multi-client --count 3 --full-env
+cargo ctask multi-client --count 3 --full-env
 
 # Run web clients only
-cargo xtask multi-client --web-clients 3 --with-mqtt-server
+cargo ctask multi-client --web-clients 3 --with-mqtt-server
 
 # Custom configuration
-cargo xtask multi-client \
+cargo ctask multi-client \
   --count 2 \
   --web-clients 1 \
   --mqtt-port 1884 \
@@ -99,7 +99,7 @@ cargo xtask multi-client \
 #### Option 2: Manual Setup
 ```bash
 # Terminal 1: Start infrastructure only
-cargo xtask multi-client --count 0 --web-clients 0 --full-env
+cargo ctask multi-client --count 0 --web-clients 0 --full-env
 
 # Terminal 2: Manual desktop client
 cargo run -- --player-id alice
@@ -190,10 +190,10 @@ mcplay includes improved MQTT server startup logic:
 
 ### Unified Scenario Format
 
-mcplay now uses a unified scenario format that supports both simple mcplay scenarios and complex xtask orchestration scenarios:
+mcplay now uses a unified scenario format that supports both simple mcplay scenarios and complex orchestration scenarios:
 
 - **Backward Compatibility**: Existing mcplay scenarios continue to work unchanged
-- **Extended Capabilities**: Support for xtask-style actions like MQTT operations, parallel execution, and custom actions
+- **Extended Capabilities**: Support for orchestration-style actions like MQTT operations, parallel execution, and custom actions
 - **Flexible Client Configuration**: Supports both simple client definitions and extended configuration with spawn positions, inventories, and permissions
 - **Rich Action Types**: Includes MCP calls, MQTT publish/expect, client actions, parallel/sequence execution, and custom actions
 - **Enhanced Validation**: Comprehensive validation with detailed error messages and warnings

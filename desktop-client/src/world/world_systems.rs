@@ -311,6 +311,7 @@ fn handle_load_world_events(
                     &mut voxel_world,
                     &mut commands,
                     &world_info.path,
+                    &existing_blocks_query,
                 );
             }
         } else {
@@ -403,6 +404,7 @@ fn handle_create_world_events(
     mut commands: Commands,
     mut discovered_worlds: ResMut<DiscoveredWorlds>,
     mut pending_commands: ResMut<PendingCommands>,
+    existing_blocks_query: Query<Entity, With<crate::environment::VoxelBlock>>,
 ) {
     for event in create_events.read() {
         info!("Creating new world: {}", event.world_name);
@@ -453,6 +455,7 @@ fn handle_create_world_events(
             &mut voxel_world,
             &mut commands,
             &world_path,
+            &existing_blocks_query,
         );
 
         // Add to discovered worlds
@@ -540,8 +543,20 @@ fn create_empty_world(
     voxel_world: &mut VoxelWorld,
     commands: &mut Commands,
     world_path: &Path,
+    existing_blocks_query: &Query<Entity, With<crate::environment::VoxelBlock>>,
 ) {
-    // Clear existing blocks
+    // Clear existing 3D block entities from the scene
+    let mut cleared_entities = 0usize;
+    for entity in existing_blocks_query.iter() {
+        commands.entity(entity).despawn();
+        cleared_entities += 1;
+    }
+    info!(
+        "Cleared {} existing block entities before creating new world",
+        cleared_entities
+    );
+
+    // Clear existing blocks in voxel storage
     voxel_world.blocks.clear();
 
     // Set current world

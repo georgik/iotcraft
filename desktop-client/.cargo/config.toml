@@ -1,5 +1,5 @@
 [alias]
-xtask = "run --package xtask --"
+ctask = "run --package ctask --"
 
 # Platform-specific linker configuration
 # Use system linker on macOS since lld doesn't support macOS platform

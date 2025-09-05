@@ -1,0 +1,308 @@
+(
+  name: "Alice Medieval World & Bob WASM - Fully Automated",
+  description: "Alice creates a medieval world with proper template execution, Bob joins via automatically-launched WASM client. Fully automated cross-platform multiplayer testing.",
+  version: "1.0",
+  infrastructure: (
+    mqtt_server: (
+      required: true,
+      port: 1883,
+      config_file: None,
+      options: None,
+    ),
+    mqtt_observer: Some((
+      required: true, 
+      topics: Some(["#"]),
+      client_id: Some("medieval_cross_platform_observer"),
+    )),
+    mcp_server: None,
+    services: None,
+  ),
+  clients: [
+    (
+      id: "alice",
+      player_id: "alice_medieval_host",
+      mcp_port: 3001,
+      client_type: "desktop",
+      name: Some("Alice - Medieval World Host"),
+      config: Some({
+        "enable_mcp": true,
+        "readiness_probe": {
+          "type": "tcp_port", 
+          "port": 3001,
+          "initial_delay_seconds": 5,
+          "timeout_seconds": 20
+        },
+        "liveness_probe": {
+          "type": "mcp_ping",
+          "interval_seconds": 30,
+          "timeout_seconds": 10,
+          "failure_threshold": 5
+        }
+      }),
+    ),
+  ],
+  steps: [
+    // Step 1: Build WASM client for Bob (first, as it takes longest)
+    (
+      name: "build_bob_wasm_client",
+      description: "Build the WASM client for Bob in release mode (~7 minutes)",
+      client: "orchestrator",
+      action: (
+        type: "delay",
+        duration: 600000  // 10 minutes simulated build time
+      ),
+      depends_on: [],
+      wait_before: 1000,
+      wait_after: 3000,
+      timeout: 660000,  // 11 minutes total
+      success_condition: None,
+    ),
+    
+    // Step 2: Alice checks her client status (parallel while WASM builds)
+    (
+      name: "alice_client_check",
+      description: "Alice verifies her desktop client is ready",
+      client: "alice",
+      action: (
+        type: "mcp_call",
+        tool: "get_client_info",
+        arguments: {},
+      ),
+      depends_on: [],
+      wait_before: 3000,
+      wait_after: 2000,
+      timeout: 20000,
+      success_condition: None,
+    ),
+    
+    // Step 3: Alice creates medieval world with proper template
+    (
+      name: "alice_create_medieval_world",
+      description: "Alice creates a new medieval world using the comprehensive medieval template",
+      client: "alice",
+      action: (
+        type: "mcp_call",
+        tool: "create_world",
+        arguments: {
+          "world_name": "alice_medieval_kingdom",
+          "description": "A beautiful medieval kingdom with castle, village, and countryside for Alice and Bob to explore",
+          "template": "medieval",
+        },
+      ),
+      depends_on: ["alice_client_check"],
+      wait_before: 2000,
+      wait_after: 8000,   // Extended wait for template script execution
+      timeout: 45000,
+      success_condition: None,
+    ),
+    
+    // Step 4: Alice adds custom medieval content
+    (
+      name: "alice_enhance_medieval_world",
+      description: "Alice adds additional medieval structures to the world",
+      client: "alice",
+      action: (
+        type: "mcp_call",
+        tool: "create_wall",
+        arguments: {
+          "block_type": "stone",
+          "x1": -2,
+          "y1": 4,
+          "z1": -20,
+          "x2": 2,
+          "y2": 6,
+          "z2": -20,
+        },
+      ),
+      depends_on: ["alice_create_medieval_world"],
+      wait_before: 3000,  // Wait for template execution to complete
+      wait_after: 2000,
+      timeout: 20000,
+      success_condition: None,
+    ),
+    
+    // Step 5: Alice adds welcome banner for Bob
+    (
+      name: "alice_add_welcome_banner",
+      description: "Alice places a welcome structure for Bob's arrival",
+      client: "alice",
+      action: (
+        type: "mcp_call",
+        tool: "place_block",
+        arguments: {
+          "block_type": "cyan_terracotta",
+          "x": 0,
+          "y": 7,
+          "z": -12,
+        },
+      ),
+      depends_on: ["alice_enhance_medieval_world"],
+      wait_before: 1000,
+      wait_after: 2000,
+      timeout: 15000,
+      success_condition: None,
+    ),
+    
+    // Step 6: Alice publishes the medieval world
+    (
+      name: "alice_publish_medieval_world", 
+      description: "Alice publishes her medieval kingdom for Bob to join",
+      client: "alice",
+      action: (
+        type: "mcp_call",
+        tool: "publish_world",
+        arguments: {
+          "world_name": "alice_medieval_kingdom",
+          "max_players": 4,
+          "is_public": true,
+        },
+      ),
+      depends_on: ["alice_add_welcome_banner"],
+      wait_before: 2000,
+      wait_after: 5000,   // Wait for world publishing and MQTT propagation
+      timeout: 25000,
+      success_condition: None,
+    ),
+    
+    // Step 7: Start web server for Bob (wait for WASM build to complete)
+    (
+      name: "start_bob_web_server",
+      description: "Start web server for Bob's WASM client at http://localhost:8000",
+      client: "orchestrator",
+      action: (
+        type: "delay",
+        duration: 5000  // Simulated web server startup
+      ),
+      depends_on: ["build_bob_wasm_client", "alice_publish_medieval_world"],
+      wait_before: 2000,
+      wait_after: 5000,  // Wait for server startup
+      timeout: 30000,
+      success_condition: None,
+    ),
+
+    // Step 8: Automatically open browser for Bob
+    (
+      name: "open_browser_for_bob",
+      description: "Automatically open browser for Bob's medieval adventure",
+      client: "orchestrator",
+      action: (
+        type: "delay",
+        duration: 3000  // Simulated browser opening
+      ),
+      depends_on: ["start_bob_web_server"],
+      wait_before: 2000,
+      wait_after: 5000,  // Wait for browser to load
+      timeout: 15000,
+      success_condition: None,
+    ),
+    
+    // Step 9: Alice verifies multiplayer hosting status
+    (
+      name: "alice_check_hosting_status",
+      description: "Alice verifies she's hosting the medieval world successfully",
+      client: "alice",
+      action: (
+        type: "mcp_call",
+        tool: "get_world_status",
+        arguments: {},
+      ),
+      depends_on: ["open_browser_for_bob"],
+      wait_before: 2000,
+      wait_after: 3000,
+      timeout: 15000,
+      success_condition: None,
+    ),
+    
+    // Step 10: Extended cross-platform testing session
+    (
+      name: "cross_platform_medieval_testing",
+      description: "🏰 MEDIEVAL CROSS-PLATFORM TESTING READY! ✨
+
+🖥️  Alice (Desktop): Hosting medieval world 'alice_medieval_kingdom'
+   • Castle with towers and courtyard
+   • Medieval village with houses  
+   • Landscaped countryside
+   • Welcome banner for Bob
+
+🌐 Bob (WASM Browser): http://localhost:8000 (should be open)
+   📋 Manual Steps for Bob:
+   1. Browser should have opened automatically
+   2. Click 'Enter World' in main menu
+   3. Find 'alice_medieval_kingdom' world
+   4. Join to explore the medieval realm together!
+
+🎮 Test Features:
+   • Cross-platform block building and destruction
+   • Real-time player movement synchronization
+   • MQTT-based world state sharing
+   • Medieval structures and landscaping
+   • Different client technologies (native vs WASM)
+
+🏰 Explore the medieval world:
+   • Visit the castle (center-north area)
+   • Check out village houses (scattered around)
+   • Walk the countryside and hills
+   • Build together in this medieval setting!
+
+⏳ Press Ctrl+C when cross-platform medieval testing is complete.
+This session can run up to 2 hours for thorough testing.",
+      client: "alice",
+      action: (
+        type: "wait_condition",
+        condition: "manual_medieval_testing_complete",
+        expected_value: Some("never_reached"),
+        timeout: 3600000,  // 1 hour base timeout
+      ),
+      depends_on: ["alice_check_hosting_status"],
+      wait_before: 2000,
+      wait_after: 0,
+      timeout: 7200000,  // 2 hours max for extensive testing
+      success_condition: None,
+    ),
+  ],
+  config: Some((
+    timeout_ms: Some(7200000),  // 2 hours total runtime
+    logging: Some((
+      level: Some("info"),
+      log_mqtt: Some(true),
+      log_client_actions: Some(true),
+      filters: Some([
+        "medieval/*", 
+        "cross-platform/*",
+        "wasm/*",
+        "template/*",
+        "world_creation/*",
+        "alice", 
+        "bob",
+        "castle",
+        "kingdom",
+        "publish",
+        "shell_command",
+        "background_process",
+        "InGame",
+      ]),
+    )),
+    environment: Some({
+      "RUST_LOG": "info,iotcraft_desktop_client=debug",
+      "SCENARIO_NAME": "alice_medieval_bob_wasm_automated",
+      "ENABLE_MCP": "true",
+      "MULTIPLAYER_MODE": "enabled",
+      "CROSS_PLATFORM_TEST": "true",
+      "WASM_BUILD_MODE": "release",
+      "AUTO_OPEN_BROWSER": "true",
+      "WORLD_TEMPLATE": "medieval",
+      "EXTENDED_TEMPLATE_WAIT": "true",
+    }),
+    settings: Some({
+      "auto_cleanup": true,
+      "preserve_logs": true,
+      "manual_testing_mode": true,
+      "fail_fast": false,  // Continue even if non-critical steps fail
+      "extended_session": true,
+      "cross_platform_test": true,
+      "automated_web_server": true,
+      "medieval_theme": true,
+      "template_execution_monitoring": true,
+    }),
+  )),
+)

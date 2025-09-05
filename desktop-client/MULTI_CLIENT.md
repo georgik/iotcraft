@@ -1,6 +1,6 @@
-# Multi-Client Testing with xtask
+# Multi-Client Testing with ctask
 
-The xtask now includes a powerful `multi-client` command to run multiple IoTCraft client instances simultaneously for multiplayer testing. This supports both desktop and web clients, making it invaluable for testing MQTT synchronization, multiplayer interactions, and system performance under load.
+The ctask now includes a powerful `multi-client` command to run multiple IoTCraft client instances simultaneously for multiplayer testing.
 
 ## Features
 
@@ -20,29 +20,29 @@ The xtask now includes a powerful `multi-client` command to run multiple IoTCraf
 
 ```bash
 # Run 2 desktop clients (default)
-cd xtask && cargo run -- multi-client
+cargo ctask multi-client
 
 # Run 3 desktop clients
-cd xtask && cargo run -- multi-client --count 3
+cargo ctask multi-client --count 3
 
 # Run 2 web clients in browsers
-cd xtask && cargo run -- multi-client --web-clients 2
+cargo ctask multi-client --web-clients 2
 
 # Run mixed clients: 2 desktop + 3 web
-cd xtask && cargo run -- multi-client --count 2 --web-clients 3
+cargo ctask multi-client --count 2 --web-clients 3
 ```
 
 ### Advanced Usage
 
 ```bash
 # Complete test environment with full infrastructure
-cd xtask && cargo run -- multi-client \
+cargo ctask multi-client \
   --count 2 \
   --web-clients 2 \
   --full-env
 
 # Custom ports and browser
-cd xtask && cargo run -- multi-client \
+cargo ctask multi-client \
   --count 1 \
   --web-clients 3 \
   --mqtt-port 1884 \
@@ -50,21 +50,21 @@ cd xtask && cargo run -- multi-client \
   --browser-cmd firefox
 
 # With MQTT server and observer
-cd xtask && cargo run -- multi-client \
+cargo ctask multi-client \
   --count 2 \
   --web-clients 1 \
   --with-mqtt-server \
   --with-observer
 
 # External MQTT server with mixed clients
-cd xtask && cargo run -- multi-client \
+cargo ctask multi-client \
   --count 2 \
   --web-clients 2 \
   --mqtt-server broker.hivemq.com \
   --log-dir test-logs
 
 # Pass additional arguments to desktop clients only
-cd xtask && cargo run -- multi-client \
+cargo ctask multi-client \
   --count 2 \
   --web-clients 1 \
   -- --script test_script.txt
@@ -74,14 +74,14 @@ cd xtask && cargo run -- multi-client \
 
 ```bash
 # Start just the infrastructure (useful for manual client testing)
-cd xtask && cargo run -- multi-client \
+cargo ctask multi-client \
   --count 0 \
   --web-clients 0 \
   --with-mqtt-server \
   --with-observer
 
 # Start web server for manual browser testing
-cd xtask && cargo run -- multi-client \
+cargo ctask multi-client \
   --count 0 \
   --web-clients 1
 # Then manually navigate to http://localhost:8000
@@ -162,7 +162,7 @@ URL: http://localhost:8000?player=player-3
 Started at: 2024-01-01 12:00:00 UTC
 Port: 8000
 Directory: dist
-Command: cargo xtask web-serve --port 8000 --dir dist
+Command: cargo ctask web-serve --port 8000 --dir dist
 ==================
 
 [12:00:01.789] [STDOUT] [Web-Server] INFO: Server starting on 0.0.0.0:8000...
@@ -196,13 +196,13 @@ tail -f logs/1640995200/*.log
 ### 1. Basic Multiplayer Sync (Desktop Only)
 ```bash
 # Test basic desktop multiplayer synchronization
-cd xtask && cargo run -- multi-client --count 2 --full-env
+cargo ctask multi-client --count 2 --full-env
 ```
 
 ### 2. Cross-Platform Testing (Desktop + Web)
 ```bash
 # Test desktop and web client synchronization
-cd xtask && cargo run -- multi-client \
+cargo ctask multi-client \
   --count 2 \
   --web-clients 2 \
   --full-env
@@ -211,7 +211,7 @@ cd xtask && cargo run -- multi-client \
 ### 3. Web-Only Testing
 ```bash
 # Test multiple web clients
-cd xtask && cargo run -- multi-client \
+cargo ctask multi-client \
   --web-clients 3 \
   --with-mqtt-server
 ```
@@ -219,7 +219,7 @@ cd xtask && cargo run -- multi-client \
 ### 4. Load Testing (Mixed Clients)
 ```bash
 # High-load testing with mixed client types
-cd xtask && cargo run -- multi-client \
+cargo ctask multi-client \
   --count 4 \
   --web-clients 4 \
   --full-env
@@ -228,7 +228,7 @@ cd xtask && cargo run -- multi-client \
 ### 5. Browser-Specific Testing
 ```bash
 # Test with specific browser
-cd xtask && cargo run -- multi-client \
+cargo ctask multi-client \
   --web-clients 2 \
   --browser-cmd firefox \
   --full-env
@@ -237,7 +237,7 @@ cd xtask && cargo run -- multi-client \
 ### 6. Cross-Server Testing
 ```bash
 # Test against external MQTT broker
-cd xtask && cargo run -- multi-client \
+cargo ctask multi-client \
   --count 2 \
   --web-clients 1 \
   --mqtt-server test.mosquitto.org
@@ -246,7 +246,7 @@ cd xtask && cargo run -- multi-client \
 ### 7. Infrastructure Development
 ```bash
 # Start infrastructure for manual development
-cd xtask && cargo run -- multi-client \
+cargo ctask multi-client \
   --count 0 \
   --web-clients 0 \
   --full-env
@@ -257,7 +257,7 @@ cd xtask && cargo run -- multi-client \
 ### 8. Scripted Desktop Testing
 ```bash
 # Run desktop clients with automated scripts
-cd xtask && cargo run -- multi-client \
+cargo ctask multi-client \
   --count 2 \
   --web-clients 1 \
   --full-env \

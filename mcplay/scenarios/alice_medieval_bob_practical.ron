@@ -1,0 +1,293 @@
+(
+  name: "Alice Medieval Kingdom & Bob WASM - Practical",
+  description: "Alice creates a medieval world with extended template execution time, provides clear Bob setup instructions with automated guidance",
+  version: "1.0",
+  infrastructure: (
+    mqtt_server: (
+      required: true,
+      port: 1883,
+      config_file: None,
+      options: None,
+    ),
+    mqtt_observer: Some((
+      required: true, 
+      topics: Some(["#"]),
+      client_id: Some("medieval_practical_observer"),
+    )),
+    mcp_server: None,
+    services: None,
+  ),
+  clients: [
+    (
+      id: "alice",
+      player_id: "alice_medieval_builder",
+      mcp_port: 3001,
+      client_type: "desktop",
+      name: Some("Alice - Medieval World Builder"),
+      config: Some({
+        "enable_mcp": true,
+        "readiness_probe": {
+          "type": "tcp_port", 
+          "port": 3001,
+          "initial_delay_seconds": 5,
+          "timeout_seconds": 20
+        },
+        "liveness_probe": {
+          "type": "mcp_ping",
+          "interval_seconds": 30,
+          "timeout_seconds": 10,
+          "failure_threshold": 5
+        }
+      }),
+    ),
+  ],
+  steps: [
+    // Step 1: Alice checks client status
+    (
+      name: "alice_client_check",
+      description: "Alice verifies her desktop client is ready for medieval world creation",
+      client: "alice",
+      action: (
+        type: "mcp_call",
+        tool: "get_client_info",
+        arguments: {},
+      ),
+      depends_on: [],
+      wait_before: 3000,
+      wait_after: 2000,
+      timeout: 20000,
+      success_condition: None,
+    ),
+    
+    // Step 2: Alice creates medieval world with proper template
+    (
+      name: "alice_create_medieval_kingdom",
+      description: "Alice creates a new medieval world using the comprehensive medieval template",
+      client: "alice",
+      action: (
+        type: "mcp_call",
+        tool: "create_world",
+        arguments: {
+          "world_name": "AliceMedievalKingdom",
+          "description": "A magnificent medieval kingdom with castle, village, and countryside - built with the medieval template",
+          "template": "medieval",
+        },
+      ),
+      depends_on: ["alice_client_check"],
+      wait_before: 2000,
+      wait_after: 12000,   // Extended wait for template script execution (12 seconds)
+      timeout: 60000,      // 1 minute total timeout
+      success_condition: None,
+    ),
+    
+    // Step 3: Alice verifies world content
+    (
+      name: "alice_verify_world_content",
+      description: "Alice checks that the medieval world was created successfully with template content",
+      client: "alice",
+      action: (
+        type: "mcp_call",
+        tool: "get_world_status",
+        arguments: {},
+      ),
+      depends_on: ["alice_create_medieval_kingdom"],
+      wait_before: 3000,  // Wait for template commands to execute
+      wait_after: 2000,
+      timeout: 15000,
+      success_condition: None,
+    ),
+    
+    // Step 4: Alice adds custom welcome content
+    (
+      name: "alice_add_welcome_gate",
+      description: "Alice adds a welcome gate structure at the castle entrance",
+      client: "alice",
+      action: (
+        type: "mcp_call",
+        tool: "create_wall",
+        arguments: {
+          "block_type": "quartz_block",
+          "x1": -4,
+          "y1": 4,
+          "z1": -6,
+          "x2": 4,
+          "y2": 6,
+          "z2": -6,
+        },
+      ),
+      depends_on: ["alice_verify_world_content"],
+      wait_before: 2000,
+      wait_after: 2000,
+      timeout: 15000,
+      success_condition: None,
+    ),
+    
+    // Step 5: Alice places welcome beacon
+    (
+      name: "alice_place_welcome_beacon",
+      description: "Alice places a cyan terracotta beacon to welcome Bob",
+      client: "alice",
+      action: (
+        type: "mcp_call",
+        tool: "place_block",
+        arguments: {
+          "block_type": "cyan_terracotta",
+          "x": 0,
+          "y": 7,
+          "z": -6,
+        },
+      ),
+      depends_on: ["alice_add_welcome_gate"],
+      wait_before: 1000,
+      wait_after: 2000,
+      timeout: 15000,
+      success_condition: None,
+    ),
+    
+    // Step 6: Alice publishes the medieval world
+    (
+      name: "alice_publish_medieval_kingdom", 
+      description: "Alice publishes her medieval kingdom for Bob to join",
+      client: "alice",
+      action: (
+        type: "mcp_call",
+        tool: "publish_world",
+        arguments: {
+          "world_name": "AliceMedievalKingdom",
+          "max_players": 4,
+          "is_public": true,
+        },
+      ),
+      depends_on: ["alice_place_welcome_beacon"],
+      wait_before: 2000,
+      wait_after: 5000,   // Wait for world publishing and MQTT propagation
+      timeout: 25000,
+      success_condition: None,
+    ),
+    
+    // Step 7: Alice verifies hosting status
+    (
+      name: "alice_verify_hosting",
+      description: "Alice verifies she's successfully hosting the medieval kingdom",
+      client: "alice",
+      action: (
+        type: "mcp_call",
+        tool: "get_world_status",
+        arguments: {},
+      ),
+      depends_on: ["alice_publish_medieval_kingdom"],
+      wait_before: 2000,
+      wait_after: 3000,
+      timeout: 15000,
+      success_condition: None,
+    ),
+    
+    // Step 8: Automated setup instructions for Bob
+    (
+      name: "automated_bob_setup_instructions",
+      description: "🏰 MEDIEVAL KINGDOM READY FOR CROSS-PLATFORM PLAY! ✨
+
+🖥️  Alice (Desktop): Hosting 'AliceMedievalKingdom' with medieval template features:
+   ✅ Castle with towers and courtyard
+   ✅ Medieval village with houses scattered around 
+   ✅ Landscaped hills and countryside
+   ✅ Welcome gate with cyan beacon for Bob
+   ✅ Grass foundation, stone structures, decorative elements
+
+🌐 Bob (WASM Setup) - AUTOMATED COMMANDS:
+   
+   📋 Run these commands in separate terminals:
+   
+   Terminal 1 - Build WASM client:
+   cd desktop-client
+   cargo xtask web-build --release
+   
+   Terminal 2 - Start web server:
+   cd desktop-client  
+   cargo xtask web-serve --port 8000
+   
+   Terminal 3 - Open browser:
+   open http://localhost:8000
+   
+   📝 Bob's Steps in Browser:
+   1. Main menu should load automatically
+   2. Click 'Enter World' 
+   3. Look for 'AliceMedievalKingdom' in world list
+   4. Join to explore Alice's medieval realm!
+
+🎮 Cross-Platform Testing Features:
+   • Test medieval castle exploration together
+   • Build additional medieval structures
+   • Real-time block synchronization via MQTT
+   • Player movement and interaction sync
+   • Different client technologies (native vs WASM)
+
+🏰 Explore Medieval Features:
+   • Castle towers at (-10,-17), (10,-17), (-10,-8), (10,-8) 
+   • Village houses at (15,-5), (-18,8), (12,10)
+   • Welcome gate and beacon at (0,-6)
+   • Hills and terrain variety
+   • Medieval decorations throughout
+
+⏳ This session will continue until you press Ctrl+C.
+   Extended testing time allows thorough cross-platform validation.
+   
+✨ Both clients share the same medieval world via MQTT sync!",
+      client: "alice",
+      action: (
+        type: "wait_condition",
+        condition: "manual_medieval_cross_platform_testing",
+        expected_value: Some("never_reached"),
+        timeout: 3600000,  // 1 hour timeout
+      ),
+      depends_on: ["alice_verify_hosting"],
+      wait_before: 3000,
+      wait_after: 0,
+      timeout: 7200000,  // 2 hours max
+      success_condition: None,
+    ),
+  ],
+  config: Some((
+    timeout_ms: Some(7200000),  // 2 hours total
+    logging: Some((
+      level: Some("info"),
+      log_mqtt: Some(true),
+      log_client_actions: Some(true),
+      filters: Some([
+        "medieval/*", 
+        "cross-platform/*",
+        "template/*",
+        "world_creation/*",
+        "castle/*",
+        "kingdom/*",
+        "alice", 
+        "bob",
+        "publish",
+        "InGame",
+        "create_world",
+        "AliceMedievalKingdom",
+        "get_world_status",
+      ]),
+    )),
+    environment: Some({
+      "RUST_LOG": "info,iotcraft_desktop_client=debug",
+      "SCENARIO_NAME": "alice_medieval_bob_practical",
+      "ENABLE_MCP": "true",
+      "MULTIPLAYER_MODE": "enabled",
+      "CROSS_PLATFORM_TEST": "true",
+      "WORLD_TEMPLATE": "medieval",
+      "EXTENDED_TEMPLATE_WAIT": "true",
+      "PRACTICAL_INSTRUCTIONS": "true",
+    }),
+    settings: Some({
+      "auto_cleanup": true,
+      "preserve_logs": true,
+      "manual_testing_mode": true,
+      "fail_fast": false,
+      "extended_session": true,
+      "cross_platform_test": true,
+      "medieval_theme": true,
+      "practical_setup": true,
+    }),
+  )),
+)

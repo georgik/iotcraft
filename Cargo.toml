@@ -3,11 +3,12 @@ resolver = "2"
 
 members = [
     "desktop-client",
-    "desktop-client/xtask",
+    "desktop-client/ctask",
     "iotcraft-mcp-protocol", 
     "mqtt-server",
     "mqtt-client",
-    "mcplay"
+    "mcplay",
+    "xtask"
 ]
 
 # Workspace-wide dependencies for consistency

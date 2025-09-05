@@ -673,6 +673,11 @@ struct LoggingApp {
     scenario_completed: bool,            // Track if scenario is completed
     auto_exit_after_completion: bool,    // Auto exit when scenario completes
     observer_process_healthy: bool,      // Track MQTT observer process health
+    // Step progress tracking
+    current_step_index: Option<usize>, // Index of currently executing step
+    completed_steps: Vec<String>,      // Names of completed steps
+    failed_steps: Vec<String>,         // Names of failed steps
+    step_start_time: Option<std::time::Instant>, // When current step started
 }
 
 #[cfg(feature = "tui")]
@@ -886,6 +891,11 @@ impl LoggingApp {
             scenario_completed: false,
             auto_exit_after_completion: true, // Enable auto-exit by default
             observer_process_healthy: true,
+            // Initialize step progress tracking
+            current_step_index: None,
+            completed_steps: Vec::new(),
+            failed_steps: Vec::new(),
+            step_start_time: None,
         }
     }
 
@@ -1081,6 +1091,71 @@ impl LoggingApp {
                 self.update_service_status(service_name, ServiceStatus::Starting);
             }
         }
+
+        // Parse step execution progress for orchestrator messages
+        if service_name == "Orchestrator" {
+            self.parse_step_progress(message);
+        }
+    }
+
+    fn parse_step_progress(&mut self, message: &str) {
+        // Parse step execution messages to track progress
+        if let Some(captures) = regex::Regex::new(r"📍 Step (\d+): ([^(]+) \((.*)\)")
+            .ok()
+            .and_then(|re| re.captures(message))
+        {
+            if let Some(step_num_str) = captures.get(1) {
+                if let Ok(step_index) = step_num_str.as_str().parse::<usize>() {
+                    // Step numbers are 1-based, convert to 0-based index
+                    self.current_step_index = Some(step_index.saturating_sub(1));
+                    self.step_start_time = Some(std::time::Instant::now());
+                }
+            }
+        }
+        // Parse step completion messages
+        else if message.contains("✅ Completed in") {
+            if let Some(current_index) = self.current_step_index {
+                if let Some(step) = self.scenario.steps.get(current_index) {
+                    if !self.completed_steps.contains(&step.name) {
+                        self.completed_steps.push(step.name.clone());
+                    }
+                }
+            }
+        }
+        // Parse step failure messages
+        else if message.contains("❌") && message.contains("failed") {
+            if let Some(current_index) = self.current_step_index {
+                if let Some(step) = self.scenario.steps.get(current_index) {
+                    if !self.failed_steps.contains(&step.name) {
+                        self.failed_steps.push(step.name.clone());
+                    }
+                }
+            }
+        }
+    }
+
+    fn get_step_progress_info(&self) -> (usize, usize, Option<&str>, Option<Duration>) {
+        let total_steps = self.scenario.steps.len();
+        let completed_count = self.completed_steps.len();
+
+        let current_step_name = if let Some(index) = self.current_step_index {
+            self.scenario.steps.get(index).map(|s| s.name.as_str())
+        } else {
+            None
+        };
+
+        let current_step_duration = if let Some(start_time) = self.step_start_time {
+            Some(start_time.elapsed())
+        } else {
+            None
+        };
+
+        (
+            completed_count,
+            total_steps,
+            current_step_name,
+            current_step_duration,
+        )
     }
 }
 
@@ -1320,27 +1395,53 @@ async fn run_scenario(
         scenario,
         scenario_file_path,
     )));
-    let state_clone = Arc::clone(&state);
 
-    // Setup signal handler for graceful shutdown
+    // Setup signal handler for graceful shutdown with force-exit on second Ctrl+C
+    let state_for_cleanup = Arc::clone(&state);
     tokio::spawn(async move {
         let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
             .expect("Failed to install SIGTERM handler");
         let mut sigint = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())
             .expect("Failed to install SIGINT handler");
 
-        tokio::select! {
-            _ = sigterm.recv() => {
-                println!("\n🛑 Received SIGTERM, initiating graceful shutdown...");
-            }
-            _ = sigint.recv() => {
-                println!("\n🛑 Received SIGINT (Ctrl+C), initiating graceful shutdown...");
+        let mut sigint_count = 0;
+        let mut cleanup_started = false;
+
+        loop {
+            tokio::select! {
+                _ = sigterm.recv() => {
+                    println!("\n🛑 Received SIGTERM, initiating graceful shutdown...");
+                    if !cleanup_started {
+                        cleanup_started = true;
+                        let mut state = state_for_cleanup.lock().await;
+                        let _ = cleanup(&mut state, verbose).await;
+                    }
+                    std::process::exit(0);
+                }
+                _ = sigint.recv() => {
+                    sigint_count += 1;
+
+                    if sigint_count == 1 {
+                        println!("\n🛑 Received SIGINT (Ctrl+C), initiating graceful shutdown...");
+                        println!("   💡 Press Ctrl+C again to force immediate exit");
+
+                        if !cleanup_started {
+                            cleanup_started = true;
+                            // Start cleanup in background without blocking signal handler
+                            let state_cleanup = Arc::clone(&state_for_cleanup);
+                            tokio::spawn(async move {
+                                let mut state = state_cleanup.lock().await;
+                                let _ = cleanup(&mut state, verbose).await;
+                                std::process::exit(0);
+                            });
+                        }
+                    } else {
+                        println!("\n💥 Received second SIGINT (Ctrl+C), forcing immediate exit!");
+                        std::process::exit(1);
+                    }
+                }
             }
         }
-
-        let mut state = state_clone.lock().await;
-        let _ = cleanup(&mut state, verbose).await;
-        std::process::exit(0);
     });
 
     // Lock state for main execution
@@ -2292,23 +2393,35 @@ async fn cleanup(
 ) -> Result<(), Box<dyn std::error::Error>> {
     println!("🧹 Cleaning up...");
 
-    // Terminate client processes
-    for (client_id, mut process) in state.client_processes.drain() {
-        if verbose {
-            println!("  Terminating client {}", client_id);
+    // Set a timeout for cleanup operations
+    let cleanup_future = async {
+        // Terminate client processes
+        for (client_id, mut process) in state.client_processes.drain() {
+            if verbose {
+                println!("  Terminating client {}", client_id);
+            }
+            let _ = process.kill().await;
         }
-        let _ = process.kill().await;
+
+        // Terminate infrastructure processes
+        for (service_name, mut process) in state.infrastructure_processes.drain() {
+            if verbose {
+                println!("  Terminating {}", service_name);
+            }
+            let _ = process.kill().await;
+        }
+    };
+
+    // Apply 5-second timeout to cleanup
+    match tokio::time::timeout(Duration::from_secs(5), cleanup_future).await {
+        Ok(_) => {
+            println!("✅ Cleanup completed");
+        }
+        Err(_) => {
+            println!("⚠️ Cleanup timed out after 5 seconds, forcing exit");
+        }
     }
 
-    // Terminate infrastructure processes
-    for (service_name, mut process) in state.infrastructure_processes.drain() {
-        if verbose {
-            println!("  Terminating {}", service_name);
-        }
-        let _ = process.kill().await;
-    }
-
-    println!("✅ Cleanup completed");
     Ok(())
 }
 
@@ -3326,10 +3439,14 @@ fn draw_log_viewing_ui(f: &mut Frame, app: &LoggingApp) {
         .constraints([Constraint::Percentage(25), Constraint::Percentage(75)])
         .split(main_chunks[0]);
 
-    // Split the left panel into log selector and system info
+    // Split the left panel into log selector, step progress, and system info
     let left_chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Percentage(70), Constraint::Percentage(30)])
+        .constraints([
+            Constraint::Percentage(50), // Log selector
+            Constraint::Length(6),      // Step progress (fixed height)
+            Constraint::Min(0),         // System info (remaining space)
+        ])
         .split(chunks[0]);
 
     // Left panel top: Pane selector
@@ -3395,6 +3512,77 @@ fn draw_log_viewing_ui(f: &mut Frame, app: &LoggingApp) {
 
     f.render_widget(pane_selector, left_chunks[0]);
 
+    // Left panel middle: Step progress information
+    let (completed_count, total_steps, current_step_name, current_step_duration) =
+        app.get_step_progress_info();
+
+    let mut step_progress_lines = Vec::new();
+
+    // Progress bar
+    let progress_ratio = if total_steps > 0 {
+        completed_count as f64 / total_steps as f64
+    } else {
+        0.0
+    };
+
+    let progress_width = 30; // Width of progress bar
+    let filled_width = (progress_width as f64 * progress_ratio) as usize;
+    let progress_bar = format!(
+        "[{}{}] {}/{}",
+        "█".repeat(filled_width),
+        "░".repeat(progress_width - filled_width),
+        completed_count,
+        total_steps
+    );
+    step_progress_lines.push(Line::from(vec![Span::styled(
+        progress_bar,
+        Style::default().fg(Color::Cyan),
+    )]));
+
+    // Current step info
+    if let Some(step_name) = current_step_name {
+        let step_text = if step_name.len() > 25 {
+            format!("{}...", &step_name[..22])
+        } else {
+            step_name.to_string()
+        };
+
+        let duration_text = if let Some(duration) = current_step_duration {
+            format!(" ({:.1}s)", duration.as_secs_f64())
+        } else {
+            String::new()
+        };
+
+        step_progress_lines.push(Line::from(vec![
+            Span::styled("🎬 ", Style::default().fg(Color::Yellow)),
+            Span::styled(step_text, Style::default().fg(Color::White)),
+            Span::styled(duration_text, Style::default().fg(Color::Gray)),
+        ]));
+    } else if total_steps > 0 {
+        if completed_count == total_steps {
+            step_progress_lines.push(Line::from(vec![Span::styled(
+                "🎉 All steps completed!",
+                Style::default().fg(Color::Green),
+            )]));
+        } else {
+            step_progress_lines.push(Line::from(vec![Span::styled(
+                "⏳ Preparing next step...",
+                Style::default().fg(Color::Yellow),
+            )]));
+        }
+    }
+
+    let step_progress_widget = Paragraph::new(step_progress_lines)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title("📋 Scenario Progress")
+                .border_style(Style::default().fg(Color::Cyan)),
+        )
+        .wrap(Wrap { trim: false });
+
+    f.render_widget(step_progress_widget, left_chunks[1]);
+
     // Left panel bottom: System information
     let system_info_lines: Vec<Line> = app
         .system_info
@@ -3412,7 +3600,7 @@ fn draw_log_viewing_ui(f: &mut Frame, app: &LoggingApp) {
         )
         .wrap(Wrap { trim: false });
 
-    f.render_widget(system_info_widget, left_chunks[1]);
+    f.render_widget(system_info_widget, left_chunks[2]);
 
     // Right panel: Log content
     let current_pane_name = app.get_current_pane_name();

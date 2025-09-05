@@ -82,17 +82,17 @@ jobs:
     - name: Run desktop unit tests
       run: |
         cd desktop-client
-        cargo xtask test unit
+        cargo ctask test unit
 
     - name: Run desktop integration tests
       run: |
         cd desktop-client
-        cargo xtask test integration
+        cargo ctask test integration
 
     - name: Run MQTT integration tests
       run: |
         cd desktop-client
-        cargo xtask test mqtt
+        cargo ctask test mqtt
 
   # WASM tests (Web target)
   wasm-tests:
@@ -149,17 +149,17 @@ jobs:
     - name: Run WASM unit tests
       run: |
         cd desktop-client
-        cargo xtask test wasm-unit
+        cargo ctask test wasm-unit
 
     - name: Run WASM integration tests
       run: |
         cd desktop-client
-        cargo xtask test wasm-integration
+        cargo ctask test wasm-integration
 
     - name: Build web version for verification
       run: |
         cd desktop-client
-        cargo xtask web-build --release
+        cargo ctask web-build --release
 
     - name: Upload WASM build artifacts
       uses: actions/upload-artifact@v4
@@ -201,7 +201,7 @@ jobs:
       run: |
         cd desktop-client
         # Build both targets to ensure cross-platform compatibility
-        cargo xtask web-build
+        cargo ctask web-build
         cargo build
         echo "✅ Both desktop and WASM builds completed successfully"
 
