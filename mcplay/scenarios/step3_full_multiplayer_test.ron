@@ -3,7 +3,7 @@
 // This tests the full multiplayer synchronization workflow
 Scenario(
     name: "step3_full_multiplayer_test",
-    description: "Step 3: Complete multiplayer test - Alice creates/publishes world, Bob joins, movement & block placement with synchronization validation",
+    description: "Step 3: Complete multiplayer test - Alice creates/publishes world, Bob joins with InGame state transition, movement & block placement with synchronization validation",
     version: "1.0",
     
     // Full infrastructure with MQTT observer for debugging
@@ -232,10 +232,35 @@ Scenario(
             expectations: None,
         ),
         
-        // Step 8: Verify Bob successfully joined by checking his multiplayer status
+        // Step 8: Bob transitions to InGame state after joining Alice's world
+        Step(
+            name: "bob_set_ingame_state",
+            description: "Bob transitions to InGame state after successfully joining Alice's shared world",
+            client: "bob",
+            action: (
+                type: "mcp_call",
+                tool: "set_game_state",
+                arguments: {
+                    "state": "InGame"
+                },
+            ),
+            wait_before: 500,
+            wait_after: 1000,
+            timeout: 10000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["bob_join_alice_world"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 9: Verify Bob successfully joined by checking his multiplayer status
         Step(
             name: "bob_verify_joined",
-            description: "VERIFY: Confirm Bob successfully joined Alice's world",
+            description: "VERIFY: Confirm Bob successfully joined Alice's world and is in InGame state",
             client: "bob",
             action: (
                 type: "mcp_call",
@@ -249,7 +274,7 @@ Scenario(
                 type: "mcp_response",
                 expected: "success",
             )),
-            depends_on: ["bob_join_alice_world"],
+            depends_on: ["bob_set_ingame_state"],
             timing: None,
             conditions: None,
             expectations: None,

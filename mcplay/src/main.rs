@@ -1314,6 +1314,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .help("Enable verbose logging")
                 .action(clap::ArgAction::SetTrue),
         )
+        .arg(
+            Arg::new("keep-alive")
+                .long("keep-alive")
+                .help("Keep scenario running indefinitely after completion for playtesting (prevents auto-exit)")
+                .action(clap::ArgAction::SetTrue),
+        )
         .get_matches();
 
     if matches.get_flag("list-scenarios") {
@@ -1372,7 +1378,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Run the scenario
     let verbose = matches.get_flag("verbose");
-    run_scenario(scenario, Some(scenario_path), verbose).await?;
+    let keep_alive = matches.get_flag("keep-alive");
+    run_scenario(scenario, Some(scenario_path), verbose, keep_alive).await?;
 
     Ok(())
 }
@@ -1454,6 +1461,7 @@ async fn run_scenario(
     scenario: Scenario,
     scenario_file_path: Option<PathBuf>,
     verbose: bool,
+    keep_alive: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Create shared state wrapped in Arc<Mutex> for signal handling
     let state = Arc::new(Mutex::new(OrchestratorState::new(
@@ -1542,10 +1550,10 @@ async fn run_scenario(
     }
 
     // Execute scenario with proper cleanup handling
-    let result = run_scenario_inner(Arc::clone(&state), verbose).await;
+    let result = run_scenario_inner(Arc::clone(&state), verbose, keep_alive).await;
 
-    // Always cleanup, even on error
-    {
+    // Only cleanup if not keeping alive or if there was an error
+    if !keep_alive || result.is_err() {
         let mut state = state.lock().await;
         cleanup(&mut state, verbose).await?;
         // Show log summary for non-TUI mode after cleanup
@@ -1558,6 +1566,7 @@ async fn run_scenario(
 async fn run_scenario_inner(
     state: Arc<Mutex<OrchestratorState>>,
     verbose: bool,
+    keep_alive: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Start infrastructure if any services are required
     let needs_infrastructure = {
@@ -1600,6 +1609,44 @@ async fn run_scenario_inner(
     {
         let state = state.lock().await;
         generate_report(&*state);
+    }
+
+    // Keep scenario running indefinitely if keep-alive is enabled
+    if keep_alive {
+        println!("\n🔄 Scenario completed successfully!");
+        println!("🎮 Keep-alive mode enabled - scenario will continue running for playtesting");
+        println!("💡 All processes remain active and ready for manual testing");
+        println!("⏸️  Press Ctrl+C to stop and cleanup processes\n");
+
+        // Log the keep-alive status
+        {
+            let state = state.lock().await;
+            state.write_to_log_file(
+                &LogSource::Orchestrator,
+                "🔄 Scenario completed successfully!",
+            );
+            state.write_to_log_file(
+                &LogSource::Orchestrator,
+                "🎮 Keep-alive mode enabled - scenario will continue running for playtesting",
+            );
+            state.write_to_log_file(
+                &LogSource::Orchestrator,
+                "💡 All processes remain active and ready for manual testing",
+            );
+            state.write_to_log_file(
+                &LogSource::Orchestrator,
+                "⏸️  Press Ctrl+C to stop and cleanup processes",
+            );
+        }
+
+        // Wait indefinitely until Ctrl+C
+        loop {
+            sleep(Duration::from_secs(10)).await;
+            // Periodically log that we're still alive
+            if verbose {
+                println!("🔄 Keep-alive: Scenario still running... (Press Ctrl+C to stop)");
+            }
+        }
     }
 
     Ok(())

@@ -25,6 +25,7 @@ impl Plugin for McpPlugin {
         // Initialize MCP resources
         app.init_resource::<McpServerState>()
             .init_resource::<McpToolRegistry>()
+            .init_resource::<McpStateTransition>()
             .insert_resource(McpMqttClient { client: None });
 
         // Create communication channels using async_channel
@@ -502,12 +503,14 @@ fn execute_mcp_commands(
     >,
     mut create_world_events: EventWriter<CreateWorldEvent>,
     mut load_world_events: EventWriter<LoadWorldEvent>,
+    mut publish_world_events: EventWriter<crate::multiplayer::shared_world::PublishWorldEvent>,
     mut next_game_state: Option<ResMut<NextState<GameState>>>,
     // World management resources
     current_world: Option<Res<crate::world::world_types::CurrentWorld>>,
     mut commands: Commands,
     existing_blocks_query: Query<Entity, With<crate::environment::VoxelBlock>>,
     mut discovered_worlds: ResMut<crate::world::world_types::DiscoveredWorlds>,
+    mut mcp_state_transition: ResMut<McpStateTransition>,
 ) {
     // Add comprehensive debug logging
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -547,11 +550,13 @@ fn execute_mcp_commands(
             &mut camera_query,
             &mut create_world_events,
             &mut load_world_events,
+            &mut publish_world_events,
             &mut next_game_state,
             current_world.as_deref(),
             &mut commands,
             &existing_blocks_query,
             &mut discovered_worlds,
+            &mut mcp_state_transition,
         );
 
         // Emit the result as CommandExecutedEvent
@@ -676,12 +681,14 @@ fn execute_mcp_command_directly(
     >,
     _create_world_events: &mut EventWriter<CreateWorldEvent>,
     load_world_events: &mut EventWriter<LoadWorldEvent>,
+    publish_world_events: &mut EventWriter<crate::multiplayer::shared_world::PublishWorldEvent>,
     next_game_state: &mut Option<ResMut<NextState<GameState>>>,
     current_world: Option<&crate::world::world_types::CurrentWorld>,
     // New params for synchronous world creation in MCP
     commands: &mut Commands,
     existing_blocks_query: &Query<Entity, With<crate::environment::VoxelBlock>>,
     discovered_worlds: &mut ResMut<crate::world::world_types::DiscoveredWorlds>,
+    mcp_state_transition: &mut ResMut<McpStateTransition>,
 ) -> String {
     match tool_name {
         "get_client_info" => json!({
@@ -1102,8 +1109,32 @@ fn execute_mcp_command_directly(
             }
         }
         "publish_world" => {
-            // Simplified implementation without multiplayer events
-            "Error: World publishing not available in current mode".to_string()
+            if let Some(world_name) = arguments.get("world_name").and_then(|v| v.as_str()) {
+                let max_players = arguments
+                    .get("max_players")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(10) as u32;
+                let is_public = arguments
+                    .get("is_public")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(true);
+
+                info!("Publishing world via MCP: {}", world_name);
+
+                // Emit PublishWorldEvent to trigger multiplayer mode transition (same as UI Share button)
+                publish_world_events.write(crate::multiplayer::shared_world::PublishWorldEvent {
+                    world_name: world_name.to_string(),
+                    max_players,
+                    is_public,
+                });
+
+                format!(
+                    "World '{}' published for multiplayer (max_players: {}, public: {})",
+                    world_name, max_players, is_public
+                )
+            } else {
+                "Error: world_name is required for publish_world".to_string()
+            }
         }
         "set_game_state" => {
             if let Some(state_str) = arguments.get("state").and_then(|v| v.as_str()) {
@@ -1129,10 +1160,15 @@ fn execute_mcp_command_directly(
                     }
                 };
 
-                // Set the next game state
+                // Set the next game state with MCP flag
                 if let Some(next_state) = next_game_state.as_mut() {
+                    // Set flag to indicate this is an MCP-triggered transition
+                    mcp_state_transition.is_mcp_transition = true;
                     next_state.set(new_state.clone());
-                    format!("Game state will be set to {:?} on next frame", new_state)
+                    format!(
+                        "Game state will be set to {:?} on next frame (MCP transition)",
+                        new_state
+                    )
                 } else {
                     "Error: Game state resource not available".to_string()
                 }
@@ -1485,4 +1521,11 @@ fn handle_resources_list_request() -> Value {
     json!({
         "resources": []
     })
+}
+
+/// Resource to track whether game state transitions are triggered by MCP
+/// This prevents automatic cursor grabbing when MCP controls the state
+#[derive(Resource, Default)]
+pub struct McpStateTransition {
+    pub is_mcp_transition: bool,
 }

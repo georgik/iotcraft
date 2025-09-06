@@ -62,12 +62,21 @@ impl Plugin for MainMenuPlugin {
     }
 }
 
-/// System to ensure cursor is grabbed when entering the game
+/// System to ensure cursor is grabbed when entering the game (but not for MCP transitions)
 fn grab_cursor_on_game_start(
     mut windows: Query<&mut Window>,
     mut cursor_options_query: Query<&mut bevy::window::CursorOptions>,
     mut camera_controller_query: Query<&mut crate::camera_controllers::CameraController>,
+    mut mcp_state_transition: ResMut<crate::mcp::mcp_server::McpStateTransition>,
 ) {
+    // Check if this transition was triggered by MCP
+    if mcp_state_transition.is_mcp_transition {
+        info!("Skipping cursor grab - this is an MCP-triggered state transition");
+        // Reset the flag for next time
+        mcp_state_transition.is_mcp_transition = false;
+        return;
+    }
+
     for mut window in &mut windows {
         info!("Grabbing cursor on game start - setting to Locked");
 
