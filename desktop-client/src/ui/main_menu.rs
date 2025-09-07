@@ -67,14 +67,16 @@ fn grab_cursor_on_game_start(
     mut windows: Query<&mut Window>,
     mut cursor_options_query: Query<&mut bevy::window::CursorOptions>,
     mut camera_controller_query: Query<&mut crate::camera_controllers::CameraController>,
-    mut mcp_state_transition: ResMut<crate::mcp::mcp_server::McpStateTransition>,
+    mcp_state_transition: Option<ResMut<crate::mcp::mcp_server::McpStateTransition>>,
 ) {
-    // Check if this transition was triggered by MCP
-    if mcp_state_transition.is_mcp_transition {
-        info!("Skipping cursor grab - this is an MCP-triggered state transition");
-        // Reset the flag for next time
-        mcp_state_transition.is_mcp_transition = false;
-        return;
+    // Check if this transition was triggered by MCP (only if MCP is enabled)
+    if let Some(mut mcp_transition) = mcp_state_transition {
+        if mcp_transition.is_mcp_transition {
+            info!("Skipping cursor grab - this is an MCP-triggered state transition");
+            // Reset the flag for next time
+            mcp_transition.is_mcp_transition = false;
+            return;
+        }
     }
 
     for mut window in &mut windows {

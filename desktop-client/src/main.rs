@@ -340,6 +340,44 @@ fn execute_pending_commands(
                     });
                 }
             }
+            "load_world" => {
+                if parts.len() >= 2 {
+                    let world_name = parts[1];
+                    
+                    info!("Executing MCP load_world command for world: {}", world_name);
+                    
+                    // Write LoadWorldEvent using the EventWriter parameter
+                    load_world_events.write(LoadWorldEvent {
+                        world_name: world_name.to_string(),
+                    });
+                    
+                    // Set game state to InGame to transition UI
+                    if let Some(ref mut next_state) = next_game_state {
+                        next_state.set(GameState::InGame);
+                    }
+                    
+                    let result_msg = format!("Loaded world '{}' and set game state to InGame", world_name);
+                    info!("load_world command executed successfully: {}", result_msg);
+                    
+                    // If this came from MCP, respond with success
+                    if let Some(req_id) = request_id.clone() {
+                        command_executed_events.write(CommandExecutedEvent {
+                            request_id: req_id,
+                            result: result_msg,
+                        });
+                    }
+                } else {
+                    let error_msg = "Usage: load_world <world_name>";
+                    error!("load_world command failed: {}", error_msg);
+                    
+                    if let Some(req_id) = request_id.clone() {
+                        command_executed_events.write(CommandExecutedEvent {
+                            request_id: req_id,
+                            result: format!("Error: {}", error_msg),
+                        });
+                    }
+                }
+            }
             "blink" => {
                 if parts.len() == 2 {
                     let action = parts[1];

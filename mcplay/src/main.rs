@@ -1782,14 +1782,41 @@ async fn start_clients(
     for client in &state.scenario.clients {
         if verbose {
             println!("  Starting client: {}", client.id);
+            // Log the command that will be executed
+            let player_name = client.name.as_ref().unwrap_or(&client.id);
+            let mut cmd_parts = vec![
+                "cargo".to_string(),
+                "run".to_string(),
+                "--bin".to_string(),
+                "iotcraft-dekstop-client".to_string(),
+                "--".to_string(),
+                "--mcp".to_string(),
+                "--player-id".to_string(),
+                client.player_id.clone(),
+                "--player-name".to_string(),
+                player_name.clone(),
+            ];
+            if state.scenario.infrastructure.mqtt_server.required {
+                cmd_parts.push("--mqtt-server".to_string());
+                cmd_parts.push(format!("localhost:{}", state.scenario.infrastructure.mqtt_server.port));
+            }
+            println!("    Command: {}", cmd_parts.join(" "));
+            println!("    Working dir: ../desktop-client");
+            println!("    Environment: MCP_PORT={}", client.mcp_port);
         }
 
         // Build client command arguments
         let mut cmd = TokioCommand::new("cargo");
         cmd.current_dir("../desktop-client")
             .arg("run")
-            .arg("--")
-            .arg("--mcp")
+            .arg("--bin")
+            .arg("iotcraft-dekstop-client")
+            .args(&["--", "--mcp"])
+            .arg("--player-id")
+            .arg(&client.player_id)
+            .arg("--player-name")
+            // Use client name if available, otherwise fall back to client ID
+            .arg(client.name.as_ref().unwrap_or(&client.id))
             .env("MCP_PORT", client.mcp_port.to_string())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped());
@@ -4909,7 +4936,9 @@ async fn start_clients_with_logging(
         client_cmd_parts.push("--player-id".to_string());
         client_cmd_parts.push(client.player_id.clone());
         client_cmd_parts.push("--player-name".to_string());
-        client_cmd_parts.push(client.id.clone()); // Use client ID as display name
+        // Use client name if available, otherwise fall back to client ID
+        let player_name = client.name.as_ref().unwrap_or(&client.id);
+        client_cmd_parts.push(player_name.clone());
 
         // Add optional MQTT arguments if required
         if state.scenario.infrastructure.mqtt_server.required {
@@ -4944,7 +4973,8 @@ async fn start_clients_with_logging(
             .arg("--player-id")
             .arg(&client.player_id)
             .arg("--player-name")
-            .arg(&client.id) // Use client ID as display name
+            // Use client name if available, otherwise fall back to client ID
+            .arg(client.name.as_ref().unwrap_or(&client.id))
             .env("MCP_PORT", client.mcp_port.to_string())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped());
@@ -5032,7 +5062,13 @@ async fn start_clients_with_logging(
             ),
         );
 
-        let mcp_ready = wait_for_port_with_retries_and_context_with_logging(
+        // Get mutable reference to the process from the HashMap for monitoring
+        let client_process_ref = state
+            .client_processes
+            .get_mut(&client.id)
+            .ok_or("Client process not found in HashMap")?;
+
+        let mcp_ready = wait_for_port_with_process_monitoring(
             "localhost",
             client.mcp_port,
             600, // Increased from 300 (5 min) to 600 (10 min) for Rust build time
@@ -5040,6 +5076,7 @@ async fn start_clients_with_logging(
                 "cargo run --bin iotcraft-dekstop-client ({})",
                 client.id
             )),
+            client_process_ref, // Pass the process handle so we can monitor if it exits
             log_collector.clone(),
         )
         .await;
@@ -5621,6 +5658,100 @@ async fn wait_for_port_with_retries_and_context_with_logging(
     let mut last_log_time = Instant::now();
 
     while start.elapsed() < timeout_duration {
+        // Check for connection
+        if TcpStream::connect(format!("{}:{}", host, port))
+            .await
+            .is_ok()
+        {
+            log_collector.log_str(
+                LogSource::Orchestrator,
+                &format!("    ✅ Port {}:{} is now available", host, port),
+            );
+            return true;
+        }
+
+        // Log progress every 3 seconds
+        if last_log_time.elapsed() >= Duration::from_secs(3) {
+            let elapsed = start.elapsed().as_secs();
+            if let Some(context) = context {
+                log_collector.log_str(
+                    LogSource::Orchestrator,
+                    &format!(
+                        "    ⏳ Still waiting for {} on port {}:{} ({}s elapsed)...",
+                        context, host, port, elapsed
+                    ),
+                );
+            } else {
+                log_collector.log_str(
+                    LogSource::Orchestrator,
+                    &format!(
+                        "    ⏳ Still waiting for port {}:{} ({}s elapsed)...",
+                        host, port, elapsed
+                    ),
+                );
+            }
+            last_log_time = Instant::now();
+        }
+
+        sleep(Duration::from_millis(1000)).await;
+    }
+
+    log_collector.log_str(
+        LogSource::Orchestrator,
+        &format!(
+            "    ❌ Timeout: Port {}:{} did not become available after {}s",
+            host, port, timeout_seconds
+        ),
+    );
+    false
+}
+
+// Enhanced version that monitors process health while waiting for port
+async fn wait_for_port_with_process_monitoring(
+    host: &str,
+    port: u16,
+    timeout_seconds: u64,
+    context: Option<&str>,
+    process: &mut tokio::process::Child,
+    log_collector: LogCollector,
+) -> bool {
+    let timeout_duration = Duration::from_secs(timeout_seconds);
+    let start = Instant::now();
+    let mut last_log_time = Instant::now();
+
+    while start.elapsed() < timeout_duration {
+        // First check if the process is still running
+        match process.try_wait() {
+            Ok(Some(exit_status)) => {
+                let error_msg = if let Some(context) = context {
+                    format!(
+                        "Process for {} exited with status {} before port became available",
+                        context, exit_status
+                    )
+                } else {
+                    format!(
+                        "Process exited with status {} before port {}:{} became available",
+                        exit_status, host, port
+                    )
+                };
+                log_collector.log_str(
+                    LogSource::Orchestrator,
+                    &format!("    ❌ {}", error_msg),
+                );
+                return false;
+            }
+            Ok(None) => {
+                // Process is still running, continue monitoring
+            }
+            Err(e) => {
+                log_collector.log_str(
+                    LogSource::Orchestrator,
+                    &format!("    ⚠️ Failed to check process status: {}", e),
+                );
+                // Continue trying, process might still be running
+            }
+        }
+
         // Check for connection
         if TcpStream::connect(format!("{}:{}", host, port))
             .await
