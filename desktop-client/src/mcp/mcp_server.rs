@@ -481,32 +481,14 @@ fn handle_async_tool_call_request(
     );
 }
 
-/// Dedicated MCP command execution system (separate from script system)
-/// Simplified to reduce parameter count for Bevy system compatibility
+/// Dedicated MCP command execution system with parameter bundling to restore full functionality
+/// This replaces the simplified version and supports all multiplayer commands
 fn execute_mcp_commands(
-    mut pending_executions: ResMut<PendingToolExecutions>,
-    mut command_executed_events: EventWriter<CommandExecutedEvent>,
-    // Core resources for command execution
-    temperature: Res<TemperatureResource>,
-    mqtt_config: Res<MqttConfig>,
-    mut voxel_world: ResMut<VoxelWorld>,
-    device_query: Query<(&DeviceEntity, &Transform), Without<Camera>>,
-    mut camera_query: Query<
-        (
-            &mut Transform,
-            &mut crate::camera_controllers::CameraController,
-        ),
-        With<Camera>,
-    >,
-    mut create_world_events: EventWriter<CreateWorldEvent>,
-    mut load_world_events: EventWriter<LoadWorldEvent>,
-    mut next_game_state: Option<ResMut<NextState<GameState>>>,
-    // World management resources
-    current_world: Option<Res<crate::world::world_types::CurrentWorld>>,
-    mut commands: Commands,
-    existing_blocks_query: Query<Entity, With<crate::environment::VoxelBlock>>,
-    mut discovered_worlds: ResMut<crate::world::world_types::DiscoveredWorlds>,
-    mut mcp_state_transition: ResMut<McpStateTransition>,
+    mut core_params: super::mcp_params::CoreMcpParams,
+    mut world_params: super::mcp_params::WorldMcpParams,
+    mut multiplayer_params: super::mcp_params::MultiplayerMcpParams,
+    mut entity_params: super::mcp_params::EntityMcpParams,
+    mut state_params: super::mcp_params::McpStateMcpParams,
 ) {
     // Add comprehensive debug logging
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -518,46 +500,40 @@ fn execute_mcp_commands(
         info!(
             "[DEBUG] execute_mcp_commands system running, tick {}, queue size: {}",
             counter,
-            pending_executions.mcp_commands.len()
+            core_params.pending_executions.mcp_commands.len()
         );
     }
 
-    if !pending_executions.mcp_commands.is_empty() {
+    if !core_params.pending_executions.mcp_commands.is_empty() {
         info!(
             "[DEBUG] Processing {} MCP commands from queue",
-            pending_executions.mcp_commands.len()
+            core_params.pending_executions.mcp_commands.len()
         );
     }
 
+    // Take all queued MCP commands to avoid multiple mutable borrows
+    let mcp_commands: Vec<_> = core_params.pending_executions.mcp_commands.drain(..).collect();
+    
     // Process all queued MCP commands
-    for mcp_command in pending_executions.mcp_commands.drain(..) {
+    for mcp_command in mcp_commands {
         info!(
             "Executing MCP command: {} (ID: {})",
             mcp_command.tool_name, mcp_command.request_id
         );
 
-        // For now, execute basic commands without full multiplayer support
-        // TODO: Re-add multiplayer event handling in a separate system or with proper bundling
-        let result = execute_basic_mcp_command(
+        // Execute MCP command with full functionality restored via parameter bundling
+        let result = super::mcp_commands::execute_mcp_command_bundled(
             &mcp_command.tool_name,
             &mcp_command.arguments,
-            &temperature,
-            &mqtt_config,
-            &mut voxel_world,
-            &device_query,
-            &mut camera_query,
-            &mut create_world_events,
-            &mut load_world_events,
-            &mut next_game_state,
-            current_world.as_deref(),
-            &mut commands,
-            &existing_blocks_query,
-            &mut discovered_worlds,
-            &mut mcp_state_transition,
+            &mut core_params,
+            &mut world_params,
+            &mut multiplayer_params,
+            &mut entity_params,
+            &mut state_params,
         );
 
         // Emit the result as CommandExecutedEvent
-        command_executed_events.write(CommandExecutedEvent {
+        core_params.command_executed_events.write(CommandExecutedEvent {
             request_id: mcp_command.request_id,
             result,
         });
@@ -661,172 +637,7 @@ fn parse_block_type(block_type_str: &str) -> Option<crate::environment::BlockTyp
     }
 }
 
-/// Execute basic MCP commands with reduced parameter count for Bevy system compatibility
-fn execute_basic_mcp_command(
-    tool_name: &str,
-    arguments: &serde_json::Value,
-    temperature: &TemperatureResource,
-    _mqtt_config: &MqttConfig,
-    voxel_world: &mut VoxelWorld,
-    device_query: &Query<(&DeviceEntity, &Transform), Without<Camera>>,
-    camera_query: &mut Query<
-        (
-            &mut Transform,
-            &mut crate::camera_controllers::CameraController,
-        ),
-        With<Camera>,
-    >,
-    _create_world_events: &mut EventWriter<CreateWorldEvent>,
-    load_world_events: &mut EventWriter<LoadWorldEvent>,
-    next_game_state: &mut Option<ResMut<NextState<GameState>>>,
-    current_world: Option<&crate::world::world_types::CurrentWorld>,
-    commands: &mut Commands,
-    existing_blocks_query: &Query<Entity, With<crate::environment::VoxelBlock>>,
-    discovered_worlds: &mut ResMut<crate::world::world_types::DiscoveredWorlds>,
-    mcp_state_transition: &mut ResMut<McpStateTransition>,
-) -> String {
-    match tool_name {
-        // Basic commands without multiplayer functionality
-        "get_client_info" => json!({
-            "client_id": crate::profile::load_or_create_profile_with_override(None).player_id,
-            "version": "1.0.0",
-            "status": "ready",
-            "capabilities": ["world_building", "device_management", "mqtt_integration"]
-        })
-        .to_string(),
-        "get_game_state" => {
-            json!({
-                "game_state": "InGame",
-                "world_loaded": true,
-                "multiplayer_active": false
-            })
-            .to_string()
-        }
-        "health_check" => {
-            json!({
-                "status": "healthy",
-                "uptime_seconds": 3600,
-                "memory_usage_mb": 256,
-                "services_running": ["mqtt_client", "mcp_server"]
-            })
-            .to_string()
-        }
-        "get_system_info" => json!({
-            "platform": std::env::consts::OS,
-            "architecture": std::env::consts::ARCH,
-            "rust_version": env!("CARGO_PKG_RUST_VERSION"),
-            "app_version": env!("CARGO_PKG_VERSION")
-        })
-        .to_string(),
-        "get_world_status" => {
-            let block_count = voxel_world.blocks.len();
-            let device_count = device_query.iter().count();
-            let world_name = current_world
-                .map(|cw| cw.name.as_str())
-                .unwrap_or("No World Loaded");
-
-            json!({
-                "blocks": block_count,
-                "devices": device_count,
-                "uptime_seconds": 3600,
-                "world_name": world_name
-            })
-            .to_string()
-        }
-        "set_game_state" => {
-            if let Some(state_str) = arguments.get("state").and_then(|v| v.as_str()) {
-                info!("Setting game state via MCP to: {}", state_str);
-
-                let new_state = match state_str.to_lowercase().as_str() {
-                    "mainmenu" | "main_menu" => crate::ui::main_menu::GameState::MainMenu,
-                    "ingame" | "in_game" => crate::ui::main_menu::GameState::InGame,
-                    "settings" => crate::ui::main_menu::GameState::Settings,
-                    "worldselection" | "world_selection" => {
-                        crate::ui::main_menu::GameState::WorldSelection
-                    }
-                    "gameplaymenu" | "gameplay_menu" => {
-                        crate::ui::main_menu::GameState::GameplayMenu
-                    }
-                    "consoleopen" | "console_open" => crate::ui::main_menu::GameState::ConsoleOpen,
-                    _ => {
-                        return format!(
-                            "Error: Invalid game state '{}'",
-                            state_str
-                        );
-                    }
-                };
-
-                if let Some(next_state) = next_game_state.as_mut() {
-                    mcp_state_transition.is_mcp_transition = true;
-                    next_state.set(new_state.clone());
-                    format!("Game state set to {:?} (MCP transition)", new_state)
-                } else {
-                    "Error: Game state resource not available".to_string()
-                }
-            } else {
-                "Error: state parameter is required for set_game_state".to_string()
-            }
-        }
-        "load_world" => {
-            if let Some(world_name) = arguments.get("world_name").and_then(|v| v.as_str()) {
-                info!("MCP load_world command: world_name={}", world_name);
-                
-                load_world_events.write(LoadWorldEvent {
-                    world_name: world_name.to_string(),
-                });
-                
-                if let Some(next_state) = next_game_state {
-                    next_state.set(GameState::InGame);
-                    info!("MCP load_world: set game state to InGame");
-                }
-                
-                format!("Loading world '{}' from filesystem and transitioning to InGame state", world_name)
-            } else {
-                "Error: load_world requires world_name parameter".to_string()
-            }
-        }
-        // Simplified multiplayer commands with limited functionality
-        "list_online_worlds" => {
-            "Error: Multiplayer functionality temporarily disabled - use simplified MCP mode".to_string()
-        }
-        "join_world" => {
-            "Error: Multiplayer functionality temporarily disabled - use simplified MCP mode".to_string()
-        }
-        "leave_world" => {
-            "Error: Multiplayer functionality temporarily disabled - use simplified MCP mode".to_string()
-        }
-        "get_multiplayer_status" => {
-            json!({
-                "multiplayer_mode": "SinglePlayer",
-                "world_id": null,
-                "is_published": false,
-                "timestamp": chrono::Utc::now().to_rfc3339()
-            }).to_string()
-        }
-        // Basic block commands
-        "place_block" => {
-            if let (Some(block_type), Some(x), Some(y), Some(z)) = (
-                arguments.get("block_type").and_then(|v| v.as_str()),
-                arguments.get("x").and_then(|v| v.as_i64()),
-                arguments.get("y").and_then(|v| v.as_i64()),
-                arguments.get("z").and_then(|v| v.as_i64()),
-            ) {
-                if let Some(block_type_enum) = parse_block_type(block_type) {
-                    let position = bevy::math::IVec3::new(x as i32, y as i32, z as i32);
-                    voxel_world.set_block(position, block_type_enum);
-                    format!("Placed {} block at ({}, {}, {})", block_type, x, y, z)
-                } else {
-                    format!("Error: Unknown block type '{}'", block_type)
-                }
-            } else {
-                "Error: place_block requires block_type, x, y, z parameters".to_string()
-            }
-        }
-        _ => {
-            format!("Error: Unknown MCP command: {} (using simplified command set)", tool_name)
-        }
-    }
-}
+// Simplified function removed - replaced with parameter bundled version in mcp_commands.rs
 
 /// Execute MCP command directly with access to game resources (full version - currently unused)
 fn execute_mcp_command_directly(
