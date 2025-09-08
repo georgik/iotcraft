@@ -3,62 +3,149 @@ use crate::localization::{
     Language, LanguageChangeEvent, LocalizationBundle, LocalizationConfig, LocalizedText,
     get_localized_text,
 };
-use crate::multiplayer::{
-    JoinSharedWorldEvent, OnlineWorlds, PublishWorldEvent, RefreshOnlineWorldsEvent,
-};
 use crate::world::{
     CreateWorldEvent, DeleteWorldEvent, DiscoveredWorlds, LoadWorldEvent, SaveWorldEvent,
 };
 use bevy::{app::AppExit, prelude::*};
+
+// Desktop-specific multiplayer imports
+#[cfg(not(target_arch = "wasm32"))]
+use crate::multiplayer::{
+    JoinSharedWorldEvent, OnlineWorlds, PublishWorldEvent, RefreshOnlineWorldsEvent,
+};
+
+// WASM-compatible stubs for multiplayer types
+#[cfg(target_arch = "wasm32")]
+mod multiplayer_stubs {
+    use crate::world::WorldSaveData;
+    use bevy::prelude::*;
+    use std::collections::HashMap;
+
+    /// Web-compatible stub for SharedWorldInfo
+    #[derive(Clone, Debug)]
+    pub struct SharedWorldInfo {
+        pub world_name: String,
+        pub host_name: String,
+        pub host_player: String,
+        pub player_count: u32,
+        pub max_players: u32,
+        pub description: String,
+        pub last_updated: u64,
+    }
+
+    /// Web-compatible stub for OnlineWorlds
+    #[derive(Resource, Default)]
+    pub struct OnlineWorlds {
+        pub worlds: HashMap<String, SharedWorldInfo>,
+        pub last_updated: Option<std::time::Instant>,
+        pub world_data_cache: HashMap<String, WorldSaveData>,
+    }
+
+    /// Web-compatible stub events (matching desktop structure)
+    #[derive(Event, BufferedEvent, Clone, Debug)]
+    pub struct JoinSharedWorldEvent {
+        pub world_id: String,
+    }
+
+    #[derive(Event, BufferedEvent, Clone, Debug)]
+    pub struct PublishWorldEvent {
+        pub world_name: String,
+        pub max_players: u32,
+        pub is_public: bool,
+    }
+
+    #[derive(Event, BufferedEvent, Clone, Debug, Default)]
+    pub struct RefreshOnlineWorldsEvent;
+
+    /// Web-compatible stub for MultiplayerMode
+    #[derive(Resource, Debug, Clone, PartialEq)]
+    pub enum MultiplayerMode {
+        SinglePlayer,
+        HostingWorld {
+            world_id: String,
+            is_published: bool,
+        },
+        JoinedWorld {
+            world_id: String,
+            host_player: String,
+        },
+    }
+
+    impl Default for MultiplayerMode {
+        fn default() -> Self {
+            Self::SinglePlayer
+        }
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+use multiplayer_stubs::{
+    JoinSharedWorldEvent, MultiplayerMode, OnlineWorlds, PublishWorldEvent,
+    RefreshOnlineWorldsEvent, SharedWorldInfo,
+};
+
+#[cfg(not(target_arch = "wasm32"))]
+use crate::multiplayer::MultiplayerMode;
 
 /// Plugin for the main menu
 pub struct MainMenuPlugin;
 
 impl Plugin for MainMenuPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<WorldCreationState>()
-            .add_systems(
-                OnEnter(GameState::MainMenu),
-                (setup_main_menu, release_cursor_for_main_menu),
-            )
-            .add_systems(OnExit(GameState::MainMenu), despawn_main_menu)
-            .add_systems(
-                OnEnter(GameState::WorldSelection),
-                setup_world_selection_menu,
-            )
-            .add_systems(
-                OnExit(GameState::WorldSelection),
-                despawn_world_selection_menu,
-            )
-            .add_systems(OnEnter(GameState::WorldCreation), setup_world_creation_menu)
-            .add_systems(
-                OnExit(GameState::WorldCreation),
-                despawn_world_creation_menu,
-            )
-            .add_systems(OnEnter(GameState::Settings), setup_settings_menu)
-            .add_systems(OnExit(GameState::Settings), despawn_settings_menu)
-            .add_systems(OnEnter(GameState::GameplayMenu), setup_gameplay_menu)
-            .add_systems(OnExit(GameState::GameplayMenu), despawn_gameplay_menu)
-            .add_systems(OnEnter(GameState::InGame), grab_cursor_on_game_start)
-            .add_systems(OnEnter(GameState::ConsoleOpen), release_cursor_for_console)
-            .add_systems(OnExit(GameState::ConsoleOpen), grab_cursor_after_console)
-            .add_systems(
-                Update,
-                (
-                    main_menu_interaction.run_if(in_state(GameState::MainMenu)),
-                    settings_menu_interaction.run_if(in_state(GameState::Settings)),
-                    language_button_interaction.run_if(in_state(GameState::Settings)),
-                    world_selection_interaction.run_if(in_state(GameState::WorldSelection)),
-                    delete_world_interaction.run_if(in_state(GameState::WorldSelection)),
-                    online_world_interaction.run_if(in_state(GameState::WorldSelection)),
-                    refresh_online_worlds_interaction.run_if(in_state(GameState::WorldSelection)),
-                    update_online_worlds_ui.run_if(in_state(GameState::WorldSelection)),
-                    world_creation_interaction.run_if(in_state(GameState::WorldCreation)),
-                    world_name_input_system.run_if(in_state(GameState::WorldCreation)),
-                    gameplay_menu_interaction.run_if(in_state(GameState::GameplayMenu)),
-                    handle_escape_key.run_if(not(in_state(GameState::MainMenu))),
-                ),
-            );
+        app.init_resource::<WorldCreationState>();
+
+        // Initialize WASM-specific multiplayer stubs
+        #[cfg(target_arch = "wasm32")]
+        {
+            app.init_resource::<OnlineWorlds>()
+                .init_resource::<MultiplayerMode>()
+                .add_event::<JoinSharedWorldEvent>()
+                .add_event::<PublishWorldEvent>()
+                .add_event::<RefreshOnlineWorldsEvent>();
+        }
+
+        app.add_systems(
+            OnEnter(GameState::MainMenu),
+            (setup_main_menu, release_cursor_for_main_menu),
+        )
+        .add_systems(OnExit(GameState::MainMenu), despawn_main_menu)
+        .add_systems(
+            OnEnter(GameState::WorldSelection),
+            setup_world_selection_menu,
+        )
+        .add_systems(
+            OnExit(GameState::WorldSelection),
+            despawn_world_selection_menu,
+        )
+        .add_systems(OnEnter(GameState::WorldCreation), setup_world_creation_menu)
+        .add_systems(
+            OnExit(GameState::WorldCreation),
+            despawn_world_creation_menu,
+        )
+        .add_systems(OnEnter(GameState::Settings), setup_settings_menu)
+        .add_systems(OnExit(GameState::Settings), despawn_settings_menu)
+        .add_systems(OnEnter(GameState::GameplayMenu), setup_gameplay_menu)
+        .add_systems(OnExit(GameState::GameplayMenu), despawn_gameplay_menu)
+        .add_systems(OnEnter(GameState::InGame), grab_cursor_on_game_start)
+        .add_systems(OnEnter(GameState::ConsoleOpen), release_cursor_for_console)
+        .add_systems(OnExit(GameState::ConsoleOpen), grab_cursor_after_console)
+        .add_systems(
+            Update,
+            (
+                main_menu_interaction.run_if(in_state(GameState::MainMenu)),
+                settings_menu_interaction.run_if(in_state(GameState::Settings)),
+                language_button_interaction.run_if(in_state(GameState::Settings)),
+                world_selection_interaction.run_if(in_state(GameState::WorldSelection)),
+                delete_world_interaction.run_if(in_state(GameState::WorldSelection)),
+                online_world_interaction.run_if(in_state(GameState::WorldSelection)),
+                refresh_online_worlds_interaction.run_if(in_state(GameState::WorldSelection)),
+                update_online_worlds_ui.run_if(in_state(GameState::WorldSelection)),
+                world_creation_interaction.run_if(in_state(GameState::WorldCreation)),
+                world_name_input_system.run_if(in_state(GameState::WorldCreation)),
+                gameplay_menu_interaction.run_if(in_state(GameState::GameplayMenu)),
+                handle_escape_key.run_if(not(in_state(GameState::MainMenu))),
+            ),
+        );
     }
 }
 
@@ -67,9 +154,12 @@ fn grab_cursor_on_game_start(
     mut windows: Query<&mut Window>,
     mut cursor_options_query: Query<&mut bevy::window::CursorOptions>,
     mut camera_controller_query: Query<&mut crate::camera_controllers::CameraController>,
-    mcp_state_transition: Option<ResMut<crate::mcp::mcp_server::McpStateTransition>>,
+    #[cfg(not(target_arch = "wasm32"))] mcp_state_transition: Option<
+        ResMut<crate::mcp::mcp_server::McpStateTransition>,
+    >,
 ) {
-    // Check if this transition was triggered by MCP (only if MCP is enabled)
+    // Check if this transition was triggered by MCP (only if MCP is enabled on desktop)
+    #[cfg(not(target_arch = "wasm32"))]
     if let Some(mut mcp_transition) = mcp_state_transition {
         if mcp_transition.is_mcp_transition {
             info!("Skipping cursor grab - this is an MCP-triggered state transition");
@@ -1282,7 +1372,7 @@ fn gameplay_menu_interaction(
     mut save_world_events: EventWriter<SaveWorldEvent>,
     mut publish_world_events: EventWriter<PublishWorldEvent>,
     current_world: Option<Res<crate::world::CurrentWorld>>,
-    mut multiplayer_mode: ResMut<crate::multiplayer::MultiplayerMode>,
+    mut multiplayer_mode: ResMut<MultiplayerMode>,
 ) {
     for (interaction, mut color) in return_to_game_query.iter_mut() {
         match *interaction {
@@ -1336,7 +1426,7 @@ fn gameplay_menu_interaction(
                 }
                 // Reset multiplayer mode to prevent auto-transition back to game
                 info!("Resetting multiplayer mode to SinglePlayer when quitting to main menu");
-                *multiplayer_mode = crate::multiplayer::MultiplayerMode::SinglePlayer;
+                *multiplayer_mode = MultiplayerMode::SinglePlayer;
                 game_state.set(GameState::MainMenu);
             }
             Interaction::Hovered => {
@@ -1355,7 +1445,7 @@ fn gameplay_menu_interaction(
                 info!("Quitting to main menu without saving");
                 // Reset multiplayer mode to prevent auto-transition back to game
                 info!("Resetting multiplayer mode to SinglePlayer when quitting to main menu");
-                *multiplayer_mode = crate::multiplayer::MultiplayerMode::SinglePlayer;
+                *multiplayer_mode = MultiplayerMode::SinglePlayer;
                 game_state.set(GameState::MainMenu);
             }
             Interaction::Hovered => {

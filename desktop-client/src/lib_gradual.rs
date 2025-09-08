@@ -634,29 +634,39 @@ pub fn start() {
     web_sys::console::log_1(&start_message.into());
 
     // Initialize the Bevy app with basic plugins
-    App::new()
-        .add_plugins(
-            DefaultPlugins
-                .set(WindowPlugin {
-                    primary_window: Some(Window {
-                        title: "IoTCraft Desktop Client - Web Version".to_string(),
-                        resolution: bevy::window::WindowResolution::new(1280, 720),
-                        canvas: Some("#canvas".to_owned()),
-                        fit_canvas_to_parent: true,
-                        prevent_default_event_handling: false, // Allow browser events for better iPad compatibility
-                        ..default()
-                    }),
-                    ..default()
-                })
-                .set(AssetPlugin {
-                    watch_for_changes_override: Some(false), // Disable asset watching for web
+    let mut app = App::new();
+
+    app.add_plugins(
+        DefaultPlugins
+            .set(WindowPlugin {
+                primary_window: Some(Window {
+                    title: "IoTCraft Desktop Client - Web Version".to_string(),
+                    resolution: bevy::window::WindowResolution::new(1280, 720),
+                    canvas: Some("#canvas".to_owned()),
+                    fit_canvas_to_parent: true,
+                    prevent_default_event_handling: false, // Allow browser events for better iPad compatibility
                     ..default()
                 }),
-        )
-        // Insert resources BEFORE adding plugins that depend on them
-        .insert_resource(MqttConfig::from_web_env())
-        .insert_resource(crate::profile::load_or_create_profile_with_override(None))
-        // Add desktop fonts and localization systems
+                ..default()
+            })
+            .set(AssetPlugin {
+                watch_for_changes_override: Some(false), // Disable asset watching for web
+                ..default()
+            }),
+    )
+    // Insert resources BEFORE adding plugins that depend on them
+    .insert_resource(MqttConfig::from_web_env())
+    .insert_resource(crate::profile::load_or_create_profile_with_override(None));
+
+    // Initialize fonts resource immediately after AssetServer is available (same as desktop)
+    // We need to do this in a way that ensures AssetServer exists
+    app.world_mut()
+        .resource_scope(|world, asset_server: Mut<AssetServer>| {
+            let fonts = crate::fonts::Fonts::new(&asset_server);
+            world.insert_resource(fonts);
+        });
+
+    app // Add desktop fonts and localization systems
         .add_plugins(crate::fonts::FontPlugin)
         .add_plugins(crate::localization::LocalizationPlugin)
         // Add desktop UI system
@@ -666,8 +676,13 @@ pub fn start() {
         .add_plugins(crate::console::ConsolePlugin) // Add full desktop console (with T key)
         .add_plugins(crate::web_player_controller::WebPlayerControllerPlugin) // Add web player controller with gravity and fly mode
         .add_plugins(crate::inventory::InventoryPlugin) // Add inventory system
+        // Add error indicator plugin for ErrorResource (used by world systems)
+        .add_plugins(crate::ui::error_indicator::ErrorIndicatorPlugin)
         // Note: EnvironmentPlugin disabled for web - comprehensive scene handled by setup_basic_scene_once
         .add_plugins(crate::multiplayer_web::WebMultiplayerPlugin) // Add web multiplayer for block sync
+        // Add world plugin for world management (DiscoveredWorlds resource)
+        .add_plugins(crate::world::WorldPlugin)
+        // Note: OnlineWorlds resource initialized by MainMenuPlugin for WASM compatibility
         // Add script system for unified world creation
         .add_plugins(ScriptPlugin)
         // Add desktop camera controller and player controller plugins
@@ -679,6 +694,8 @@ pub fn start() {
         .insert_resource(WorldId::default())
         .insert_resource(MultiplayerConnectionStatus::default())
         .insert_resource(PositionTimer::default())
+        // Initialize GameState - required for handle_escape_key and other state-dependent systems
+        .init_state::<GameState>()
         // VoxelWorld resource needed for multiplayer block synchronization
         .insert_resource(crate::environment::VoxelWorld::default())
         // Console resources for desktop console integration
