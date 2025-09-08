@@ -65,6 +65,7 @@ impl Plugin for WebMqttPlugin {
                 (
                     update_temperature,
                     update_world_discovery,
+                    update_world_data_cache,
                     handle_world_publishing,
                     handle_refresh_events,
                 ),
@@ -353,6 +354,10 @@ pub struct WorldDiscoveryReceiver(pub Mutex<mpsc::Receiver<SharedWorldInfo>>);
 #[derive(Resource)]
 pub struct WorldPublishSender(pub Mutex<mpsc::Sender<PublishWorldEvent>>);
 
+/// Resource for receiving world data messages (complete world save data)
+#[derive(Resource)]
+pub struct WorldDataReceiver(pub Mutex<mpsc::Receiver<(String, crate::world::WorldSaveData)>>);
+
 /// Global WebSocket reference for publishing messages - Not used as Resource for thread safety
 pub struct WebSocketSender(pub Rc<RefCell<Option<WebSocket>>>);
 
@@ -378,6 +383,7 @@ pub fn spawn_web_mqtt_subscriber(
     let (outgoing_pose_tx, outgoing_pose_rx) = mpsc::channel::<PoseMessage>();
     let (world_discovery_tx, world_discovery_rx) = mpsc::channel::<SharedWorldInfo>();
     let (world_publish_tx, world_publish_rx) = mpsc::channel::<PublishWorldEvent>();
+    let (world_data_tx, world_data_rx) = mpsc::channel::<(String, crate::world::WorldSaveData)>();
 
     commands.insert_resource(TemperatureReceiver(Mutex::new(temp_rx)));
     commands.insert_resource(DeviceAnnouncementReceiver(Mutex::new(device_rx)));
@@ -385,6 +391,7 @@ pub fn spawn_web_mqtt_subscriber(
     commands.insert_resource(PoseSender(Mutex::new(outgoing_pose_tx)));
     commands.insert_resource(WorldDiscoveryReceiver(Mutex::new(world_discovery_rx)));
     commands.insert_resource(WorldPublishSender(Mutex::new(world_publish_tx)));
+    commands.insert_resource(WorldDataReceiver(Mutex::new(world_data_rx)));
 
     let client_id = generate_unique_client_id("web-mqtt-client");
     let world_id = "default"; // Use default world for web client
@@ -414,7 +421,7 @@ pub fn spawn_web_mqtt_subscriber(
     websocket.set_binary_type(BinaryType::Arraybuffer);
 
     // Connection and subscription state tracking
-    let subscriptions_confirmed = Rc::new(RefCell::new(0u8)); // Track confirmed subscriptions (0-4)
+    let subscriptions_confirmed = Rc::new(RefCell::new(0u8)); // Track confirmed subscriptions (0-5)
     let pose_subscription_confirmed = Rc::new(RefCell::new(false)); // Track specifically pose subscription
 
     // Wrap channels in Rc<RefCell<>> for sharing between closures
@@ -424,12 +431,14 @@ pub fn spawn_web_mqtt_subscriber(
     let outgoing_pose_rx = Rc::new(RefCell::new(outgoing_pose_rx));
     let world_discovery_tx = Rc::new(RefCell::new(world_discovery_tx));
     let world_publish_rx = Rc::new(RefCell::new(world_publish_rx));
+    let world_data_tx = Rc::new(RefCell::new(world_data_tx));
 
     // Clone references for closures
     let temp_tx_clone = temp_tx.clone();
     let device_tx_clone = device_tx.clone();
     let pose_tx_clone = pose_tx.clone();
     let world_discovery_tx_clone = world_discovery_tx.clone();
+    let world_data_tx_clone = world_data_tx.clone();
     let subscriptions_confirmed_clone = subscriptions_confirmed.clone();
     let pose_subscription_confirmed_clone = pose_subscription_confirmed.clone();
 
@@ -463,7 +472,7 @@ pub fn spawn_web_mqtt_subscriber(
                 if return_codes.iter().all(|&code| code <= 0x01) {
                     if let Ok(mut confirmed) = subscriptions_confirmed_clone.try_borrow_mut() {
                         *confirmed += 1;
-                        info!("MQTT Web: Subscriptions confirmed: {}/4", *confirmed);
+                        info!("MQTT Web: Subscriptions confirmed: {}/5", *confirmed);
 
                         // Special handling for specific subscriptions
                         if packet_id == 5 {
@@ -482,9 +491,13 @@ pub fn spawn_web_mqtt_subscriber(
                             info!(
                                 "🌍 MQTT Web: World discovery subscription confirmed! World discovery enabled."
                             );
+                        } else if packet_id == 3 {
+                            info!(
+                                "🌍 MQTT Web: World data subscription confirmed! World loading enabled."
+                            );
                         }
 
-                        if *confirmed == 4 {
+                        if *confirmed == 5 {
                             info!("🎉 MQTT Web: All subscriptions confirmed!");
                         }
                     }
@@ -524,6 +537,39 @@ pub fn spawn_web_mqtt_subscriber(
                             }
                         } else {
                             info!("🌍 Web: Empty world info (world unpublished): {}", topic);
+                        }
+                    }
+                } else if topic.starts_with("iotcraft/worlds/") && topic.ends_with("/data") {
+                    // Handle world data messages (complete world save data)
+                    if let Ok(world_data_str) = String::from_utf8(payload) {
+                        if !world_data_str.is_empty() {
+                            info!("🌍 Web: Received world data on topic: {}", topic);
+                            // Extract world ID from topic (iotcraft/worlds/{world_id}/data)
+                            let topic_parts: Vec<&str> = topic.split('/').collect();
+                            if topic_parts.len() >= 3 {
+                                let world_id = topic_parts[2].to_string();
+                                if let Ok(world_data) =
+                                    serde_json::from_str::<crate::world::WorldSaveData>(
+                                        &world_data_str,
+                                    )
+                                {
+                                    info!(
+                                        "🌍 Web: Parsed world data for: {} ({} blocks)",
+                                        world_id,
+                                        world_data.blocks.len()
+                                    );
+                                    if let Ok(tx) = world_data_tx_clone.try_borrow() {
+                                        let _ = tx.send((world_id, world_data));
+                                    }
+                                } else {
+                                    error!(
+                                        "🌍 Web: Failed to parse world data JSON for: {}",
+                                        world_id
+                                    );
+                                }
+                            }
+                        } else {
+                            info!("🌍 Web: Empty world data (world removed): {}", topic);
                         }
                     }
                 } else if topic.starts_with("iotcraft/worlds/") && topic.contains("/pose") {
@@ -635,6 +681,18 @@ pub fn spawn_web_mqtt_subscriber(
                 info!("🌍 Web: Subscribed to world discovery: iotcraft/worlds/+/info");
             }
 
+            // 3.1. Subscribe to world data topic (iotcraft/worlds/+/data) for world reconstruction
+            let sub_world_data_packet =
+                SimpleMqttPackets::subscribe_packet("iotcraft/worlds/+/data", 3);
+            if let Err(e) = websocket_clone2.send_with_u8_array(&sub_world_data_packet) {
+                error!(
+                    "MQTT Web: Failed to send world data SUBSCRIBE packet: {:?}",
+                    e
+                );
+            } else {
+                info!("🌍 Web: Subscribed to world data: iotcraft/worlds/+/data");
+            }
+
             // 4. FIRST: Publish an initial pose to CREATE the topic hierarchy for multiplayer
             let publish_topic = format!(
                 "iotcraft/worlds/{}/players/{}/pose",
@@ -707,8 +765,8 @@ pub fn spawn_web_mqtt_subscriber(
                 };
 
                 // Only start publishing poses after pose subscription is confirmed (packet ID 5)
-                // We need at least 3 confirmations (temperature + device + world discovery)
-                if confirmed_count < 3 {
+                // We need at least 4 confirmations (temperature + device + world discovery + world data)
+                if confirmed_count < 4 {
                     // Periodically log that we're waiting for subscriptions
                     static mut LOG_COUNTER: u32 = 0;
                     unsafe {
@@ -716,7 +774,7 @@ pub fn spawn_web_mqtt_subscriber(
                         if LOG_COUNTER % 100 == 0 {
                             // Log every 5 seconds (50ms * 100)
                             info!(
-                                "⏳ Web: Waiting for subscriptions to be confirmed ({}/4)",
+                                "⏳ Web: Waiting for subscriptions to be confirmed ({}/5)",
                                 confirmed_count
                             );
                         }
@@ -895,6 +953,35 @@ pub fn update_world_discovery(
                 #[cfg(not(target_arch = "wasm32"))]
                 {
                     // This should not be called in desktop, but keep for compatibility
+                    online_worlds.last_updated = Some(0.0);
+                }
+            }
+        }
+    }
+}
+
+/// Update OnlineWorlds resource with world data from MQTT for world reconstruction
+pub fn update_world_data_cache(
+    mut online_worlds: ResMut<OnlineWorlds>,
+    world_data_receiver: Option<Res<WorldDataReceiver>>,
+) {
+    if let Some(receiver) = world_data_receiver {
+        if let Ok(rx) = receiver.0.lock() {
+            while let Ok((world_id, world_data)) = rx.try_recv() {
+                info!(
+                    "🌍 Web: Caching world data for world: {} ({} blocks)",
+                    world_id,
+                    world_data.blocks.len()
+                );
+                online_worlds.world_data_cache.insert(world_id, world_data);
+
+                // Update timestamp using JavaScript Date.now() for WASM
+                #[cfg(target_arch = "wasm32")]
+                {
+                    online_worlds.last_updated = Some(js_sys::Date::now());
+                }
+                #[cfg(not(target_arch = "wasm32"))]
+                {
                     online_worlds.last_updated = Some(0.0);
                 }
             }
