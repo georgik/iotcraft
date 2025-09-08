@@ -98,6 +98,9 @@ pub mod player_controller;
 // Minimap module available for both desktop and web
 pub mod minimap;
 
+// WASM performance limits and safety constants
+pub mod wasm_limits;
+
 #[cfg(not(target_arch = "wasm32"))]
 pub mod player_avatar;
 
