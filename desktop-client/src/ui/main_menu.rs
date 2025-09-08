@@ -16,28 +16,33 @@ use crate::multiplayer::{
 
 // WASM-compatible stubs for multiplayer types
 #[cfg(target_arch = "wasm32")]
-mod multiplayer_stubs {
+pub mod multiplayer_stubs {
     use crate::world::WorldSaveData;
     use bevy::prelude::*;
+    use serde::{Deserialize, Serialize};
     use std::collections::HashMap;
 
-    /// Web-compatible stub for SharedWorldInfo
-    #[derive(Clone, Debug)]
+    /// Web-compatible stub for SharedWorldInfo (matches desktop structure)
+    #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
     pub struct SharedWorldInfo {
+        pub world_id: String,
         pub world_name: String,
-        pub host_name: String,
+        pub description: String,
         pub host_player: String,
+        pub host_name: String,
+        pub created_at: String,
+        pub last_updated: String,
         pub player_count: u32,
         pub max_players: u32,
-        pub description: String,
-        pub last_updated: u64,
+        pub is_public: bool,
+        pub version: String,
     }
 
     /// Web-compatible stub for OnlineWorlds
     #[derive(Resource, Default)]
     pub struct OnlineWorlds {
         pub worlds: HashMap<String, SharedWorldInfo>,
-        pub last_updated: Option<std::time::Instant>,
+        pub last_updated: Option<f64>, // Use f64 for WASM-compatible timestamp (JS timestamp)
         pub world_data_cache: HashMap<String, WorldSaveData>,
     }
 
@@ -1679,9 +1684,17 @@ pub fn generate_new_world_name() -> String {
 pub struct OnlineWorldsList;
 
 /// Track when the UI was last updated
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(Resource, Default)]
 struct OnlineWorldsUiState {
     last_update_time: Option<std::time::Instant>,
+    last_world_count: usize,
+}
+
+#[cfg(target_arch = "wasm32")]
+#[derive(Resource, Default)]
+struct OnlineWorldsUiState {
+    last_update_time: Option<f64>, // Use f64 for WASM-compatible timestamp (JS timestamp)
     last_world_count: usize,
 }
 
