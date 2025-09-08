@@ -10,6 +10,7 @@ fn main() {
     // Configure MQTT options: client ID, broker address, keep alive
     let mut mqttoptions = MqttOptions::new("rust-mqtt-client", "127.0.0.1", 1883);
     mqttoptions.set_keep_alive(Duration::from_secs(5));
+    mqttoptions.set_max_packet_size(1048576, 1048576); // Set max packet size to 1MB to match server
 
     // Create a synchronous client and connection
     let (mut client, mut connection) = Client::new(mqttoptions, 10);

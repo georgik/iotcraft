@@ -27,6 +27,8 @@ mod config;
 #[cfg(not(target_arch = "wasm32"))]
 mod console;
 #[cfg(not(target_arch = "wasm32"))]
+mod debug;
+#[cfg(not(target_arch = "wasm32"))]
 mod devices;
 #[cfg(not(target_arch = "wasm32"))]
 mod environment;
@@ -72,6 +74,8 @@ use camera_controllers::{CameraController, CameraControllerPlugin};
 #[cfg(not(target_arch = "wasm32"))]
 use config::MqttConfig;
 #[cfg(not(target_arch = "wasm32"))]
+use debug::{debug_commands::*, debug_params::DiagnosticsVisible};
+#[cfg(not(target_arch = "wasm32"))]
 use devices::*;
 #[cfg(not(target_arch = "wasm32"))]
 use environment::*;
@@ -80,7 +84,7 @@ use fonts::{FontPlugin, Fonts};
 #[cfg(not(target_arch = "wasm32"))]
 use interaction::InteractionPlugin as MyInteractionPlugin;
 #[cfg(not(target_arch = "wasm32"))]
-use inventory::{InventoryPlugin, PlayerInventory};
+use inventory::{InventoryPlugin, PlayerInventory, inventory_commands::*};
 #[cfg(not(target_arch = "wasm32"))]
 use localization::{LocalizationConfig, LocalizationPlugin};
 #[cfg(not(target_arch = "wasm32"))]
@@ -340,44 +344,7 @@ fn execute_pending_commands(
                     });
                 }
             }
-            "load_world" => {
-                if parts.len() >= 2 {
-                    let world_name = parts[1];
-                    
-                    info!("Executing MCP load_world command for world: {}", world_name);
-                    
-                    // Write LoadWorldEvent using the EventWriter parameter
-                    load_world_events.write(LoadWorldEvent {
-                        world_name: world_name.to_string(),
-                    });
-                    
-                    // Set game state to InGame to transition UI
-                    if let Some(ref mut next_state) = next_game_state {
-                        next_state.set(GameState::InGame);
-                    }
-                    
-                    let result_msg = format!("Loaded world '{}' and set game state to InGame", world_name);
-                    info!("load_world command executed successfully: {}", result_msg);
-                    
-                    // If this came from MCP, respond with success
-                    if let Some(req_id) = request_id.clone() {
-                        command_executed_events.write(CommandExecutedEvent {
-                            request_id: req_id,
-                            result: result_msg,
-                        });
-                    }
-                } else {
-                    let error_msg = "Usage: load_world <world_name>";
-                    error!("load_world command failed: {}", error_msg);
-                    
-                    if let Some(req_id) = request_id.clone() {
-                        command_executed_events.write(CommandExecutedEvent {
-                            request_id: req_id,
-                            result: format!("Error: {}", error_msg),
-                        });
-                    }
-                }
-            }
+            // load_world is now handled by the MCP command system in mcp_commands.rs
             "blink" => {
                 if parts.len() == 2 {
                     let action = parts[1];
@@ -1063,50 +1030,7 @@ fn execute_pending_commands(
                     }
                 }
             }
-            "load_world" => {
-                if parts.len() >= 2 {
-                    let world_name = parts[1].to_string();
-
-                    info!("Executing load_world command: world_name='{}'", world_name);
-
-                    // Send LoadWorldEvent to trigger world loading
-                    load_world_events.write(LoadWorldEvent {
-                        world_name: world_name.clone(),
-                    });
-
-                    // Set game state to InGame to transition UI from main menu
-                    if let Some(next_state) = next_game_state.as_mut() {
-                        next_state.set(crate::ui::main_menu::GameState::InGame);
-                        info!("Set game state to InGame for world loading transition");
-                    } else {
-                        warn!("NextState<GameState> resource not available for state transition");
-                    }
-
-                    let result_msg =
-                        format!("Loaded world: {} and transitioned to InGame", world_name);
-                    #[cfg(feature = "console")]
-                    write_to_console(result_msg.clone());
-
-                    // Emit command executed event if this was from MCP
-                    if let Some(req_id) = request_id {
-                        command_executed_events.write(CommandExecutedEvent {
-                            request_id: req_id,
-                            result: result_msg,
-                        });
-                    }
-                } else {
-                    let error_msg = "Usage: load_world <world_name>".to_string();
-                    #[cfg(feature = "console")]
-                    write_to_console(error_msg.clone());
-
-                    if let Some(req_id) = request_id {
-                        command_executed_events.write(CommandExecutedEvent {
-                            request_id: req_id,
-                            result: error_msg,
-                        });
-                    }
-                }
-            }
+            // load_world is now handled by the MCP command system in mcp_commands.rs (second duplicate removed)
             "set_game_state" => {
                 if parts.len() >= 2 {
                     let state_str = parts[1];
@@ -1566,12 +1490,12 @@ fn main() {
     );
 
     app.init_resource::<DiagnosticsVisible>()
-        .add_systems(Startup, setup_diagnostics_ui)
+        .add_systems(Startup, setup_diagnostics_ui_bundled)
         .add_systems(Update, execute_pending_commands)
         .add_systems(Update, execute_console_commands)
-        .add_systems(Update, handle_inventory_input)
-        .add_systems(Update, handle_diagnostics_toggle)
-        .add_systems(Update, update_diagnostics_content)
+        .add_systems(Update, handle_inventory_input_bundled)
+        .add_systems(Update, handle_diagnostics_toggle_bundled)
+        .add_systems(Update, update_diagnostics_content_bundled)
         .run();
 }
 
@@ -1664,25 +1588,28 @@ fn manage_camera_controller(mut camera_query: Query<&mut CameraController, With<
     }
 }
 
+// LEGACY: Resource and systems moved to debug module (debug_params.rs)
 // Resource to track diagnostics visibility
-#[derive(Resource)]
-struct DiagnosticsVisible {
-    visible: bool,
-}
+// #[derive(Resource)]
+// struct DiagnosticsVisible {
+//     visible: bool,
+// }
 
-impl Default for DiagnosticsVisible {
-    fn default() -> Self {
-        Self { visible: false }
-    }
-}
+// impl Default for DiagnosticsVisible {
+//     fn default() -> Self {
+//         Self { visible: false }
+//     }
+// }
 
-#[derive(Component)]
-struct DiagnosticsText;
+// #[derive(Component)]
+// struct DiagnosticsText;
 
-#[derive(Component)]
-struct DiagnosticsOverlay;
+// #[derive(Component)]
+// struct DiagnosticsOverlay;
 
+// LEGACY: System replaced by handle_diagnostics_toggle_bundled in debug_commands.rs
 // System to handle F3 key toggle
+/*
 fn handle_diagnostics_toggle(
     keyboard_input: Res<ButtonInput<KeyCode>>,
     mut diagnostics_visible: ResMut<DiagnosticsVisible>,
@@ -1705,7 +1632,10 @@ fn handle_diagnostics_toggle(
         );
     }
 }
+*/
 
+// LEGACY: System replaced by update_diagnostics_content_bundled in debug_commands.rs
+/*
 // System to update diagnostics content
 fn update_diagnostics_content(
     diagnostics_visible: Res<DiagnosticsVisible>,
@@ -1937,7 +1867,10 @@ fn update_diagnostics_content(
         }
     }
 }
+*/
 
+// LEGACY: System replaced by setup_diagnostics_ui_bundled in debug_commands.rs
+/*
 // System to setup diagnostics UI
 fn setup_diagnostics_ui(mut commands: Commands, fonts: Res<Fonts>) {
     // Create a full-width diagnostics panel at the top
@@ -1972,6 +1905,7 @@ fn setup_diagnostics_ui(mut commands: Commands, fonts: Res<Fonts>) {
             ));
         });
 }
+*/
 
 // System to handle mouse capture when window is clicked...
 fn handle_mouse_capture(
@@ -2000,6 +1934,8 @@ fn handle_mouse_capture(
     }
 }
 
+// LEGACY: Systems replaced by handle_inventory_input_bundled in inventory_commands.rs
+/*
 // System to handle inventory slot selection with number keys and mouse wheel
 #[cfg(feature = "console")]
 fn handle_inventory_input(
@@ -2123,3 +2059,4 @@ fn handle_inventory_input(
         }
     }
 }
+*/

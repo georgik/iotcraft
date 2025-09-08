@@ -71,7 +71,7 @@ fn discover_worlds(mut discovered_worlds: ResMut<DiscoveredWorlds>) {
 
 /// Gets the worlds directory path
 #[cfg(not(target_arch = "wasm32"))]
-fn get_worlds_directory() -> std::path::PathBuf {
+pub fn get_worlds_directory() -> std::path::PathBuf {
     let mut path = dirs::document_dir().unwrap_or_else(|| std::env::current_dir().unwrap());
     path.push("IOTCraft");
     path.push("worlds");
@@ -80,7 +80,7 @@ fn get_worlds_directory() -> std::path::PathBuf {
 
 /// For web, we'll use a virtual directory concept
 #[cfg(target_arch = "wasm32")]
-fn get_worlds_directory() -> std::path::PathBuf {
+pub fn get_worlds_directory() -> std::path::PathBuf {
     // Return a dummy path for web - we'll handle storage differently
     std::path::PathBuf::from("web_worlds")
 }

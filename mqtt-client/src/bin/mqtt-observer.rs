@@ -80,6 +80,7 @@ async fn main() {
     // Configure MQTT options
     let mut mqttoptions = MqttOptions::new(&client_id, &host, port);
     mqttoptions.set_keep_alive(Duration::from_secs(5));
+    mqttoptions.set_max_packet_size(1048576, 1048576); // Set max packet size to 1MB to match server
 
     // Create an async client and event loop
     let (client, mut eventloop) = AsyncClient::new(mqttoptions, 10);

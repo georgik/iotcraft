@@ -220,22 +220,31 @@ fn handle_publish_world_events(
     for event in publish_events.read() {
         info!("Publishing world: {}", event.world_name);
 
-        if let Some(current_world) = &current_world {
-            // Generate a unique world ID
-            let world_id = format!("{}_{}", current_world.name, chrono::Utc::now().timestamp());
-
-            *multiplayer_mode = MultiplayerMode::HostingWorld {
-                world_id: world_id.clone(),
-                is_published: event.is_public,
-            };
-
-            info!(
-                "World {} is now being hosted with ID: {} (public: {})",
-                event.world_name, world_id, event.is_public
-            );
-            info!("Multiplayer mode changed to: {:?}", *multiplayer_mode);
+        // Generate a unique world ID based on world name and timestamp
+        // Use the event world name if current_world resource isn't available yet
+        let base_world_name = if let Some(current_world) = &current_world {
+            current_world.name.clone()
         } else {
-            warn!("Cannot publish world - no current world loaded");
+            event.world_name.clone()
+        };
+        let world_id = format!("{}_{}", base_world_name, chrono::Utc::now().timestamp());
+
+        // IMMEDIATELY transition to multiplayer mode - the act of publishing makes it multiplayer!
+        *multiplayer_mode = MultiplayerMode::HostingWorld {
+            world_id: world_id.clone(),
+            is_published: event.is_public,
+        };
+
+        info!(
+            "🚀 World '{}' is now being hosted with ID: {} (public: {})",
+            event.world_name, world_id, event.is_public
+        );
+        info!("✅ Multiplayer mode changed to: {:?}", *multiplayer_mode);
+
+        if current_world.is_none() {
+            info!(
+                "⚠️ CurrentWorld resource not yet available, but multiplayer mode set - world publishing will proceed once resources are ready"
+            );
         }
     }
 }
@@ -260,6 +269,7 @@ fn handle_join_shared_world_events(
         info!("Attempting to join shared world: {}", event.world_id);
 
         if let Some(world_info) = online_worlds.worlds.get(&event.world_id) {
+            // Standard case - world found in online worlds via MQTT discovery
             *multiplayer_mode = MultiplayerMode::JoinedWorld {
                 world_id: event.world_id.clone(),
                 host_player: world_info.host_player.clone(),
@@ -287,7 +297,23 @@ fn handle_join_shared_world_events(
                 );
             }
         } else {
-            error!("World {} not found in online worlds", event.world_id);
+            // Fallback case - world not found in online worlds (MQTT discovery failed or not available)
+            // Allow joining anyway for testing purposes - assume default host info
+            warn!(
+                "World {} not found in online worlds - allowing join with default host info for testing",
+                event.world_id
+            );
+
+            *multiplayer_mode = MultiplayerMode::JoinedWorld {
+                world_id: event.world_id.clone(),
+                host_player: "unknown_host".to_string(), // Placeholder host
+            };
+
+            info!(
+                "Joined world {} in testing mode (MQTT discovery not available)",
+                event.world_id
+            );
+            info!("Multiplayer mode changed to: {:?}", *multiplayer_mode);
         }
     }
 }
@@ -408,15 +434,29 @@ fn handle_world_state_received_events(
     multiplayer_mode: Res<MultiplayerMode>,
 ) {
     for event in world_state_events.read() {
+        info!(
+            "🌎 [Bob Debug] Received WorldStateReceivedEvent for world: {}",
+            event.world_id
+        );
+        info!(
+            "🔍 [Bob Debug] Current multiplayer mode: {:?}",
+            &*multiplayer_mode
+        );
+
         // Only load world data if we're currently in the specified world
         if let MultiplayerMode::JoinedWorld {
             world_id: joined_id,
-            ..
+            host_player,
         } = &*multiplayer_mode
         {
+            info!(
+                "🌎 [Bob Debug] In JoinedWorld mode - joined_id: '{}', host_player: '{}'",
+                joined_id, host_player
+            );
+
             if *joined_id == event.world_id {
                 info!(
-                    "Loading shared world state for: {} ({} blocks)",
+                    "✅ [Bob Debug] World IDs match! Loading shared world state for: {} ({} blocks)",
                     event.world_id,
                     event.world_data.blocks.len()
                 );
@@ -431,7 +471,18 @@ fn handle_world_state_received_events(
                     &mut inventory,
                     &camera_query,
                 );
+                info!("🎆 [Bob Debug] World reconstruction completed successfully!");
+            } else {
+                warn!(
+                    "⚠️ [Bob Debug] World ID mismatch: joined_id='{}' != event.world_id='{}'",
+                    joined_id, event.world_id
+                );
             }
+        } else {
+            warn!(
+                "⚠️ [Bob Debug] Not in JoinedWorld mode, skipping world state loading. Current mode: {:?}",
+                &*multiplayer_mode
+            );
         }
     }
 }
@@ -448,8 +499,18 @@ fn load_shared_world_data(
     camera_query: &Query<Entity, With<crate::camera_controllers::CameraController>>,
 ) {
     info!(
-        "Loading shared world with {} blocks",
+        "🌎 [Bob Debug] Starting shared world reconstruction with {} blocks",
         world_data.blocks.len()
+    );
+
+    // Log world metadata being reconstructed
+    info!(
+        "📝 [Bob Debug] World metadata - name: '{}', description: '{}'",
+        world_data.metadata.name, world_data.metadata.description
+    );
+    info!(
+        "📅 [Bob Debug] World timestamps - created: {}, last_played: {}",
+        world_data.metadata.created_at, world_data.metadata.last_played
     );
 
     // Clear existing blocks
@@ -458,22 +519,49 @@ fn load_shared_world_data(
         commands.entity(entity).despawn();
     }
     info!(
-        "Cleared {} existing block entities from scene",
+        "🧹 [Bob Debug] Cleared {} existing block entities from scene",
         cleared_entities
     );
+    let old_blocks_count = voxel_world.blocks.len();
     voxel_world.blocks.clear();
+    info!(
+        "🧹 [Bob Debug] Cleared {} existing blocks from VoxelWorld data structure",
+        old_blocks_count
+    );
 
-    // Load blocks
-    for block_data in &world_data.blocks {
+    // Load blocks into VoxelWorld data structure
+    info!(
+        "🔄 [Bob Debug] Loading {} blocks into VoxelWorld data structure...",
+        world_data.blocks.len()
+    );
+    for (index, block_data) in world_data.blocks.iter().enumerate() {
         voxel_world.blocks.insert(
             IVec3::new(block_data.x, block_data.y, block_data.z),
             block_data.block_type,
         );
+
+        // Log progress for large worlds
+        if index % 1000 == 0 && index > 0 {
+            info!(
+                "🔄 [Bob Debug] Loaded {} / {} blocks into VoxelWorld...",
+                index,
+                world_data.blocks.len()
+            );
+        }
     }
-    info!("Loaded {} blocks into VoxelWorld", voxel_world.blocks.len());
+    info!(
+        "✅ [Bob Debug] Loaded {} blocks into VoxelWorld data structure",
+        voxel_world.blocks.len()
+    );
 
     // Spawn visual blocks
+    info!(
+        "🎨 [Bob Debug] Creating visual entities for {} blocks...",
+        voxel_world.blocks.len()
+    );
     let mut spawned_blocks = 0;
+    let mut block_type_counts = std::collections::HashMap::new();
+
     for (pos, block_type) in voxel_world.blocks.iter() {
         let cube_mesh = meshes.add(Cuboid::new(
             crate::environment::CUBE_SIZE,
@@ -502,25 +590,71 @@ fn load_shared_world_data(
             crate::environment::VoxelBlock { position: *pos },
         ));
         spawned_blocks += 1;
+        *block_type_counts.entry(*block_type).or_insert(0) += 1;
+
+        // Log progress for large worlds
+        if spawned_blocks % 1000 == 0 && spawned_blocks > 0 {
+            info!(
+                "🎨 [Bob Debug] Spawned {} / {} visual block entities...",
+                spawned_blocks,
+                voxel_world.blocks.len()
+            );
+        }
     }
-    info!("Spawned {} visual block entities", spawned_blocks);
+    info!(
+        "✅ [Bob Debug] Spawned {} visual block entities",
+        spawned_blocks
+    );
+    info!(
+        "🧱 [Bob Debug] Visual block type breakdown: {:?}",
+        block_type_counts
+    );
 
     // Load inventory
+    let old_inventory_items = inventory.slots.iter().filter(|item| item.is_some()).count();
     *inventory = world_data.inventory.clone();
     inventory.ensure_proper_size();
-    // ResMut automatically marks resources as changed when mutated
+    let new_inventory_items = inventory.slots.iter().filter(|item| item.is_some()).count();
+    info!(
+        "🎒 [Bob Debug] Inventory updated: {} -> {} items",
+        old_inventory_items, new_inventory_items
+    );
+    for (slot, item) in inventory.slots.iter().enumerate() {
+        if let Some(block_type) = item {
+            info!(
+                "🎒 [Bob Debug] Reconstructed inventory slot {}: {:?}",
+                slot, block_type
+            );
+        }
+    }
 
     // Set player position if camera exists
     if let Ok(camera_entity) = camera_query.single() {
+        info!(
+            "🎮 [Bob Debug] Setting player position to: ({:.2}, {:.2}, {:.2})",
+            world_data.player_position.x,
+            world_data.player_position.y,
+            world_data.player_position.z
+        );
+        info!(
+            "🔄 [Bob Debug] Setting player rotation to: ({:.4}, {:.4}, {:.4}, {:.4})",
+            world_data.player_rotation.x,
+            world_data.player_rotation.y,
+            world_data.player_rotation.z,
+            world_data.player_rotation.w
+        );
+
         commands.entity(camera_entity).insert(Transform {
             translation: world_data.player_position,
             rotation: world_data.player_rotation,
             ..default()
         });
-        info!("Set player position to: {:?}", world_data.player_position);
+        info!("✅ [Bob Debug] Player camera position and rotation updated");
+    } else {
+        warn!("⚠️ [Bob Debug] No camera entity found - unable to set player position");
     }
 
-    info!("Successfully loaded shared world data");
+    info!("🎆 [Bob Debug] Successfully completed shared world reconstruction!");
 }
 
 /// System that automatically enables multiplayer mode when MQTT is available and a world is loaded

@@ -1,9 +1,9 @@
+pub mod mcp_commands;
+pub mod mcp_params;
 pub mod mcp_protocol;
 pub mod mcp_server;
 pub mod mcp_tools;
 pub mod mcp_types;
-pub mod mcp_params;
-pub mod mcp_commands;
 
 #[cfg(test)]
 mod tests;

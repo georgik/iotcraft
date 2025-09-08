@@ -74,6 +74,9 @@ pub mod script;
 // UI module available for both desktop and web
 pub mod ui;
 
+// Debug module available for both desktop and web
+pub mod debug;
+
 // Shared materials module available for both desktop and web
 pub mod shared_materials;
 

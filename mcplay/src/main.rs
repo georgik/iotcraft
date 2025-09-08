@@ -1798,7 +1798,10 @@ async fn start_clients(
             ];
             if state.scenario.infrastructure.mqtt_server.required {
                 cmd_parts.push("--mqtt-server".to_string());
-                cmd_parts.push(format!("localhost:{}", state.scenario.infrastructure.mqtt_server.port));
+                cmd_parts.push(format!(
+                    "localhost:{}",
+                    state.scenario.infrastructure.mqtt_server.port
+                ));
             }
             println!("    Command: {}", cmd_parts.join(" "));
             println!("    Working dir: ../desktop-client");
@@ -4963,7 +4966,110 @@ async fn start_clients_with_logging(
             &format!("🏠 Environment: MCP_PORT={}", client.mcp_port),
         );
 
-        // Build client command arguments
+        // First, attempt to build the desktop-client to catch compilation errors
+        log_collector.log_str(
+            LogSource::Client(client.id.clone()),
+            "🔨 Building desktop-client before starting...",
+        );
+
+        let build_cmd = TokioCommand::new("cargo")
+            .current_dir("../desktop-client")
+            .args(&["build", "--bin", "iotcraft-dekstop-client"])
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .map_err(|e| {
+                let error_msg = format!(
+                    "Failed to execute cargo build for client {}: {}",
+                    client.id, e
+                );
+                log_collector.log_str(LogSource::Orchestrator, &format!("❌ {}", error_msg));
+                error_msg
+            })?;
+
+        let build_output = build_cmd.wait_with_output().await.map_err(|e| {
+            let error_msg = format!(
+                "Failed to wait for cargo build for client {}: {}",
+                client.id, e
+            );
+            log_collector.log_str(LogSource::Orchestrator, &format!("❌ {}", error_msg));
+            error_msg
+        })?;
+
+        // Convert build output to strings
+        let build_stdout = String::from_utf8_lossy(&build_output.stdout);
+        let build_stderr = String::from_utf8_lossy(&build_output.stderr);
+
+        // Log build output to client logs
+        if !build_stdout.trim().is_empty() {
+            for line in build_stdout.lines() {
+                log_collector.log_str(
+                    LogSource::Client(client.id.clone()),
+                    &format!("[build] {}", line),
+                );
+            }
+        }
+        if !build_stderr.trim().is_empty() {
+            for line in build_stderr.lines() {
+                log_collector.log_str(
+                    LogSource::Client(client.id.clone()),
+                    &format!("[build-err] {}", line),
+                );
+            }
+        }
+
+        // Check if build succeeded
+        if !build_output.status.success() {
+            let error_msg = format!(
+                "Build failed for client {} with exit code: {}\n\nBuild stderr:\n{}\n\nBuild stdout:\n{}",
+                client.id,
+                build_output.status.code().unwrap_or(-1),
+                build_stderr.trim(),
+                build_stdout.trim()
+            );
+            log_collector.log_str(LogSource::Orchestrator, &format!("❌ {}", error_msg));
+            log_collector.log_str(
+                LogSource::Client(client.id.clone()),
+                "🔴 Build failed - scenario cannot continue",
+            );
+
+            // Ensure logs directory exists and save detailed build logs to a separate file
+            if let Err(mkdir_err) = tokio::fs::create_dir_all("logs").await {
+                log_collector.log_str(
+                    LogSource::Orchestrator,
+                    &format!("⚠️  Failed to create logs directory: {}", mkdir_err),
+                );
+            }
+
+            let build_log_path = format!(
+                "logs/build_failure_{}_{}.log",
+                client.id,
+                chrono::Utc::now().format("%Y%m%d_%H%M%S")
+            );
+            if let Err(write_err) = tokio::fs::write(&build_log_path, &error_msg).await {
+                log_collector.log_str(
+                    LogSource::Orchestrator,
+                    &format!(
+                        "⚠️  Failed to write build log to {}: {}",
+                        build_log_path, write_err
+                    ),
+                );
+            } else {
+                log_collector.log_str(
+                    LogSource::Orchestrator,
+                    &format!("💾 Build failure details saved to: {}", build_log_path),
+                );
+            }
+
+            return Err(error_msg.into());
+        }
+
+        log_collector.log_str(
+            LogSource::Client(client.id.clone()),
+            "✅ Build completed successfully, starting client...",
+        );
+
+        // Build client command arguments (now that we know build succeeds)
         let mut cmd = TokioCommand::new("cargo");
         cmd.current_dir("../desktop-client")
             .arg("run")
@@ -4987,7 +5093,7 @@ async fn start_clients_with_logging(
             ));
         }
 
-        // Start the client
+        // Start the client (build already verified to work)
         let mut client_process = cmd.spawn().map_err(|e| {
             let error_msg = format!("Failed to start client {}: {}", client.id, e);
             log_collector.log_str(LogSource::Orchestrator, &format!("❌ {}", error_msg));
@@ -5734,10 +5840,7 @@ async fn wait_for_port_with_process_monitoring(
                         exit_status, host, port
                     )
                 };
-                log_collector.log_str(
-                    LogSource::Orchestrator,
-                    &format!("    ❌ {}", error_msg),
-                );
+                log_collector.log_str(LogSource::Orchestrator, &format!("    ❌ {}", error_msg));
                 return false;
             }
             Ok(None) => {

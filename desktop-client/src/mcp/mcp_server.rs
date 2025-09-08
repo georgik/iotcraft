@@ -512,8 +512,12 @@ fn execute_mcp_commands(
     }
 
     // Take all queued MCP commands to avoid multiple mutable borrows
-    let mcp_commands: Vec<_> = core_params.pending_executions.mcp_commands.drain(..).collect();
-    
+    let mcp_commands: Vec<_> = core_params
+        .pending_executions
+        .mcp_commands
+        .drain(..)
+        .collect();
+
     // Process all queued MCP commands
     for mcp_command in mcp_commands {
         info!(
@@ -533,10 +537,12 @@ fn execute_mcp_commands(
         );
 
         // Emit the result as CommandExecutedEvent
-        core_params.command_executed_events.write(CommandExecutedEvent {
-            request_id: mcp_command.request_id,
-            result,
-        });
+        core_params
+            .command_executed_events
+            .write(CommandExecutedEvent {
+                request_id: mcp_command.request_id,
+                result,
+            });
     }
 }
 
@@ -667,9 +673,15 @@ fn execute_mcp_command_directly(
     // Multiplayer resources for MCP commands
     online_worlds: Option<&crate::multiplayer::shared_world::OnlineWorlds>,
     multiplayer_mode: Option<&crate::multiplayer::shared_world::MultiplayerMode>,
-    refresh_online_worlds_events: &mut EventWriter<crate::multiplayer::shared_world::RefreshOnlineWorldsEvent>,
-    join_shared_world_events: &mut EventWriter<crate::multiplayer::shared_world::JoinSharedWorldEvent>,
-    leave_shared_world_events: &mut EventWriter<crate::multiplayer::shared_world::LeaveSharedWorldEvent>,
+    refresh_online_worlds_events: &mut EventWriter<
+        crate::multiplayer::shared_world::RefreshOnlineWorldsEvent,
+    >,
+    join_shared_world_events: &mut EventWriter<
+        crate::multiplayer::shared_world::JoinSharedWorldEvent,
+    >,
+    leave_shared_world_events: &mut EventWriter<
+        crate::multiplayer::shared_world::LeaveSharedWorldEvent,
+    >,
     unpublish_world_events: &mut EventWriter<crate::multiplayer::shared_world::UnpublishWorldEvent>,
 ) -> String {
     match tool_name {
@@ -1051,8 +1063,9 @@ fn execute_mcp_command_directly(
         }
         "list_online_worlds" => {
             // Trigger refresh of online worlds first
-            refresh_online_worlds_events.write(crate::multiplayer::shared_world::RefreshOnlineWorldsEvent);
-            
+            refresh_online_worlds_events
+                .write(crate::multiplayer::shared_world::RefreshOnlineWorldsEvent);
+
             // Get current online worlds using the proper resource
             if let Some(worlds) = online_worlds {
                 let mut world_list = Vec::new();
@@ -1070,7 +1083,7 @@ fn execute_mcp_command_directly(
                         "last_updated": world_info.last_updated
                     }));
                 }
-                
+
                 json!({
                     "online_worlds": world_list,
                     "total_count": world_list.len(),
@@ -1090,39 +1103,39 @@ fn execute_mcp_command_directly(
             // Use actual multiplayer mode if available
             if let Some(mode) = multiplayer_mode {
                 match mode {
-                    crate::multiplayer::shared_world::MultiplayerMode::SinglePlayer => {
-                        json!({
-                            "multiplayer_mode": "SinglePlayer",
-                            "world_id": null,
-                            "is_published": false,
-                            "host_player": null,
-                            "player_positions": [],
-                            "timestamp": chrono::Utc::now().to_rfc3339()
-                        })
-                        .to_string()
-                    }
-                    crate::multiplayer::shared_world::MultiplayerMode::HostingWorld { world_id, is_published } => {
-                        json!({
-                            "multiplayer_mode": "HostingWorld",
-                            "world_id": world_id,
-                            "is_published": is_published,
-                            "host_player": null,
-                            "player_positions": [],
-                            "timestamp": chrono::Utc::now().to_rfc3339()
-                        })
-                        .to_string()
-                    }
-                    crate::multiplayer::shared_world::MultiplayerMode::JoinedWorld { world_id, host_player } => {
-                        json!({
-                            "multiplayer_mode": "JoinedWorld",
-                            "world_id": world_id,
-                            "is_published": false,
-                            "host_player": host_player,
-                            "player_positions": [],
-                            "timestamp": chrono::Utc::now().to_rfc3339()
-                        })
-                        .to_string()
-                    }
+                    crate::multiplayer::shared_world::MultiplayerMode::SinglePlayer => json!({
+                        "multiplayer_mode": "SinglePlayer",
+                        "world_id": null,
+                        "is_published": false,
+                        "host_player": null,
+                        "player_positions": [],
+                        "timestamp": chrono::Utc::now().to_rfc3339()
+                    })
+                    .to_string(),
+                    crate::multiplayer::shared_world::MultiplayerMode::HostingWorld {
+                        world_id,
+                        is_published,
+                    } => json!({
+                        "multiplayer_mode": "HostingWorld",
+                        "world_id": world_id,
+                        "is_published": is_published,
+                        "host_player": null,
+                        "player_positions": [],
+                        "timestamp": chrono::Utc::now().to_rfc3339()
+                    })
+                    .to_string(),
+                    crate::multiplayer::shared_world::MultiplayerMode::JoinedWorld {
+                        world_id,
+                        host_player,
+                    } => json!({
+                        "multiplayer_mode": "JoinedWorld",
+                        "world_id": world_id,
+                        "is_published": false,
+                        "host_player": host_player,
+                        "player_positions": [],
+                        "timestamp": chrono::Utc::now().to_rfc3339()
+                    })
+                    .to_string(),
                 }
             } else {
                 // Fallback when multiplayer resources not available
@@ -1466,19 +1479,22 @@ fn execute_mcp_command_directly(
         "load_world" => {
             if let Some(world_name) = arguments.get("world_name").and_then(|v| v.as_str()) {
                 info!("MCP load_world command: world_name={}", world_name);
-                
+
                 // Emit LoadWorldEvent for single-player world loading from filesystem
                 load_world_events.write(LoadWorldEvent {
                     world_name: world_name.to_string(),
                 });
-                
+
                 // Set game state to InGame to transition UI
                 if let Some(next_state) = next_game_state {
                     next_state.set(GameState::InGame);
                     info!("MCP load_world: set game state to InGame");
                 }
-                
-                format!("Loading world '{}' from filesystem and transitioning to InGame state", world_name)
+
+                format!(
+                    "Loading world '{}' from filesystem and transitioning to InGame state",
+                    world_name
+                )
             } else {
                 "Error: load_world requires world_name parameter".to_string()
             }
@@ -1494,19 +1510,28 @@ fn execute_mcp_command_directly(
         // Multiplayer world management
         "unpublish_world" => {
             info!("MCP unpublish_world command");
-            
+
             // Get current world ID from multiplayer mode if available
             if let Some(mode) = multiplayer_mode {
                 match mode {
-                    crate::multiplayer::shared_world::MultiplayerMode::HostingWorld { world_id, .. } => {
+                    crate::multiplayer::shared_world::MultiplayerMode::HostingWorld {
+                        world_id,
+                        ..
+                    } => {
                         // Emit UnpublishWorldEvent with the current world ID
-                        unpublish_world_events.write(crate::multiplayer::shared_world::UnpublishWorldEvent {
-                            world_id: world_id.clone(),
-                        });
-                        format!("World '{}' unpublished and returned to single-player mode", world_id)
+                        unpublish_world_events.write(
+                            crate::multiplayer::shared_world::UnpublishWorldEvent {
+                                world_id: world_id.clone(),
+                            },
+                        );
+                        format!(
+                            "World '{}' unpublished and returned to single-player mode",
+                            world_id
+                        )
                     }
                     crate::multiplayer::shared_world::MultiplayerMode::JoinedWorld { .. } => {
-                        "Error: Cannot unpublish a joined world - use leave_world instead".to_string()
+                        "Error: Cannot unpublish a joined world - use leave_world instead"
+                            .to_string()
                     }
                     crate::multiplayer::shared_world::MultiplayerMode::SinglePlayer => {
                         "Error: No world is currently published".to_string()
@@ -1519,31 +1544,37 @@ fn execute_mcp_command_directly(
         "join_world" => {
             if let Some(world_id) = arguments.get("world_id").and_then(|v| v.as_str()) {
                 info!("MCP join_world command: world_id={}", world_id);
-                
+
                 // Emit JoinSharedWorldEvent to trigger multiplayer world joining
-                join_shared_world_events.write(crate::multiplayer::shared_world::JoinSharedWorldEvent {
-                    world_id: world_id.to_string(),
-                });
-                
-                // Set game state to InGame to transition UI  
+                join_shared_world_events.write(
+                    crate::multiplayer::shared_world::JoinSharedWorldEvent {
+                        world_id: world_id.to_string(),
+                    },
+                );
+
+                // Set game state to InGame to transition UI
                 if let Some(next_state) = next_game_state {
                     // Set flag to indicate this is an MCP-triggered transition
                     mcp_state_transition.is_mcp_transition = true;
                     next_state.set(GameState::InGame);
                     info!("MCP join_world: set game state to InGame with MCP transition flag");
                 }
-                
-                format!("Attempting to join multiplayer world '{}' and transitioning to InGame state", world_id)
+
+                format!(
+                    "Attempting to join multiplayer world '{}' and transitioning to InGame state",
+                    world_id
+                )
             } else {
                 "Error: join_world requires world_id parameter".to_string()
             }
         }
         "leave_world" => {
             info!("MCP leave_world command");
-            
+
             // Emit LeaveSharedWorldEvent to trigger leaving multiplayer
-            leave_shared_world_events.write(crate::multiplayer::shared_world::LeaveSharedWorldEvent);
-            
+            leave_shared_world_events
+                .write(crate::multiplayer::shared_world::LeaveSharedWorldEvent);
+
             "Left shared world and returned to single-player mode".to_string()
         }
         // Utility commands

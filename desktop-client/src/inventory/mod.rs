@@ -1,8 +1,12 @@
 use bevy::prelude::*;
 
+pub mod inventory_commands;
+pub mod inventory_params;
 pub mod inventory_systems;
 pub mod inventory_types;
 
+pub use inventory_commands::*;
+pub use inventory_params::*;
 pub use inventory_systems::*;
 pub use inventory_types::*;
 

@@ -500,14 +500,28 @@ fn game_control_tools() -> Vec<McpTool> {
             }),
         },
         McpTool {
-            name: "load_world".to_string(),
-            description: "Load an existing world by name and set the game state to InGame".to_string(),
+            name: "load_world_from_fs".to_string(),
+            description: "Load an existing world by name from filesystem (single-player/host mode) and set the game state to InGame".to_string(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
                     "world_name": {
                         "type": "string",
-                        "description": "Name of the world to load"
+                        "description": "Name of the world to load from filesystem"
+                    }
+                },
+                "required": ["world_name"]
+            }),
+        },
+        McpTool {
+            name: "load_world_from_mqtt".to_string(),
+            description: "Load a shared world by reconstructing it from MQTT sticky topic data (multiplayer join mode)".to_string(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "world_name": {
+                        "type": "string",
+                        "description": "Name of the world to reconstruct from MQTT shared data"
                     }
                 },
                 "required": ["world_name"]

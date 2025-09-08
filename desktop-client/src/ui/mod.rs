@@ -1,6 +1,8 @@
 pub mod crosshair;
 pub mod error_indicator;
 pub mod inventory_ui;
+pub mod ui_commands;
+pub mod ui_params;
 
 // Use different main menu implementations for desktop vs web
 #[cfg(not(target_arch = "wasm32"))]

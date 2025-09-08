@@ -80,14 +80,14 @@
       success_condition: None,
     ),
     
-    // Alice attempts to load the world (this is the failing step)
+    // Alice attempts to load the world from filesystem (updated to use new command)
     (
       name: "alice_load_world",
-      description: "Alice tries to load the world she just created",
+      description: "Alice tries to load the world she just created from filesystem",
       client: "alice",
       action: (
         type: "mcp_call",
-        tool: "load_world",
+        tool: "load_world_from_fs",
         arguments: {
           "world_name": "test_load_world"
         },
