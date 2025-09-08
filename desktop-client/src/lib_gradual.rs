@@ -27,6 +27,17 @@ use crate::mqtt::web::{PoseMessage, PoseReceiver, PoseSender};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::multiplayer::{PoseMessage, PoseReceiver, PoseSender};
 
+// Imports for inventory and interaction system
+use crate::environment::{BlockType, VoxelWorld};
+use crate::inventory::{BreakBlockEvent, ItemType, PlaceBlockEvent, PlayerInventory};
+
+// WASM-compatible GhostBlockState (simplified version for web)
+#[derive(Resource, Default)]
+struct WebGhostBlockState {
+    pub position: Option<IVec3>,
+    pub can_place: bool,
+}
+
 /// Device types available in the system
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum DeviceType {
@@ -676,6 +687,7 @@ pub fn start() {
         .add_plugins(crate::console::ConsolePlugin) // Add full desktop console (with T key)
         .add_plugins(crate::web_player_controller::WebPlayerControllerPlugin) // Add web player controller with gravity and fly mode
         .add_plugins(crate::inventory::InventoryPlugin) // Add inventory system
+        .add_plugins(crate::ui::InventoryUiPlugin) // Add inventory UI (hotbar)
         // Add error indicator plugin for ErrorResource (used by world systems)
         .add_plugins(crate::ui::error_indicator::ErrorIndicatorPlugin)
         // Note: EnvironmentPlugin disabled for web - comprehensive scene handled by setup_basic_scene_once
@@ -705,6 +717,8 @@ pub fn start() {
         // MCP event needed by execute_pending_commands
         // Prevent duplicate scene setup - only one startup system should handle it
         .insert_resource(SceneSetupGuard(false))
+        // WASM-specific ghost block state for inventory interaction
+        .insert_resource(WebGhostBlockState::default())
         .add_systems(
             Startup,
             (
@@ -727,6 +741,14 @@ pub fn start() {
                 apply_remote_poses,
                 execute_pending_commands_web_wrapper, // Execute script commands to populate VoxelWorld
                 sync_block_visuals_web, // Sync VoxelWorld blocks to visual entities (desktop pattern)
+                populate_initial_inventory_web, // Add some blocks to inventory for testing
+                // Inventory and interaction systems for WASM
+                crate::inventory::handle_inventory_input_bundled
+                    .run_if(in_state(GameState::InGame)),
+                handle_block_interaction_input_web.run_if(in_state(GameState::InGame)),
+                // Ghost block preview and crosshair systems for WASM
+                update_ghost_block_preview_web.run_if(in_state(GameState::InGame)),
+                draw_crosshair_web.run_if(in_state(GameState::InGame)),
                 log_fps,
             ),
         )
@@ -2256,4 +2278,257 @@ pub fn update_touch_ui(
             }
         }
     }
+}
+
+/// Handle block interaction input (placing and breaking blocks) for WASM version
+/// Mimics desktop behavior with raycasting from camera center
+pub fn handle_block_interaction_input_web(
+    mouse_button_input: Res<ButtonInput<MouseButton>>,
+    game_state: Res<State<GameState>>,
+    camera_query: Query<&GlobalTransform, With<Camera3d>>,
+    voxel_world: Res<VoxelWorld>,
+    mut place_block_events: EventWriter<PlaceBlockEvent>,
+    mut break_block_events: EventWriter<BreakBlockEvent>,
+    player_inventory: Res<PlayerInventory>,
+    ghost_block_state: Option<Res<WebGhostBlockState>>,
+) {
+    // Only process input in InGame state
+    if *game_state.get() != GameState::InGame {
+        return;
+    }
+
+    // Get camera transform for raycasting
+    let Ok(camera_transform) = camera_query.single() else {
+        return;
+    };
+
+    // Raycast from camera center (mimicking desktop crosshair behavior)
+    let ray_origin = camera_transform.translation();
+    let ray_direction = camera_transform.forward().as_vec3(); // Camera forward direction
+
+    // Find intersection with voxel world (max distance ~10 blocks)
+    const MAX_DISTANCE: f32 = 10.0;
+    let mut ray_pos = ray_origin;
+    let ray_step = ray_direction.normalize() * 0.1; // Small step size for accuracy
+
+    for _ in 0..(MAX_DISTANCE / 0.1) as i32 {
+        ray_pos += ray_step;
+
+        // Convert world position to voxel coordinates
+        let voxel_position = IVec3::new(
+            ray_pos.x.floor() as i32,
+            ray_pos.y.floor() as i32,
+            ray_pos.z.floor() as i32,
+        );
+
+        // Check if there's a block at this position
+        if voxel_world.is_block_at(voxel_position) {
+            // Found a block - handle interaction
+            let target_position = voxel_position;
+
+            // Left click - break block
+            if mouse_button_input.just_pressed(MouseButton::Left) {
+                break_block_events.write(BreakBlockEvent {
+                    position: target_position,
+                });
+
+                #[cfg(target_arch = "wasm32")]
+                web_sys::console::log_1(
+                    &format!("🔨 Breaking block at {:?}", target_position).into(),
+                );
+            }
+
+            // Right click - place block (use ghost state logic like desktop)
+            if mouse_button_input.just_pressed(MouseButton::Right) {
+                // Get the currently selected item from inventory
+                if let Some(selected_item) = player_inventory.get_selected_item() {
+                    if let ItemType::Block(block_type) = selected_item.item_type {
+                        // Use ghost block state position if available (like desktop)
+                        if let Some(ghost_state) = &ghost_block_state {
+                            if let Some(placement_position) = ghost_state.position {
+                                if ghost_state.can_place {
+                                    place_block_events.write(PlaceBlockEvent {
+                                        position: placement_position,
+                                    });
+
+                                    #[cfg(target_arch = "wasm32")]
+                                    web_sys::console::log_1(
+                                        &format!(
+                                            "🧱 Placing {:?} block at {:?}",
+                                            block_type, placement_position
+                                        )
+                                        .into(),
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            break; // Stop raycasting after finding the first block
+        }
+    }
+}
+
+/// Updates ghost block preview for WASM (adapted from desktop interaction system)
+pub fn update_ghost_block_preview_web(
+    camera_query: Query<(&Camera, &GlobalTransform), With<Camera3d>>,
+    windows: Query<&Window>,
+    voxel_world: Res<VoxelWorld>,
+    mut ghost_state: ResMut<WebGhostBlockState>,
+    game_state: Res<State<GameState>>,
+) {
+    // Only process in InGame state
+    if *game_state.get() != GameState::InGame {
+        ghost_state.position = None;
+        return;
+    }
+
+    let Ok(window) = windows.single() else {
+        ghost_state.position = None;
+        return;
+    };
+
+    let Ok((camera, camera_transform)) = camera_query.single() else {
+        ghost_state.position = None;
+        return;
+    };
+
+    // Use screen center as cursor position (like desktop when cursor is grabbed)
+    let cursor_position = Vec2::new(window.width() / 2.0, window.height() / 2.0);
+
+    // Use the camera component directly for raycasting
+    let Ok(ray) = camera.viewport_to_world(camera_transform, cursor_position) else {
+        ghost_state.position = None;
+        return;
+    };
+
+    // Define interaction distance range - start from a minimum distance to avoid placing too close
+    let min_distance = 2.0; // Minimum distance from camera
+    let max_distance = 8.0; // Maximum reach distance
+    let step_size = 0.1; // Fine-grained raycast steps
+
+    ghost_state.position = None;
+    ghost_state.can_place = false;
+
+    // Perform precise raycast to find which block face is being looked at
+    let mut last_pos = (ray.origin + ray.direction * min_distance).as_ivec3();
+    let mut current_distance = min_distance;
+    while current_distance <= max_distance {
+        let check_position = (ray.origin + ray.direction * current_distance).as_ivec3();
+        if voxel_world.is_block_at(check_position) {
+            // Hit a block. The placement position is the last position that was air.
+            if !voxel_world.is_block_at(last_pos) {
+                ghost_state.position = Some(last_pos);
+                ghost_state.can_place = true;
+            }
+            break;
+        }
+        last_pos = check_position;
+        current_distance += step_size;
+    }
+}
+
+/// Draw crosshair and ghost block wireframe for WASM (adapted from desktop interaction system)
+pub fn draw_crosshair_web(
+    mut gizmos: Gizmos,
+    game_state: Res<State<GameState>>,
+    ghost_state: Res<WebGhostBlockState>,
+    inventory: Res<PlayerInventory>,
+    windows: Query<&Window>,
+) {
+    // Only draw in InGame state
+    if *game_state.get() != GameState::InGame {
+        return;
+    }
+
+    // Get window to determine screen center
+    let Ok(window) = windows.single() else {
+        return;
+    };
+
+    let screen_center = Vec2::new(window.width() / 2.0, window.height() / 2.0);
+    let crosshair_size = 10.0;
+
+    // Draw crosshair at screen center
+    gizmos.line_2d(
+        screen_center + Vec2::new(-crosshair_size, 0.0),
+        screen_center + Vec2::new(crosshair_size, 0.0),
+        Color::WHITE,
+    );
+    gizmos.line_2d(
+        screen_center + Vec2::new(0.0, -crosshair_size),
+        screen_center + Vec2::new(0.0, crosshair_size),
+        Color::WHITE,
+    );
+
+    // Draw ghost block if we have inventory item and valid placement position
+    if let Some(_selected_item) = inventory.get_selected_item() {
+        if let Some(ghost_pos) = ghost_state.position {
+            if ghost_state.can_place {
+                let position = ghost_pos.as_vec3();
+                let color = Color::srgba(0.2, 1.0, 0.2, 0.5); // Semi-transparent green
+
+                // Draw wireframe cube
+                let half_size = 0.5;
+                let corners = [
+                    position + Vec3::new(-half_size, -half_size, -half_size),
+                    position + Vec3::new(half_size, -half_size, -half_size),
+                    position + Vec3::new(half_size, half_size, -half_size),
+                    position + Vec3::new(-half_size, half_size, -half_size),
+                    position + Vec3::new(-half_size, -half_size, half_size),
+                    position + Vec3::new(half_size, -half_size, half_size),
+                    position + Vec3::new(half_size, half_size, half_size),
+                    position + Vec3::new(-half_size, half_size, half_size),
+                ];
+
+                // Bottom face
+                gizmos.line(corners[0], corners[1], color);
+                gizmos.line(corners[1], corners[2], color);
+                gizmos.line(corners[2], corners[3], color);
+                gizmos.line(corners[3], corners[0], color);
+
+                // Top face
+                gizmos.line(corners[4], corners[5], color);
+                gizmos.line(corners[5], corners[6], color);
+                gizmos.line(corners[6], corners[7], color);
+                gizmos.line(corners[7], corners[4], color);
+
+                // Vertical edges
+                gizmos.line(corners[0], corners[4], color);
+                gizmos.line(corners[1], corners[5], color);
+                gizmos.line(corners[2], corners[6], color);
+                gizmos.line(corners[3], corners[7], color);
+            }
+        }
+    }
+}
+
+/// Populate initial inventory items for WASM testing
+pub fn populate_initial_inventory_web(
+    mut inventory: ResMut<PlayerInventory>,
+    mut populated: Local<bool>,
+) {
+    // Only populate once
+    if *populated {
+        return;
+    }
+
+    // Add some basic blocks for testing
+    inventory.add_items(ItemType::Block(BlockType::Grass), 64);
+    inventory.add_items(ItemType::Block(BlockType::Dirt), 64);
+    inventory.add_items(ItemType::Block(BlockType::Stone), 32);
+    inventory.add_items(ItemType::Block(BlockType::QuartzBlock), 16);
+    inventory.add_items(ItemType::Block(BlockType::GlassPane), 16);
+    inventory.add_items(ItemType::Block(BlockType::CyanTerracotta), 8);
+    inventory.add_items(ItemType::Block(BlockType::Water), 8);
+
+    // Select first slot by default
+    inventory.select_slot(0);
+
+    *populated = true;
+
+    #[cfg(target_arch = "wasm32")]
+    web_sys::console::log_1(&"✅ Initial inventory populated with building blocks".into());
 }
