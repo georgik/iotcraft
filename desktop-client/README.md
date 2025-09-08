@@ -19,9 +19,9 @@ For release builds:
 cargo run --release
 ```
 
-### Web Version
+## Web Version (WASM)
 
-We now use a Rust-based build system (ctask) instead of shell scripts for better maintainability and portability.
+The IoTCraft desktop-client compiles to WebAssembly for browser deployment, enabling cross-platform testing with both native desktop and web clients. We use a Rust-based build system (ctask) instead of shell scripts for better maintainability and portability.
 
 #### Build web version
 ```bash
@@ -37,6 +37,24 @@ cargo ctask web-serve --port 8000
 ```bash
 cargo ctask web-dev --port 8000
 ```
+
+#### Cross-Platform Integration with mcplay
+
+The WASM client integrates seamlessly with mcplay orchestration for sophisticated cross-platform testing:
+
+```bash
+# mcplay automatically builds, serves, and launches WASM client in browser
+cd ../mcplay && cargo run scenarios/alice_desktop_bob_wasm_visual.ron
+
+# Extended manual testing with browser client
+cd ../mcplay && cargo run scenarios/alice_desktop_bob_wasm_visual.ron --keep-alive
+```
+
+**Key Features:**
+- **🌐 Automatic Browser Management**: mcplay launches Chrome/Firefox and tracks as managed process
+- **🔄 Real-time Synchronization**: Desktop ↔ Web client multiplayer interactions
+- **📊 Visual Test Interface**: Rich manual testing instructions displayed in mcplay TUI
+- **🎮 Full Feature Parity**: Same game mechanics, MQTT integration, and world building capabilities
 
 #### Available ctask commands:
 - `cargo ctask web-build [--release] [--output dist]` - Build the web version
@@ -128,49 +146,65 @@ cargo run -- --player-id bob
 
 See [MULTI_CLIENT.md](MULTI_CLIENT.md) for detailed documentation and examples.
 
-## Scenario Testing with mcplay
+## Cross-Platform Testing with mcplay
 
-IoTCraft includes `mcplay`, a powerful scenario orchestration tool for testing complex multi-client interactions with an intuitive Text User Interface (TUI).
+IoTCraft includes `mcplay`, a comprehensive multi-client orchestration platform for testing complex interactions between desktop and web clients with an intuitive Text User Interface (TUI). mcplay enables sophisticated cross-platform testing scenarios with automated infrastructure management.
 
 ### Quick Start with mcplay
 
 ```bash
 # Launch TUI to browse and run scenarios interactively
-cargo run --bin mcplay
+cd ../mcplay && cargo run
 
 # Or run a specific scenario directly
-cargo run --bin mcplay scenarios/orchestrator-test.ron
+cd ../mcplay && cargo run scenarios/alice_desktop_bob_wasm_visual.ron
+
+# Run with keep-alive for extended manual testing
+cd ../mcplay && cargo run scenarios/alice_desktop_bob_wasm_visual.ron --keep-alive
 ```
 
-### TUI Features
+### Cross-Platform Orchestration Features
 
-The mcplay TUI provides an interactive experience for managing scenarios:
+The mcplay orchestration platform provides comprehensive multi-client testing capabilities:
 
+#### **🎭 Multi-Client Management**
+- **Desktop + WASM Clients**: Seamlessly orchestrate both native desktop and browser-based WASM clients
+- **Automated Browser Launching**: Automatically opens browsers for WASM clients with proper process tracking
+- **Cross-Platform Synchronization**: Test real-time multiplayer interactions between desktop and web
+- **Client Health Monitoring**: Advanced readiness and liveness probes for all client types
+
+#### **🏗️ Infrastructure Automation**
+- **MQTT Server Management**: Automatic startup and configuration of MQTT broker infrastructure
+- **Web Server Management**: Builds and serves WASM clients with automated port management
+- **Observer Integration**: MQTT message monitoring and logging for debugging
+- **Clean Shutdown**: Proper cleanup of all processes and resources
+
+#### **🎨 TUI Interface Features**
 - **📋 Scenario Browser**: Navigate through all available scenarios with arrow keys
-- **✅ Visual Validation**: See which scenarios are valid with status indicators
+- **✅ Visual Status Indicators**: Real-time process status with Kubernetes-style indicators (⏳🟡🟢🔴🔵🟠)
+- **📊 Multi-Pane Logging**: Separate log views for each service with Tab/Shift+Tab navigation
 - **📖 Scenario Details**: Press `d` to view detailed scenario information
 - **🔍 Quick Validation**: Press `v` to validate scenarios without running them
 - **🔄 Live Refresh**: Press `r` to refresh the scenario list
 - **⚡ One-Click Execution**: Press `Enter` to run scenarios directly
-- **🎯 Smart Filtering**: Only shows valid scenarios for execution
 
 ### Command Line Options
 
 ```bash
 # Interactive TUI (default when no arguments provided)
-cargo run --bin mcplay
+cd ../mcplay && cargo run
 
 # List all available scenarios
-cargo run --bin mcplay -- --list-scenarios
+cd ../mcplay && cargo run -- --list-scenarios
 
 # Validate a scenario file
-cargo run --bin mcplay -- --validate scenarios/my-scenario.ron
+cd ../mcplay && cargo run -- --validate scenarios/alice_desktop_bob_wasm_visual.ron
 
-# Run with verbose output
-cargo run --bin mcplay -- --verbose scenarios/test-scenario.ron
+# Run with verbose output and keep-alive for extended testing
+cd ../mcplay && cargo run -- --verbose --keep-alive scenarios/full_orchestration.ron
 
-# Override MQTT port
-cargo run --bin mcplay -- --mqtt-port 1884 scenarios/test-scenario.ron
+# Override MQTT port for custom configurations
+cd ../mcplay && cargo run -- --mqtt-port 1884 scenarios/test-scenario.ron
 ```
 
 ### Scenario Format Support
@@ -199,15 +233,28 @@ mcplay now uses a unified scenario format that supports both simple mcplay scena
 - **Enhanced Validation**: Comprehensive validation with detailed error messages and warnings
 - **Future-Proof Design**: Extensible architecture for adding new action types and configuration options
 
-### Available Scenarios
+### Featured Cross-Platform Scenarios
 
-mcplay automatically discovers scenarios in the `scenarios/` directory:
-- `orchestrator-test.ron` - Basic orchestrator-only testing
-- `simple_test.json` - Single-client block placement
-- `two_player_world_sharing.json` - Multi-client collaboration
-- And many more...
+mcplay automatically discovers scenarios in the `../mcplay/scenarios/` directory:
 
-See **[docs/SCENARIOS.md](docs/SCENARIOS.md)** for comprehensive scenario documentation and **[CHANGELOG_MCPLAY.md](CHANGELOG_MCPLAY.md)** for recent mcplay enhancements.
+#### **Primary Cross-Platform Scenarios** 🌟
+- `alice_desktop_bob_wasm_visual.ron` - **Primary cross-platform test**: Desktop client + WASM browser client with visual interface
+- `full_orchestration.ron` - Comprehensive 7-step workflow testing all major features
+- `four_player_multiplayer_test.ron` - Advanced multi-client synchronization testing
+
+#### **Development & Testing Scenarios**
+- `alice_medieval_world_test.ron` - MCP world creation with medieval templates
+- `comprehensive_fast_test.ron` - Quick validation of core functionality  
+- `status_indicators_test.ron` - Visual demonstration of mcplay's status system
+- `simple_test.ron` - Basic client startup and indefinite running
+
+#### **Browser & WASM Integration** 🌐
+- **Automated Browser Launching**: Chrome/Firefox integration with process tracking
+- **Visual Testing Instructions**: Rich manual test guidelines displayed in TUI
+- **Cross-Platform Validation**: Desktop ↔ WASM client synchronization testing
+- **Keep-Alive Mode**: `--keep-alive` flag for extended manual playtesting
+
+See **[../mcplay/README.md](../mcplay/README.md)** for detailed mcplay documentation and **[../mcplay/CHANGELOG_MCPLAY.md](../mcplay/CHANGELOG_MCPLAY.md)** for recent orchestration enhancements.
 
 ## Model Context Protocol (MCP) Integration
 
@@ -285,22 +332,32 @@ cargo run --bin mcp_test_client -- interactive
 
 ### Multi-Client MCP Testing
 
-Combine multi-client testing with MCP for advanced scenarios:
+Combine multi-client testing with MCP for advanced scenarios using mcplay orchestration:
 
 ```bash
-# Run multiple clients with MCP enabled
-cargo xtask multi-client --count 2 --full-env -- --mcp
+# Cross-platform MCP testing with desktop + WASM clients
+cd ../mcplay && cargo run scenarios/alice_desktop_bob_wasm_visual.ron --keep-alive
 
-# Test AI coordination across multiple clients
-# Each client can be controlled by different AI agents
+# Run comprehensive MCP validation across multiple clients
+cd ../mcplay && cargo run scenarios/full_orchestration.ron
+
+# Test AI coordination with multiple desktop clients (legacy ctask method)
+cargo ctask multi-client --count 2 --full-env -- --mcp
 ```
+
+#### **mcplay vs ctask for Multi-Client Testing**
+- **🌟 mcplay (Recommended)**: Advanced orchestration with cross-platform support, visual monitoring, and scenario scripting
+- **⚖️ ctask**: Simpler approach for rapid desktop-only testing without advanced orchestration
 
 ### Testing Documentation
 
 - **[docs/MCP_TESTING.md](docs/MCP_TESTING.md)** - MCP-specific testing infrastructure
-- **[MULTI_CLIENT.md](MULTI_CLIENT.md)** - Multi-client testing scenarios
+- **[../mcplay/README.md](../mcplay/README.md)** - Comprehensive mcplay orchestration documentation
+- **[MULTI_CLIENT.md](MULTI_CLIENT.md)** - Multi-client testing scenarios (ctask-based)
+- **[docs/CROSS_PLATFORM_TESTING.md](docs/CROSS_PLATFORM_TESTING.md)** - Cross-platform desktop + WASM testing workflows
 - Built-in test fixtures with comprehensive edge case coverage
 - Automated test reporting and validation
+- Visual browser-based testing with mcplay orchestration
 
 ## Prerequisites
 
@@ -332,20 +389,41 @@ To manually deploy to GitHub Pages:
 
 ## Architecture
 
-- **Desktop Client**: Native Rust application using Bevy
-- **Web Client**: WASM compilation of the same codebase
-- **Build System**: Rust-based `xtask` for web builds (replaces shell scripts)
-- **Shared Code**: Most game logic works on both desktop and web
-- **Platform-specific**: MQTT connectivity differs between native (rumqttc) and web (WebSocket)
+### Core Components
+- **Desktop Client**: Native Rust application using Bevy engine
+- **Web Client (WASM)**: WebAssembly compilation of the same codebase for browsers
+- **Build System**: Rust-based `ctask` for web builds (replaces shell scripts)
+- **Cross-Platform Orchestration**: mcplay manages both desktop and web clients simultaneously
+
+### Code Sharing Strategy
+- **🎯 Maximum Code Reuse**: 95%+ shared code between desktop and web platforms
+- **Shared Systems**: World management, inventory, UI, localization, camera controls
+- **Platform Abstraction**: Clean separation of networking (native MQTT vs WebSocket)
+- **Conditional Compilation**: Strategic use of `#[cfg(target_arch = "wasm32")]` for platform-specific code
+
+### Networking Architecture
+- **Desktop**: Native MQTT via `rumqttc` on port 1883
+- **Web**: WebSocket MQTT bridge on port 8083 (auto-configured)
+- **Protocol Compatibility**: Same message formats ensure cross-platform device communication
+- **Unified API**: Abstract MQTT interface allows identical high-level game logic
 
 ## Features
 
-- 3D voxel world with physics
-- MQTT-based IoT device connectivity
-- Multiplayer support with real-time synchronization
-- **Model Context Protocol (MCP) integration** for AI agent interaction
-- Console system with scripting
-- Internationalization (i18n)
-- Asset management
-- Minimap and UI systems
-- Comprehensive testing infrastructure
+### Core Game Features
+- 🧊 **3D Voxel World**: Physics-based block building and interaction system
+- 📡 **MQTT IoT Integration**: Real-time connectivity with virtual and physical IoT devices
+- 🎮 **Cross-Platform Gaming**: Native desktop and WebAssembly web clients with shared worlds
+- 👥 **Real-time Multiplayer**: Desktop ↔ Web client synchronization with MQTT messaging
+
+### Advanced Integration
+- 🤖 **Model Context Protocol (MCP)**: AI agent interaction for automated world building and device control
+- 🎭 **mcplay Orchestration**: Comprehensive multi-client testing and scenario management
+- 🌐 **Browser Compatibility**: Full-featured WASM client with automatic browser launching
+- 🔄 **Cross-Platform Sync**: Seamless interaction between desktop and web players
+
+### Developer Tools
+- 🖥️ **Console System**: Powerful scripting interface with command history
+- 🌍 **Internationalization (i18n)**: Multi-language support with runtime switching
+- 🗺️ **Asset Management**: Efficient texture, sound, and model loading
+- 📊 **Minimap & UI**: Real-time world overview with device status indicators
+- 🧪 **Testing Infrastructure**: Automated cross-platform testing with visual validation

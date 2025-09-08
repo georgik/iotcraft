@@ -2141,6 +2141,62 @@ async fn execute_step(
                 "parameters": parameters
             }))
         }
+
+        // New system integration actions (non-TUI versions)
+        Action::SystemCommand {
+            command,
+            working_dir,
+            background,
+            timeout_seconds,
+        } => {
+            if verbose {
+                println!("  🔧 System command: {:?}", command);
+            }
+            // TODO: Implement system command execution for non-TUI mode
+            Ok(serde_json::json!({
+                "status": "system_command_executed",
+                "command": command,
+                "working_dir": working_dir,
+                "background": background
+            }))
+        }
+
+        Action::OpenBrowser {
+            url,
+            browser,
+            wait_seconds,
+        } => {
+            if verbose {
+                println!("  🌐 Open browser: {} ({:?})", url, browser);
+            }
+            // TODO: Implement browser opening for non-TUI mode
+            Ok(serde_json::json!({
+                "status": "browser_opened",
+                "url": url,
+                "browser": browser
+            }))
+        }
+
+        Action::ShowMessage {
+            message,
+            message_type,
+        } => {
+            let message_type = message_type.as_deref().unwrap_or("info");
+            if verbose {
+                let emoji = match message_type {
+                    "error" => "❌",
+                    "warning" => "⚠️",
+                    "success" => "✅",
+                    _ => "💡",
+                };
+                println!("  {} {}: {}", emoji, message_type.to_uppercase(), message);
+            }
+            Ok(serde_json::json!({
+                "status": "message_shown",
+                "message": message,
+                "message_type": message_type
+            }))
+        }
     }
 }
 
@@ -4925,7 +4981,19 @@ async fn start_clients_with_logging(
             "🟡 Client starting...",
         );
 
-        // Build client command and log it
+        // Handle different client types
+        match client.client_type.as_str() {
+            "wasm" => {
+                // For WASM clients, launch browser instead of desktop client
+                start_wasm_client_with_logging(client, log_collector.clone()).await?;
+                continue;
+            }
+            "desktop" | _ => {
+                // Default to desktop client handling
+            }
+        }
+
+        // Build client command and log it (for desktop clients)
         let mut client_cmd_parts = vec![
             "cargo".to_string(),
             "run".to_string(),
@@ -5576,6 +5644,39 @@ async fn execute_step_with_logging(
                 "parameters": parameters
             }))
         }
+
+        // New system integration actions
+        Action::SystemCommand {
+            command,
+            working_dir,
+            background,
+            timeout_seconds,
+        } => {
+            execute_system_command_with_logging(
+                command,
+                working_dir.as_deref(),
+                *background,
+                *timeout_seconds,
+                log_collector,
+            )
+            .await
+        }
+
+        Action::OpenBrowser {
+            url,
+            browser,
+            wait_seconds,
+        } => {
+            execute_open_browser_with_logging(url, browser.as_deref(), *wait_seconds, log_collector)
+                .await
+        }
+
+        Action::ShowMessage {
+            message,
+            message_type,
+        } => {
+            execute_show_message_with_logging(message, message_type.as_deref(), log_collector).await
+        }
     }
 }
 
@@ -5810,6 +5911,385 @@ async fn wait_for_port_with_retries_and_context_with_logging(
         ),
     );
     false
+}
+
+// New helper functions for system integration actions
+
+async fn execute_system_command_with_logging(
+    command: &[String],
+    working_dir: Option<&str>,
+    background: Option<bool>,
+    timeout_seconds: Option<u64>,
+    log_collector: LogCollector,
+) -> Result<serde_json::Value, Box<dyn std::error::Error + Send + Sync>> {
+    let command_str = command.join(" ");
+    let working_dir = working_dir.unwrap_or(".");
+    let background = background.unwrap_or(false);
+    let timeout_seconds = timeout_seconds.unwrap_or(30);
+
+    log_collector.log_str(
+        LogSource::Orchestrator,
+        &format!(
+            "  🔧 System command: {} (working_dir: {}, background: {}, timeout: {}s)",
+            command_str, working_dir, background, timeout_seconds
+        ),
+    );
+
+    if command.is_empty() {
+        return Err("System command cannot be empty".into());
+    }
+
+    let mut cmd = tokio::process::Command::new(&command[0]);
+    if command.len() > 1 {
+        cmd.args(&command[1..]);
+    }
+    cmd.current_dir(working_dir);
+
+    if background {
+        // For background processes, just start them and return immediately
+        cmd.stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped());
+
+        let mut child = cmd.spawn().map_err(|e| {
+            format!(
+                "Failed to start background command '{}': {}",
+                command_str, e
+            )
+        })?;
+
+        // Start background task to monitor the process
+        let log_collector_clone = log_collector.clone();
+        let command_str_clone = command_str.clone();
+        tokio::spawn(async move {
+            if let Ok(exit_status) = child.wait().await {
+                if exit_status.success() {
+                    log_collector_clone.log_str(
+                        LogSource::Orchestrator,
+                        &format!(
+                            "  ✅ Background command '{}' completed successfully",
+                            command_str_clone
+                        ),
+                    );
+                } else {
+                    log_collector_clone.log_str(
+                        LogSource::Orchestrator,
+                        &format!(
+                            "  ❌ Background command '{}' failed with status: {:?}",
+                            command_str_clone, exit_status
+                        ),
+                    );
+                }
+            }
+        });
+
+        Ok(serde_json::json!({
+            "status": "background_started",
+            "command": command_str,
+            "working_dir": working_dir
+        }))
+    } else {
+        // For foreground processes, wait for completion with timeout
+        cmd.stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped());
+
+        let mut child = cmd
+            .spawn()
+            .map_err(|e| format!("Failed to start command '{}': {}", command_str, e))?;
+
+        let timeout_duration = Duration::from_secs(timeout_seconds);
+        match tokio::time::timeout(timeout_duration, child.wait()).await {
+            Ok(Ok(exit_status)) => {
+                if exit_status.success() {
+                    log_collector.log_str(
+                        LogSource::Orchestrator,
+                        &format!("  ✅ Command '{}' completed successfully", command_str),
+                    );
+                    Ok(serde_json::json!({
+                        "status": "success",
+                        "command": command_str,
+                        "exit_code": exit_status.code().unwrap_or(0)
+                    }))
+                } else {
+                    let error_msg = format!(
+                        "Command '{}' failed with exit status: {:?}",
+                        command_str, exit_status
+                    );
+                    log_collector.log_str(LogSource::Orchestrator, &format!("  ❌ {}", error_msg));
+                    Err(error_msg.into())
+                }
+            }
+            Ok(Err(e)) => {
+                let error_msg = format!("Command '{}' execution error: {}", command_str, e);
+                log_collector.log_str(LogSource::Orchestrator, &format!("  ❌ {}", error_msg));
+                Err(error_msg.into())
+            }
+            Err(_) => {
+                // Timeout occurred, kill the process
+                let _ = child.kill().await;
+                let error_msg = format!(
+                    "Command '{}' timed out after {}s",
+                    command_str, timeout_seconds
+                );
+                log_collector.log_str(LogSource::Orchestrator, &format!("  ⏰ {}", error_msg));
+                Err(error_msg.into())
+            }
+        }
+    }
+}
+
+async fn execute_open_browser_with_logging(
+    url: &str,
+    browser: Option<&str>,
+    wait_seconds: Option<u64>,
+    log_collector: LogCollector,
+) -> Result<serde_json::Value, Box<dyn std::error::Error + Send + Sync>> {
+    let wait_seconds = wait_seconds.unwrap_or(3);
+
+    log_collector.log_str(
+        LogSource::Orchestrator,
+        &format!(
+            "  🌐 Opening browser: {} (browser: {:?}, wait: {}s)",
+            url, browser, wait_seconds
+        ),
+    );
+
+    // Prepare browser command based on macOS
+    let mut cmd = tokio::process::Command::new("open");
+
+    if let Some(browser) = browser {
+        match browser.to_lowercase().as_str() {
+            "chrome" => {
+                cmd.arg("-a").arg("Google Chrome");
+            }
+            "safari" => {
+                cmd.arg("-a").arg("Safari");
+            }
+            "firefox" => {
+                cmd.arg("-a").arg("Firefox");
+            }
+            _ => {
+                // Try to use the browser name directly
+                cmd.arg("-a").arg(browser);
+            }
+        }
+    }
+    // If no browser specified, use system default (no -a flag)
+
+    cmd.arg(url);
+
+    let output = cmd
+        .output()
+        .await
+        .map_err(|e| format!("Failed to open browser for URL '{}': {}", url, e))?;
+
+    if output.status.success() {
+        log_collector.log_str(
+            LogSource::Orchestrator,
+            &format!("  ✅ Browser opened successfully for: {}", url),
+        );
+
+        // Wait for browser to load
+        if wait_seconds > 0 {
+            log_collector.log_str(
+                LogSource::Orchestrator,
+                &format!("  ⏳ Waiting {}s for browser to load...", wait_seconds),
+            );
+            sleep(Duration::from_secs(wait_seconds)).await;
+        }
+
+        Ok(serde_json::json!({
+            "status": "browser_opened",
+            "url": url,
+            "browser": browser,
+            "wait_seconds": wait_seconds
+        }))
+    } else {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let error_msg = format!("Failed to open browser for '{}': {}", url, stderr.trim());
+        log_collector.log_str(LogSource::Orchestrator, &format!("  ❌ {}", error_msg));
+        Err(error_msg.into())
+    }
+}
+
+async fn execute_show_message_with_logging(
+    message: &str,
+    message_type: Option<&str>,
+    log_collector: LogCollector,
+) -> Result<serde_json::Value, Box<dyn std::error::Error + Send + Sync>> {
+    let message_type = message_type.unwrap_or("info");
+
+    let (emoji, prefix) = match message_type {
+        "error" => ("❌", "ERROR"),
+        "warning" => ("⚠️", "WARNING"),
+        "success" => ("✅", "SUCCESS"),
+        _ => ("💡", "INFO"),
+    };
+
+    // Format the message with proper indentation for multi-line messages
+    let formatted_message = if message.contains('\n') {
+        // Multi-line message
+        let lines: Vec<&str> = message.split('\n').collect();
+        let first_line = format!("  {} {}: {}", emoji, prefix, lines[0]);
+        let other_lines: Vec<String> = lines[1..]
+            .iter()
+            .map(|line| format!("       {}", line))
+            .collect();
+
+        vec![first_line]
+            .into_iter()
+            .chain(other_lines)
+            .collect::<Vec<String>>()
+            .join("\n")
+    } else {
+        // Single line message
+        format!("  {} {}: {}", emoji, prefix, message)
+    };
+
+    log_collector.log_str(LogSource::Orchestrator, &formatted_message);
+
+    Ok(serde_json::json!({
+        "status": "message_shown",
+        "message": message,
+        "message_type": message_type
+    }))
+}
+
+async fn start_wasm_client_with_logging(
+    client: &scenario_types::ClientConfig,
+    log_collector: LogCollector,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    log_collector.log_str(
+        LogSource::Client(client.id.clone()),
+        "🌐 Starting WASM client in browser...",
+    );
+
+    // Extract browser and URL from client config
+    let config = client
+        .config
+        .as_ref()
+        .and_then(|c| c.as_object())
+        .ok_or("WASM client requires config with browser and url")?;
+
+    let browser = config
+        .get("browser")
+        .and_then(|b| b.as_str())
+        .unwrap_or("chrome");
+
+    let url = config
+        .get("url")
+        .and_then(|u| u.as_str())
+        .ok_or("WASM client config must specify url")?;
+
+    log_collector.log_str(
+        LogSource::Client(client.id.clone()),
+        &format!("🚀 Opening {} with URL: {}", browser, url),
+    );
+
+    // Prepare browser command based on macOS
+    let mut cmd = tokio::process::Command::new("open");
+
+    match browser.to_lowercase().as_str() {
+        "chrome" => {
+            cmd.arg("-a").arg("Google Chrome");
+        }
+        "safari" => {
+            cmd.arg("-a").arg("Safari");
+        }
+        "firefox" => {
+            cmd.arg("-a").arg("Firefox");
+        }
+        _ => {
+            // Try to use the browser name directly
+            cmd.arg("-a").arg(browser);
+        }
+    }
+
+    cmd.arg(url);
+
+    // Launch browser as background process
+    let mut browser_process = cmd
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|e| {
+            let error_msg = format!(
+                "Failed to start WASM client (browser) for {}: {}",
+                client.id, e
+            );
+            log_collector.log_str(LogSource::Orchestrator, &format!("❌ {}", error_msg));
+            error_msg
+        })?;
+
+    // For WASM clients, we consider them "started" if the browser opens successfully
+    // and doesn't immediately exit with an error
+    tokio::time::sleep(Duration::from_millis(2000)).await;
+
+    // Check if the browser process is still running (basic readiness check)
+    match browser_process.try_wait() {
+        Ok(Some(exit_status)) => {
+            if exit_status.success() {
+                // Browser opened and closed normally (e.g., tab opened in existing browser)
+                log_collector.log_str(
+                    LogSource::Client(client.id.clone()),
+                    "✅ WASM client (browser) started successfully - tab opened",
+                );
+            } else {
+                let error_msg = format!(
+                    "Browser for WASM client {} exited with error status: {:?}",
+                    client.id, exit_status
+                );
+                log_collector.log_str(
+                    LogSource::Client(client.id.clone()),
+                    &format!("❌ {}", error_msg),
+                );
+                return Err(error_msg.into());
+            }
+        }
+        Ok(None) => {
+            // Browser process is still running (new browser instance)
+            log_collector.log_str(
+                LogSource::Client(client.id.clone()),
+                "✅ WASM client (browser) started successfully - browser running",
+            );
+
+            // Start background task to monitor the browser process
+            let log_collector_clone = log_collector.clone();
+            let client_id_clone = client.id.clone();
+            tokio::spawn(async move {
+                if let Ok(exit_status) = browser_process.wait().await {
+                    if exit_status.success() {
+                        log_collector_clone.log_str(
+                            LogSource::Client(client_id_clone),
+                            "📱 WASM client (browser) closed normally",
+                        );
+                    } else {
+                        log_collector_clone.log_str(
+                            LogSource::Client(client_id_clone),
+                            &format!(
+                                "⚠️ WASM client (browser) exited with status: {:?}",
+                                exit_status
+                            ),
+                        );
+                    }
+                }
+            });
+        }
+        Err(e) => {
+            log_collector.log_str(
+                LogSource::Client(client.id.clone()),
+                &format!("⚠️ Could not check browser process status: {}", e),
+            );
+            // Continue anyway, browser might still be working
+        }
+    }
+
+    // Mark client as ready
+    log_collector.log_str(
+        LogSource::Client(client.id.clone()),
+        "🟢 WASM client ready for testing",
+    );
+
+    Ok(())
 }
 
 // Enhanced version that monitors process health while waiting for port

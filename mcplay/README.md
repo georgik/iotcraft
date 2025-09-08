@@ -1,14 +1,34 @@
-# McPlay - IoTCraft Multi-client Scenario Player
+# mcplay - IoTCraft Multi-Client Orchestration Platform
 
-McPlay is a dedicated testing and orchestration tool for IoTCraft that has been extracted from the main desktop client to improve build efficiency and architectural clarity.
+mcplay is a comprehensive orchestration and testing platform for IoTCraft that enables sophisticated multi-client scenarios including cross-platform desktop + WASM browser testing.
 
 ## Features
 
-- **Scenario-based testing**: Run multi-client IoTCraft scenarios like a screenplay
-- **Interactive TUI**: Terminal user interface for scenario selection and live log monitoring
-- **MCP Integration**: Support for Model Context Protocol communication with clients
-- **Infrastructure orchestration**: Automatic MQTT server and observer management
-- **Real-time monitoring**: Live system information and log aggregation
+### 🎭 **Advanced Orchestration**
+- **Multi-Client Management**: Coordinate desktop and WASM browser clients simultaneously
+- **Infrastructure Automation**: Automatic MQTT server, web server, and browser management
+- **Cross-Platform Testing**: Desktop ↔ WASM browser multiplayer synchronization testing
+- **Health Monitoring**: Comprehensive readiness and liveness probes for all services
+- **Process Lifecycle**: Complete process management with graceful cleanup
+
+### 🎨 **Visual Management**
+- **Real-Time TUI**: Kubernetes-style status indicators with emoji-coded service health
+- **Multi-Pane Logging**: Separate log streams for orchestrator, MQTT, and each client
+- **Interactive MCP Interface**: Send MCP commands directly from TUI
+- **System Monitoring**: Real-time CPU, memory, and process information
+- **Status Tracking**: Visual process states (Starting → Ready → Running → Stopped)
+
+### 🌐 **WASM Client Support** 
+- **Browser Integration**: Automatic Chrome/Safari/Firefox launching
+- **WASM Client Type**: Define Bob as managed WASM client alongside Alice (desktop)
+- **Process Monitoring**: Browser process health monitoring and status updates
+- **Cross-Platform Sync**: Test real-time synchronization between desktop and browser
+
+### 🔧 **System Integration**
+- **System Commands**: Execute shell commands with background/foreground modes
+- **Browser Launching**: Native macOS `open` command integration with browser selection
+- **Rich Messaging**: Multi-line formatted messages with emoji indicators
+- **Keep-Alive Mode**: Extended manual testing sessions with `--keep-alive` flag
 
 ## Architecture Benefits
 
@@ -19,20 +39,54 @@ This project was extracted from the main `desktop-client` as a sibling project t
 3. **Better separation of concerns**: Testing/orchestration tools separate from the core client
 4. **Independent versioning**: McPlay can evolve independently from the desktop client
 
-## Usage
+## Quick Start
 
+### Cross-Platform Testing (Recommended)
 ```bash
-# List available scenarios
-cargo run -- --list-scenarios
-
-# Run a specific scenario
-cargo run -- path/to/scenario.json
-
-# Run with TUI (default)
+# Interactive scenario selector with TUI
 cargo run
 
-# Validate a scenario without running
-cargo run -- --validate path/to/scenario.json
+# Run Alice (desktop) + Bob (WASM browser) cross-platform test
+cargo run scenarios/alice_desktop_bob_wasm_visual.ron
+
+# Extended manual testing (keeps all processes running)
+cargo run scenarios/alice_desktop_bob_wasm_visual.ron --keep-alive
+```
+
+### CLI Options
+```bash
+# List all available scenarios
+cargo run -- --list-scenarios
+
+# Validate scenario file without execution
+cargo run -- --validate <scenario.ron>
+
+# Run with verbose logging
+cargo run -- --verbose <scenario.ron>
+
+# Override MQTT port
+cargo run -- --mqtt-port 1884 <scenario.ron>
+
+# Extended manual testing mode
+cargo run -- --keep-alive <scenario.ron>
+
+# View help
+cargo run -- --help
+```
+
+### Scenario Types
+```bash
+# Cross-platform testing (PRIMARY USE CASE)
+cargo run scenarios/alice_desktop_bob_wasm_visual.ron
+
+# Four-player desktop multiplayer
+cargo run scenarios/four_player_multiplayer_test.ron
+
+# Medieval world creation testing
+cargo run scenarios/alice_medieval_world_test.ron
+
+# MCP integration testing
+cargo run scenarios/test_mcp_ping.ron
 ```
 
 ## Building
@@ -58,16 +112,125 @@ cargo test
 - **crossterm** (optional): Terminal control
 - **chrono** (optional): Time handling for TUI
 
-## Available Scenarios
+## Featured Scenarios
 
-The `scenarios/` directory contains ready-to-use test scenarios:
+### 🌐 **Cross-Platform Testing**
+- **`alice_desktop_bob_wasm_visual.ron`** - 🎆 PRIMARY: Alice (desktop) + Bob (WASM browser) testing
+  - Automated WASM build and web server setup
+  - Browser launching with Chrome integration
+  - Medieval world creation with comprehensive testing guide
+  - Extended manual testing mode with `--keep-alive`
 
-- **simple_test.ron** - Basic MQTT server and desktop client setup for manual testing
-- **environment_setup.ron** - Complete IoTCraft environment with structures and IoT devices
-- **test_create_world.ron** - Tests MCP create_world command and game state transitions
-- **test_set_game_state.ron** - Tests set_game_state MCP tool for UI state transitions
-- **two_player_world_sharing.ron** - Multi-player scenario with world sharing and block placement
+### 🚀 **Multi-Client Scenarios**
+- **`four_player_multiplayer_test.ron`** - Four desktop clients with multiplayer sync testing
+- **`alice_medieval_world_test.ron`** - World template system validation with 4,455 blocks
+- **`two_player_world_sharing.ron`** - Alice creates, Bob joins with block placement sync
+
+### 🤖 **MCP Integration Testing**
+- **`test_mcp_ping.ron`** - Basic MCP connectivity verification
+- **`test_create_world.ron`** - MCP world creation and game state transitions
+- **`test_get_game_state.ron`** - MCP game state retrieval testing
+
+### 🔧 **Infrastructure Testing**
+- **`full_orchestration.ron`** - Complete infrastructure with health monitoring
+- **`status_indicators_test.ron`** - Service status transition demonstration
+- **`simple_test.ron`** - Basic MQTT server and client setup
+
+**Total Available:** 50+ scenarios in `scenarios/` directory
+Use `cargo run -- --list-scenarios` to see all available scenarios.
 
 ## Scenario Format
 
-McPlay supports both JSON and RON scenario formats with comprehensive action types for client coordination and testing. Scenarios define infrastructure requirements, client configurations, and step-by-step test procedures.
+mcplay uses **RON (Rust Object Notation)** format for scenario definitions with comprehensive action types and client configurations.
+
+### Client Types
+```ron
+clients: [
+    // Desktop client
+    (
+        id: "alice",
+        client_type: "desktop",
+        mcp_port: 3001,
+        // ... desktop config
+    ),
+    // WASM browser client  
+    (
+        id: "bob",
+        client_type: "wasm",
+        mcp_port: 0, // No MCP for WASM
+        config: Some({
+            "browser": "chrome",
+            "url": "http://localhost:8000",
+            "readiness_probe": {
+                "type": "process_running",
+                "initial_delay_seconds": 8
+            }
+        })
+    )
+]
+```
+
+### Action Types
+**MCP Commands:**
+```ron
+action: (
+    type: "mcp_call",
+    tool: "create_world",
+    arguments: { "world_name": "TestWorld", "template": "medieval" }
+)
+```
+
+**System Integration:**
+```ron
+// Execute shell commands
+action: (
+    type: "system_command",
+    command: ["cargo", "ctask", "web-build", "--release"],
+    working_dir: "../desktop-client",
+    background: false,
+    timeout_seconds: 300
+)
+
+// Launch browser
+action: (
+    type: "open_browser",
+    url: "http://localhost:8000",
+    browser: "chrome",
+    wait_seconds: 5
+)
+
+// Show formatted messages
+action: (
+    type: "show_message",
+    message: "Multi-line instructions\nwith detailed steps",
+    message_type: "info"
+)
+```
+
+**Timing Control:**
+```ron
+action: (
+    type: "wait_condition",
+    condition: "manual_exit",
+    timeout: 7200000  // 2 hours
+)
+```
+
+### Health Monitoring
+**Readiness Probes:**
+- `tcp_port` - Check if TCP port is accepting connections
+- `process_running` - Verify process started without error
+
+**Liveness Probes:**
+- `mcp_ping` - Send MCP ping requests
+- `process_check` - Monitor process health
+
+### Infrastructure
+```ron
+infrastructure: (
+    mqtt_server: ( required: true, port: 1883 ),
+    mqtt_observer: Some(( required: true, topics: Some(["#"]) ))
+)
+```
+
+**For detailed format specification:** See [WARP.md](WARP.md) for complete RON scenario examples.

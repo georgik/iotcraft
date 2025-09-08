@@ -283,6 +283,26 @@ pub enum Action {
         action_type: String,
         parameters: HashMap<String, serde_json::Value>,
     },
+
+    // New actions for system integration and browser control
+    #[serde(rename = "system_command")]
+    SystemCommand {
+        command: Vec<String>,
+        working_dir: Option<String>,
+        background: Option<bool>,
+        timeout_seconds: Option<u64>,
+    },
+    #[serde(rename = "open_browser")]
+    OpenBrowser {
+        url: String,
+        browser: Option<String>, // "chrome", "safari", "firefox", or system default
+        wait_seconds: Option<u64>,
+    },
+    #[serde(rename = "show_message")]
+    ShowMessage {
+        message: String,
+        message_type: Option<String>, // "info", "warning", "error"
+    },
 }
 
 /// Client action types

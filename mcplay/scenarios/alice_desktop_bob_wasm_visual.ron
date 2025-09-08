@@ -1,0 +1,304 @@
+(
+  name: "Alice Desktop + Bob Visual WASM Cross-Platform Test",
+  description: "Comprehensive cross-platform testing - Alice creates medieval world on desktop, Bob joins via visual WASM client in Chrome browser",
+  version: "1.0",
+  
+  infrastructure: (
+    mqtt_server: (
+      required: true,
+      port: 1883,
+      config_file: None,
+      options: None,
+    ),
+    mqtt_observer: Some((
+      required: true,
+      topics: Some(["#"]),
+      client_id: Some("cross_platform_observer"),
+    )),
+    mcp_server: None,
+    services: None,
+  ),
+  
+  clients: [
+    (
+      id: "alice",
+      player_id: "alice",
+      mcp_port: 3001,
+      client_type: "desktop",
+      name: Some("Alice Desktop Client"),
+      config: Some({
+        "enable_mcp": true,
+        "readiness_probe": {
+          "type": "tcp_port",
+          "port": 3001,
+          "initial_delay_seconds": 5,
+          "timeout_seconds": 10
+        },
+        "liveness_probe": {
+          "type": "mcp_ping",
+          "interval_seconds": 5,
+          "timeout_seconds": 3,
+          "failure_threshold": 2
+        }
+      }),
+    ),
+    (
+      id: "bob",
+      player_id: "bob",
+      mcp_port: 0, // No MCP for WASM client
+      client_type: "wasm",
+      name: Some("Bob WASM Client (Browser)"),
+      config: Some({
+        "enable_mcp": false,
+        "browser": "chrome",
+        "url": "http://localhost:8000",
+        "readiness_probe": {
+          "type": "process_running",
+          "initial_delay_seconds": 8,
+          "timeout_seconds": 15
+        },
+        "liveness_probe": {
+          "type": "process_check",
+          "interval_seconds": 10,
+          "timeout_seconds": 5,
+          "failure_threshold": 3
+        }
+      }),
+    )
+  ],
+  
+  steps: [
+    // Phase 1: Alice creates and prepares the medieval world
+    (
+      name: "alice_create_medieval_world",
+      description: "🏰 Alice creates a beautiful medieval world with castle, village, and countryside",
+      client: "alice",
+      action: (
+        type: "mcp_call",
+        tool: "create_world",
+        arguments: {
+          "world_name": "AliceMedievalWorld",
+          "description": "A magical medieval world with castle, village, and countryside - perfect for cross-platform testing!",
+          "template": "medieval"
+        },
+      ),
+      wait_before: 0,
+      wait_after: 12000, // Medieval template takes time to execute
+      timeout: 30000,
+      depends_on: [],
+    ),
+    
+    (
+      name: "alice_verify_world_creation",
+      description: "🔍 Verify Alice's medieval world was created successfully",
+      client: "alice",
+      action: (
+        type: "mcp_call",
+        tool: "get_world_status",
+        arguments: {},
+      ),
+      wait_before: 0,
+      wait_after: 2000,
+      timeout: 10000,
+      depends_on: ["alice_create_medieval_world"],
+    ),
+    
+    (
+      name: "alice_build_welcome_beacon",
+      description: "🚧 Alice builds a welcome beacon for Bob to find easily",
+      client: "alice",
+      action: (
+        type: "mcp_call",
+        tool: "create_wall",
+        arguments: {
+          "block_type": "quartz_block",
+          "x1": -2,
+          "y1": 5,
+          "z1": 2,
+          "x2": 2,
+          "y2": 8,
+          "z2": 2,
+          "description": "Welcome beacon tower for Bob"
+        },
+      ),
+      wait_before: 1000,
+      wait_after: 2000,
+      timeout: 10000,
+      depends_on: ["alice_verify_world_creation"],
+    ),
+    
+    (
+      name: "alice_publish_world",
+      description: "🌍 Alice publishes the medieval world for Bob to discover and join",
+      client: "alice",
+      action: (
+        type: "mcp_call",
+        tool: "publish_world",
+        arguments: {
+          "world_name": "AliceMedievalWorld",
+          "description": "Medieval castle world ready for Bob! Look for the white beacon tower at (0, 5, 2) 🏰✨"
+        },
+      ),
+      wait_before: 1000,
+      wait_after: 3000,
+      timeout: 10000,
+      depends_on: ["alice_build_welcome_beacon"],
+    ),
+    
+    // Phase 2: Build and prepare WASM client for Bob
+    (
+      name: "build_wasm_client",
+      description: "📦 Building optimized WASM client for Bob (this takes a few minutes)",
+      client: "orchestrator",
+      action: (
+        type: "system_command",
+        command: ["cargo", "ctask", "web-build", "--release"],
+        working_dir: "../desktop-client",
+        background: false,
+        timeout_seconds: 300, // 5 minutes for build
+      ),
+      wait_before: 0,
+      wait_after: 5000,
+      timeout: 360000, // 6 minutes total
+      depends_on: ["alice_publish_world"],
+    ),
+    
+    (
+      name: "start_web_server",
+      description: "🌐 Starting web server to serve Bob's WASM client",
+      client: "orchestrator",
+      action: (
+        type: "system_command",
+        command: ["cargo", "ctask", "web-serve", "--port", "8000"],
+        working_dir: "../desktop-client",
+        background: true,
+        timeout_seconds: 30,
+      ),
+      wait_before: 0,
+      wait_after: 5000, // Wait for server to be ready
+      timeout: 30000,
+      depends_on: ["build_wasm_client"],
+    ),
+    
+    (
+      name: "verify_web_server",
+      description: "✅ Verifying web server is ready to serve WASM client",
+      client: "orchestrator",
+      action: (
+        type: "system_command",
+        command: ["curl", "-f", "-s", "http://localhost:8000"],
+        working_dir: ".",
+        background: false,
+        timeout_seconds: 10,
+      ),
+      wait_before: 0,
+      wait_after: 2000,
+      timeout: 15000,
+      depends_on: ["start_web_server"],
+    ),
+    
+    // Phase 3: Bob is now started automatically as a WASM client
+    // No additional step needed since Bob is defined in clients list
+    
+    // Phase 4: Manual testing instructions and coordination
+    (
+      name: "show_cross_platform_instructions",
+      description: "📋 Instructions for manual cross-platform testing",
+      client: "orchestrator",
+      action: (
+        type: "show_message",
+        message: "🎮 CROSS-PLATFORM TESTING ACTIVE!
+
+✅ STATUS:
+   • Alice (Desktop): Running with medieval world published
+   • Bob (WASM): Chrome browser opened at http://localhost:8000
+   • MQTT Infrastructure: Active on port 1883 
+   • Web Server: Serving WASM client on port 8000
+
+🎯 TESTING CHECKLIST:
+
+1. BOB'S CLIENT SETUP:
+   ✅ Chrome browser should now show IoTCraft WASM client
+   📱 Bob should join Alice's world 'AliceMedievalWorld'
+   🏰 Look for Alice's medieval castle and white beacon tower
+
+2. CROSS-PLATFORM VERIFICATION:
+   🔄 Test multiplayer block synchronization (Bob places blocks, Alice sees them)
+   🔄 Test device interactions across platforms
+   🔄 Test world state consistency between desktop and WASM
+   🔄 Test MQTT communication (both clients should see device updates)
+
+3. VISUAL TESTING:
+   🎨 Verify Bob sees Alice's medieval template structures
+   🎨 Check rendering consistency between desktop and browser
+   🎨 Test camera controls and movement in browser
+
+🔧 ALICE'S CONTROLS (Desktop):
+   • ESC: Pause menu
+   • T: Console (place blocks, spawn devices)
+   • WASD: Move around
+   • Mouse: Look around
+
+🌐 BOB'S CONTROLS (WASM/Browser):
+   • Same controls as Alice but in browser
+   • Click on world to gain mouse capture for camera
+
+📍 KEY COORDINATES:
+   • Castle: Around (0, 0, -12)
+   • Welcome Beacon: (0, 5, 2) - White quartz tower
+   • Village Houses: Various locations around castle
+
+💡 TESTING TIPS:
+   • Both players should see the same world state
+   • Block changes should sync in real-time
+   • Try spawning IoT devices and controlling them
+   • Test switching between desktop and WASM clients
+
+⏸️  Press Ctrl+C when testing is complete to cleanup all processes",
+        message_type: "info",
+      ),
+      wait_before: 0,
+      wait_after: 0,
+      timeout: 10000,
+      depends_on: ["verify_web_server"],
+    ),
+    
+    // Phase 5: Keep-alive for extended manual testing
+    (
+      name: "manual_cross_platform_testing",
+      description: "🎮 Extended manual cross-platform testing session - Test Alice (desktop) and Bob (WASM) interaction",
+      client: "orchestrator", 
+      action: (
+        type: "wait_condition",
+        condition: "manual_exit",
+        expected_value: None,
+        timeout: 7200000, // 2 hours max
+      ),
+      wait_before: 0,
+      wait_after: 0,
+      timeout: 7200000,
+      depends_on: ["show_cross_platform_instructions"],
+    ),
+  ],
+  
+  config: Some((
+    timeout_ms: Some(7200000), // 2 hours for extended testing
+    logging: Some((
+      level: Some("info"),
+      log_mqtt: Some(true),
+      log_client_actions: Some(true),
+      filters: None,
+    )),
+    environment: Some({
+      "RUST_LOG": "info",
+      "MQTT_HOST": "localhost",
+      "MQTT_PORT": "1883"
+    }),
+    settings: Some({
+      "keep_alive": true,
+      "manual_testing": true,
+      "cross_platform": true,
+      "browser_testing": true
+    }),
+  )),
+)
