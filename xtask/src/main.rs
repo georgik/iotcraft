@@ -238,12 +238,24 @@ fn build_web(release: bool) -> Result<()> {
         return Err(anyhow::anyhow!("wasm-pack build failed"));
     }
 
+    // Copy assets if they exist
+    let assets_dir = desktop_client_dir.join("assets");
+    if assets_dir.exists() {
+        println!("🎨 Copying assets...");
+        copy_assets_directory(&desktop_client_dir)?;
+    } else {
+        println!("   ⚠️  No assets directory found, skipping asset copy");
+    }
+
     // Copy scripts directory for template support
     println!("📂 Copying scripts directory for template support...");
     copy_scripts_directory(&desktop_client_dir)?;
 
     println!("✅ Web build completed successfully!");
     println!("   Output directory: desktop-client/web/");
+    if assets_dir.exists() {
+        println!("   Assets available at: desktop-client/web/assets/");
+    }
     println!("   Scripts available at: desktop-client/web/scripts/");
     println!("   You can now serve the web version with: cargo xtask web-serve");
 
@@ -269,6 +281,28 @@ fn copy_scripts_directory(desktop_client_dir: &Path) -> Result<()> {
     copy_dir_all(&scripts_src, &scripts_dst).context("Failed to copy scripts directory")?;
 
     println!("   ✅ Scripts directory copied successfully");
+    Ok(())
+}
+
+/// Copy assets directory to web output for graphical assets
+fn copy_assets_directory(desktop_client_dir: &Path) -> Result<()> {
+    let assets_src = desktop_client_dir.join("assets");
+    let assets_dst = desktop_client_dir.join("web").join("assets");
+
+    if !assets_src.exists() {
+        println!("   ⚠️  Assets directory not found, skipping...");
+        return Ok(());
+    }
+
+    // Remove existing assets directory
+    if assets_dst.exists() {
+        fs::remove_dir_all(&assets_dst).context("Failed to remove existing assets directory")?;
+    }
+
+    // Copy the entire assets directory
+    copy_dir_all(&assets_src, &assets_dst).context("Failed to copy assets directory")?;
+
+    println!("   ✅ Assets directory copied successfully");
     Ok(())
 }
 
