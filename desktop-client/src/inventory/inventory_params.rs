@@ -11,7 +11,13 @@ use crate::console::ConsoleManager;
 use crate::environment::{VoxelBlock, VoxelWorld};
 use crate::inventory::{BreakBlockEvent, GiveItemEvent, PlaceBlockEvent, PlayerInventory};
 use crate::profile::PlayerProfile;
+// Desktop-specific imports
+#[cfg(not(target_arch = "wasm32"))]
 use crate::ui::main_menu::GameState;
+
+// WASM-specific imports
+#[cfg(target_arch = "wasm32")]
+use crate::ui::GameState;
 
 /// Parameter bundle for core inventory operations
 #[derive(SystemParam)]

@@ -1,9 +1,16 @@
 use crate::{
     fonts::Fonts,
     localization::{LanguageChangeEvent, LocalizationBundle, LocalizationConfig},
-    ui::main_menu::GameState,
     world::{CreateWorldEvent, DeleteWorldEvent, DiscoveredWorlds, LoadWorldEvent, SaveWorldEvent},
 };
+
+// Desktop-specific imports
+#[cfg(not(target_arch = "wasm32"))]
+use crate::ui::main_menu::GameState;
+
+// WASM-specific imports
+#[cfg(target_arch = "wasm32")]
+use crate::ui::GameState;
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 
@@ -42,8 +49,9 @@ pub struct WorldUIParams<'w, 's> {
     _phantom: std::marker::PhantomData<&'s ()>,
 }
 
-/// Bundle for multiplayer UI operations (desktop only, optional for WASM)
+/// Bundle for multiplayer UI operations (desktop only)
 /// Handles online world discovery and multiplayer events
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(SystemParam)]
 pub struct MultiplayerUIParams<'w, 's> {
     pub online_worlds: Option<Res<'w, crate::multiplayer::shared_world::OnlineWorlds>>,
@@ -52,6 +60,14 @@ pub struct MultiplayerUIParams<'w, 's> {
     pub publish_events: EventWriter<'w, crate::multiplayer::shared_world::PublishWorldEvent>,
     // PhantomData to use the 's lifetime
     _phantom: std::marker::PhantomData<&'s ()>,
+}
+
+/// WASM-compatible stub for multiplayer UI operations
+#[cfg(target_arch = "wasm32")]
+#[derive(SystemParam)]
+pub struct MultiplayerUIParams<'w, 's> {
+    // Stub implementation for WASM - no desktop multiplayer features
+    _phantom: std::marker::PhantomData<(&'w (), &'s ())>,
 }
 
 /// Bundle for cursor and window management
@@ -74,6 +90,7 @@ pub struct GameStateUIParams<'w, 's> {
     pub next_state: ResMut<'w, NextState<GameState>>,
     pub keyboard_input: Res<'w, ButtonInput<KeyCode>>,
     pub exit_events: EventWriter<'w, bevy::app::AppExit>,
+    #[cfg(not(target_arch = "wasm32"))]
     pub mcp_state_transition: Option<ResMut<'w, crate::mcp::mcp_server::McpStateTransition>>,
     // PhantomData to use the 's lifetime
     _phantom: std::marker::PhantomData<&'s ()>,
@@ -92,6 +109,7 @@ pub struct InteractionUIParams<'w, 's> {
     >,
 
     // Specific button queries - organized by functionality
+    #[cfg(not(target_arch = "wasm32"))]
     pub main_menu_buttons: Query<
         'w,
         's,
@@ -105,12 +123,22 @@ pub struct InteractionUIParams<'w, 's> {
         (Changed<Interaction>, With<Button>),
     >,
 
+    // WASM-compatible button query without desktop-specific components
+    #[cfg(target_arch = "wasm32")]
+    pub main_menu_buttons: Query<
+        'w,
+        's,
+        (&'static Interaction, &'static mut BackgroundColor),
+        (Changed<Interaction>, With<Button>),
+    >,
+
     // PhantomData to use the 's lifetime
     _phantom: std::marker::PhantomData<&'s ()>,
 }
 
-/// Bundle for entity management in UI systems
+/// Bundle for entity management in UI systems (desktop)
 /// Handles spawning and despawning of UI entities
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(SystemParam)]
 pub struct EntityUIParams<'w, 's> {
     // Queries for different UI component types
@@ -121,6 +149,14 @@ pub struct EntityUIParams<'w, 's> {
     pub gameplay_entities: Query<'w, 's, Entity, With<crate::ui::main_menu::GameplayMenu>>,
     // PhantomData to use the 's lifetime
     _phantom: std::marker::PhantomData<&'s ()>,
+}
+
+/// WASM-compatible stub for entity management in UI systems
+#[cfg(target_arch = "wasm32")]
+#[derive(SystemParam)]
+pub struct EntityUIParams<'w, 's> {
+    // Stub implementation for WASM - uses web main menu components
+    _phantom: std::marker::PhantomData<(&'w (), &'s ())>,
 }
 
 #[cfg(test)]

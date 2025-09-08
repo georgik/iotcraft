@@ -8,16 +8,27 @@ use bevy::prelude::*;
 use crate::console::ConsoleManager;
 
 use crate::camera_controllers::CameraController;
-use crate::devices::DeviceEntity;
 use crate::environment::VoxelWorld;
 use crate::fonts::Fonts;
 use crate::inventory::PlayerInventory;
-use crate::mqtt::TemperatureResource;
-use crate::multiplayer::{
-    MultiplayerConnectionStatus, MultiplayerMode, RemotePlayer, WorldDiscovery,
-};
-use crate::player_avatar::PlayerAvatar;
 use crate::profile::PlayerProfile;
+
+// Desktop-specific imports
+#[cfg(not(target_arch = "wasm32"))]
+use crate::{
+    devices::DeviceEntity,
+    mqtt::TemperatureResource,
+    multiplayer::{MultiplayerConnectionStatus, MultiplayerMode, RemotePlayer, WorldDiscovery},
+    player_avatar::PlayerAvatar,
+};
+
+// WASM-specific imports
+#[cfg(target_arch = "wasm32")]
+use crate::{
+    config::MqttConfig as TemperatureResource, // Stub for temperature resource
+    multiplayer_web::{MultiplayerMode, RemotePlayer},
+    player_avatar::PlayerAvatar,
+};
 
 /// Parameter bundle for core debug UI setup
 #[derive(SystemParam)]
@@ -43,6 +54,7 @@ pub struct DebugToggleParams<'w, 's> {
 pub struct GameStateDebugParams<'w, 's> {
     pub voxel_world: Res<'w, VoxelWorld>,
     pub inventory: Res<'w, PlayerInventory>,
+    #[cfg(not(target_arch = "wasm32"))]
     pub device_query: Query<'w, 's, &'static DeviceEntity>,
     pub time: Res<'w, Time>,
     // PhantomData to use the 's lifetime
@@ -60,7 +72,8 @@ pub struct PlayerDebugParams<'w, 's> {
     _phantom: std::marker::PhantomData<&'s ()>,
 }
 
-/// Parameter bundle for multiplayer and network information
+/// Parameter bundle for multiplayer and network information (desktop only)
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(SystemParam)]
 pub struct MultiplayerDebugParams<'w, 's> {
     pub temperature: Res<'w, TemperatureResource>,
@@ -69,6 +82,14 @@ pub struct MultiplayerDebugParams<'w, 's> {
     pub world_discovery: Res<'w, WorldDiscovery>,
     // PhantomData to use the 's lifetime
     _phantom: std::marker::PhantomData<&'s ()>,
+}
+
+/// WASM-compatible stub for multiplayer debug information
+#[cfg(target_arch = "wasm32")]
+#[derive(SystemParam)]
+pub struct MultiplayerDebugParams<'w, 's> {
+    // Stub implementation for WASM
+    _phantom: std::marker::PhantomData<(&'w (), &'s ())>,
 }
 
 /// Parameter bundle for diagnostic text display updates

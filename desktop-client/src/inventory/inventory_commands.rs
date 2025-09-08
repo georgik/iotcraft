@@ -23,9 +23,13 @@ pub fn handle_inventory_input_bundled(mut params: ConsoleAwareInventoryInputPara
         .map(|manager| manager.console.is_visible())
         .unwrap_or(false);
 
-    if console_open
-        || *params.base_params.game_state.get() != crate::ui::main_menu::GameState::InGame
-    {
+    #[cfg(not(target_arch = "wasm32"))]
+    let in_game_state =
+        *params.base_params.game_state.get() == crate::ui::main_menu::GameState::InGame;
+    #[cfg(target_arch = "wasm32")]
+    let in_game_state = *params.base_params.game_state.get() == crate::ui::GameState::InGame;
+
+    if console_open || !in_game_state {
         return;
     }
 
@@ -36,7 +40,12 @@ pub fn handle_inventory_input_bundled(mut params: ConsoleAwareInventoryInputPara
 #[cfg(not(feature = "console"))]
 pub fn handle_inventory_input_bundled(mut params: InventoryInputParams) {
     // Don't handle input when in any menu state (console not available to check)
-    if *params.game_state.get() != crate::ui::main_menu::GameState::InGame {
+    #[cfg(not(target_arch = "wasm32"))]
+    let in_game_state = *params.game_state.get() == crate::ui::main_menu::GameState::InGame;
+    #[cfg(target_arch = "wasm32")]
+    let in_game_state = *params.game_state.get() == crate::ui::GameState::InGame;
+
+    if !in_game_state {
         return;
     }
 

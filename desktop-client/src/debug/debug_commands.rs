@@ -82,7 +82,10 @@ pub fn update_diagnostics_content_bundled(mut params: ComprehensiveDebugParams) 
             let pitch_degrees = camera_controller.pitch.to_degrees();
 
             // Calculate additional useful information
+            #[cfg(not(target_arch = "wasm32"))]
             let device_count = params.game_state.device_query.iter().count();
+            #[cfg(target_arch = "wasm32")]
+            let device_count = 0;
             let block_count = params.game_state.voxel_world.blocks.len();
             let selected_slot = params.game_state.inventory.selected_slot + 1; // 1-indexed for display
 
@@ -143,13 +146,18 @@ pub fn update_diagnostics_content_bundled(mut params: ComprehensiveDebugParams) 
             };
 
             // Get MQTT broker connection status using temperature resource as indicator
+            #[cfg(not(target_arch = "wasm32"))]
             let mqtt_connection_status = if (*params.multiplayer.temperature).value.is_some() {
                 "✅ Connected (MQTT broker available)"
             } else {
                 "🔄 Connecting to MQTT broker..."
             };
 
+            #[cfg(target_arch = "wasm32")]
+            let mqtt_connection_status = "🌐 Web MQTT (WebSocket)";
+
             // Get multiplayer mode information and world ID
+            #[cfg(not(target_arch = "wasm32"))]
             let (multiplayer_mode_text, current_world_id) =
                 match &*params.multiplayer.multiplayer_mode {
                     crate::multiplayer::MultiplayerMode::SinglePlayer => {
@@ -172,12 +180,20 @@ pub fn update_diagnostics_content_bundled(mut params: ComprehensiveDebugParams) 
                     } => ("👥 Joined World".to_string(), world_id.clone()),
                 };
 
+            #[cfg(target_arch = "wasm32")]
+            let (multiplayer_mode_text, current_world_id) =
+                ("🌐 WASM Mode".to_string(), "Web".to_string());
+
+            #[cfg(not(target_arch = "wasm32"))]
             let multiplayer_enabled = if params.multiplayer.multiplayer_status.connection_available
             {
                 "✅ Enabled"
             } else {
                 "❌ Disabled"
             };
+
+            #[cfg(target_arch = "wasm32")]
+            let multiplayer_enabled = "🌐 Web Mode";
 
             // Get MQTT subscription information from WorldDiscovery resource
             let subscribed_topics = vec![
@@ -190,12 +206,16 @@ pub fn update_diagnostics_content_bundled(mut params: ComprehensiveDebugParams) 
             ];
 
             // Get last messages from WorldDiscovery resource
+            #[cfg(not(target_arch = "wasm32"))]
             let last_messages =
                 if let Ok(messages) = params.multiplayer.world_discovery.last_messages.try_lock() {
                     messages.clone()
                 } else {
                     HashMap::new()
                 };
+
+            #[cfg(target_arch = "wasm32")]
+            let last_messages: std::collections::HashMap<String, String> = HashMap::new();
 
             let topics_text = subscribed_topics
                 .iter()
@@ -219,7 +239,7 @@ pub fn update_diagnostics_content_bundled(mut params: ComprehensiveDebugParams) 
                     });
 
                     if let Some((_, last_msg)) = matching_message {
-                        format!("  • {}: {}", topic, last_msg.content)
+                        format!("  • {}: {}", topic, last_msg)
                     } else {
                         format!("  • {}: (no messages)", topic)
                     }

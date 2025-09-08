@@ -1,8 +1,12 @@
-use crate::{
-    localization::get_localized_text,
-    ui::main_menu::{GameState, MainMenu, WorldSelectionMenu},
-    ui::ui_params::*,
-};
+use crate::{localization::get_localized_text, ui::ui_params::*};
+
+// Desktop-specific imports
+#[cfg(not(target_arch = "wasm32"))]
+use crate::ui::main_menu::{GameState, MainMenu, WorldSelectionMenu};
+
+// WASM-specific imports
+#[cfg(target_arch = "wasm32")]
+use crate::ui::{GameState, MainMenu, WorldSelectionMenu};
 use bevy::prelude::*;
 use log::info;
 
@@ -49,7 +53,10 @@ pub fn setup_main_menu_bundled(
                                 ..default()
                             },
                             BackgroundColor(Color::srgb(0.15, 0.15, 0.15)),
+                            #[cfg(not(target_arch = "wasm32"))]
                             crate::ui::main_menu::EnterWorldButton,
+                            #[cfg(target_arch = "wasm32")]
+                            crate::ui::EnterWorldButton,
                         ))
                         .with_children(|parent| {
                             let font_handle = core_params
@@ -93,7 +100,10 @@ pub fn setup_main_menu_bundled(
                                 ..default()
                             },
                             BackgroundColor(Color::srgb(0.15, 0.15, 0.15)),
+                            #[cfg(not(target_arch = "wasm32"))]
                             crate::ui::main_menu::SettingsButton,
+                            #[cfg(target_arch = "wasm32")]
+                            crate::ui::SettingsButton,
                         ))
                         .with_children(|parent| {
                             let font_handle = core_params
@@ -137,7 +147,10 @@ pub fn setup_main_menu_bundled(
                                 ..default()
                             },
                             BackgroundColor(Color::srgb(0.2, 0.1, 0.1)),
+                            #[cfg(not(target_arch = "wasm32"))]
                             crate::ui::main_menu::QuitButton,
+                            #[cfg(target_arch = "wasm32")]
+                            crate::ui::QuitButton,
                         ))
                         .with_children(|parent| {
                             let font_handle = core_params
@@ -187,11 +200,15 @@ pub fn setup_world_selection_menu_bundled(
         .map(|w| w.worlds.len())
         .unwrap_or(0);
 
+    #[cfg(not(target_arch = "wasm32"))]
     let online_worlds_count = multiplayer_params
         .online_worlds
         .as_ref()
         .map(|w| w.worlds.len())
         .unwrap_or(0);
+
+    #[cfg(target_arch = "wasm32")]
+    let online_worlds_count = 0;
 
     info!(
         "Setting up world selection menu with {} local worlds and {} online worlds",
@@ -200,9 +217,16 @@ pub fn setup_world_selection_menu_bundled(
 
     // Refresh online worlds when entering the selection menu
     info!("Sending RefreshOnlineWorldsEvent to update world list");
+    #[cfg(not(target_arch = "wasm32"))]
     multiplayer_params
         .refresh_events
         .write(crate::multiplayer::shared_world::RefreshOnlineWorldsEvent);
+
+    #[cfg(target_arch = "wasm32")]
+    {
+        // WASM stub - no multiplayer refresh
+        let _ = &mut multiplayer_params;
+    }
 
     core_params
         .commands
@@ -260,7 +284,10 @@ pub fn setup_world_selection_menu_bundled(
                         ..default()
                     },
                     BackgroundColor(Color::srgb(0.2, 0.5, 0.2)),
+                    #[cfg(not(target_arch = "wasm32"))]
                     crate::ui::main_menu::CreateWorldButton,
+                    #[cfg(target_arch = "wasm32")]
+                    crate::ui::CreateWorldButton,
                 ))
                 .with_children(|parent| {
                     let font_handle = core_params
@@ -321,6 +348,7 @@ pub fn handle_main_menu_interaction_bundled(
     mut interaction_params: InteractionUIParams,
     mut game_state_params: GameStateUIParams,
 ) {
+    #[cfg(not(target_arch = "wasm32"))]
     for (interaction, mut color, enter_world, settings, quit) in
         interaction_params.main_menu_buttons.iter_mut()
     {
@@ -332,18 +360,22 @@ pub fn handle_main_menu_interaction_bundled(
                 } else if settings.is_some() {
                     game_state_params.next_state.set(GameState::Settings);
                 } else if quit.is_some() {
-                    // Platform-specific quit handling
-                    #[cfg(target_arch = "wasm32")]
-                    {
-                        if let Some(window) = web_sys::window() {
-                            let _ = window.location().reload();
-                        }
-                    }
-                    #[cfg(not(target_arch = "wasm32"))]
                     game_state_params
                         .exit_events
                         .write(bevy::app::AppExit::Success);
                 }
+            }
+            Interaction::Hovered => *color = Color::srgb(0.25, 0.25, 0.25).into(),
+            Interaction::None => *color = Color::srgb(0.15, 0.15, 0.15).into(),
+        }
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    for (interaction, mut color) in interaction_params.main_menu_buttons.iter_mut() {
+        match *interaction {
+            Interaction::Pressed => {
+                *color = Color::srgb(0.35, 0.75, 0.35).into();
+                // WASM stub - simplified button logic
             }
             Interaction::Hovered => *color = Color::srgb(0.25, 0.25, 0.25).into(),
             Interaction::None => *color = Color::srgb(0.15, 0.15, 0.15).into(),
@@ -357,6 +389,7 @@ pub fn grab_cursor_on_game_start_bundled(
     game_state_params: GameStateUIParams,
 ) {
     // Check if this transition was triggered by MCP (only if MCP is enabled)
+    #[cfg(not(target_arch = "wasm32"))]
     if let Some(mut mcp_transition) = game_state_params.mcp_state_transition {
         if mcp_transition.is_mcp_transition {
             info!("Skipping cursor grab - this is an MCP-triggered state transition");
@@ -412,7 +445,7 @@ pub fn handle_escape_key_bundled(game_state_params: GameStateUIParams) {
             GameState::GameplayMenu => next_state.set(GameState::InGame),
             GameState::Settings => next_state.set(GameState::MainMenu),
             GameState::WorldSelection => next_state.set(GameState::MainMenu),
-            GameState::WorldCreation => next_state.set(GameState::WorldSelection),
+            // GameState::WorldCreation doesn't exist in WASM version
             _ => {}
         }
     }
@@ -420,8 +453,14 @@ pub fn handle_escape_key_bundled(game_state_params: GameStateUIParams) {
 
 /// Despawn UI entities using parameter bundles
 pub fn despawn_main_menu_bundled(mut core_params: CoreUIParams, entity_params: EntityUIParams) {
+    #[cfg(not(target_arch = "wasm32"))]
     for entity in entity_params.main_menu_entities.iter() {
         core_params.commands.entity(entity).despawn();
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _ = (core_params, entity_params);
     }
 }
 
@@ -430,8 +469,14 @@ pub fn despawn_world_selection_menu_bundled(
     mut core_params: CoreUIParams,
     entity_params: EntityUIParams,
 ) {
+    #[cfg(not(target_arch = "wasm32"))]
     for entity in entity_params.world_selection_entities.iter() {
         core_params.commands.entity(entity).despawn();
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _ = (core_params, entity_params);
     }
 }
 

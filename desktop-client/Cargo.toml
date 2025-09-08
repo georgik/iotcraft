@@ -11,12 +11,7 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 # Core dependencies that work on both desktop and web
 # Using Bevy 0.17-dev from git for latest features
-bevy = { git = "https://github.com/bevyengine/bevy.git", rev = "335e39f", features = ["webp"] }
-
-
-# Optional debug console implementations
-# Legacy bevy_console (desktop only) - enable with --features console-bevy
-bevy_console = { version = "0.14.1", default-features = false, optional = true }
+bevy = { git = "https://github.com/bevyengine/bevy.git", rev = "8e441c3", features = ["webp"] }
 
 tracing = "0.1"
 log = "0.4"
@@ -101,8 +96,6 @@ chrono = "0.4"
 # Workspace for xtask
 [features]
 default = ["console"]
-# Console implementations (choose one)
-console-bevy = ["dep:bevy_console"]  # Legacy desktop-only console
 # Convenience feature aliases
 console = []                          # Default to Simple console (no extra deps)
 # World features
