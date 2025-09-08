@@ -682,6 +682,8 @@ pub fn start() {
         .add_plugins(crate::multiplayer_web::WebMultiplayerPlugin) // Add web multiplayer for block sync
         // Add world plugin for world management (DiscoveredWorlds resource)
         .add_plugins(crate::world::WorldPlugin)
+        // Add minimap plugin (same as desktop)
+        .add_plugins(crate::minimap::MinimapPlugin)
         // Note: OnlineWorlds resource initialized by MainMenuPlugin for WASM compatibility
         // Add script system for unified world creation
         .add_plugins(ScriptPlugin)
@@ -724,6 +726,7 @@ pub fn start() {
                 publish_local_pose,
                 apply_remote_poses,
                 execute_pending_commands_web_wrapper, // Execute script commands to populate VoxelWorld
+                sync_block_visuals_web, // Sync VoxelWorld blocks to visual entities (desktop pattern)
                 log_fps,
             ),
         )
@@ -1474,10 +1477,29 @@ fn execute_pending_commands_web_wrapper(
         ),
         With<Camera>,
     >,
-    setup_guard: Res<SceneSetupGuard>,
+    mut setup_guard: ResMut<SceneSetupGuard>,
 ) {
+    // Debug logging for guard state
+    if !pending_commands.commands.is_empty() {
+        info!(
+            "Web: Checking SceneSetupGuard state: {}, pending commands: {}",
+            setup_guard.0,
+            pending_commands.commands.len()
+        );
+        #[cfg(target_arch = "wasm32")]
+        web_sys::console::log_1(
+            &format!(
+                "Web: SceneSetupGuard: {}, pending commands: {}",
+                setup_guard.0,
+                pending_commands.commands.len()
+            )
+            .into(),
+        );
+    }
+
     // If the hardcoded scene has been set up, don't execute scripts to avoid conflicts
-    if setup_guard.0 {
+    // UNLESS this is template script execution for a new world (commands > 20 usually means template)
+    if setup_guard.0 && pending_commands.commands.len() < 20 {
         // Clear commands to prevent accumulation, but don't execute them
         if !pending_commands.commands.is_empty() {
             info!(
@@ -1495,16 +1517,59 @@ fn execute_pending_commands_web_wrapper(
             pending_commands.commands.clear();
         }
         return;
+    } else if setup_guard.0 && pending_commands.commands.len() >= 20 {
+        // This looks like a template script - reset the guard to allow execution
+        info!(
+            "Web: Detected template script with {} commands, resetting SceneSetupGuard to allow execution",
+            pending_commands.commands.len()
+        );
+        #[cfg(target_arch = "wasm32")]
+        web_sys::console::log_1(
+            &format!(
+                "Web: Template detected - {} commands, resetting guard",
+                pending_commands.commands.len()
+            )
+            .into(),
+        );
+        setup_guard.0 = false;
     }
 
     // Simplified web implementation of command execution
     // Process pending commands with basic functionality for web client
 
-    for command in pending_commands.commands.drain(..) {
-        info!("Web: Executing queued command: {}", command);
+    // Detect if this is a large batch (template) to reduce logging verbosity
+    let total_commands = pending_commands.commands.len();
+    let is_large_batch = total_commands > 10;
 
+    if is_large_batch {
+        info!(
+            "Web: Executing batch of {} template commands (reduced logging mode)",
+            total_commands
+        );
         #[cfg(target_arch = "wasm32")]
-        web_sys::console::log_1(&format!("Web: Executing command: {}", command).into());
+        web_sys::console::log_1(
+            &format!(
+                "Web: Executing batch of {} template commands (reduced logging mode)",
+                total_commands
+            )
+            .into(),
+        );
+    }
+
+    for (idx, command) in pending_commands.commands.drain(..).enumerate() {
+        // Only log individual commands if not a large batch, or show progress every 100 commands
+        if !is_large_batch || idx % 100 == 0 {
+            info!("Web: Executing queued command: {}", command);
+
+            #[cfg(target_arch = "wasm32")]
+            if is_large_batch {
+                web_sys::console::log_1(
+                    &format!("Web: Progress {}/{}: {}", idx + 1, total_commands, command).into(),
+                );
+            } else {
+                web_sys::console::log_1(&format!("Web: Executing command: {}", command).into());
+            }
+        }
 
         // Parse command string and dispatch to appropriate handler
         let parts: Vec<&str> = command.split_whitespace().collect();
@@ -1566,16 +1631,16 @@ fn execute_pending_commands_web_wrapper(
                     ) {
                         let block_type_str = parts[1];
                         if let Some(block_type) = parse_block_type(block_type_str) {
-                            place_block_web(
-                                IVec3::new(x, y, z),
-                                block_type,
-                                block_type_str,
-                                &mut voxel_world,
-                                &mut commands,
-                                &mut meshes,
-                                &mut materials,
-                                &asset_server,
-                            );
+                            // Use desktop pattern: only store in VoxelWorld, let sync system create visuals
+                            let position = IVec3::new(x, y, z);
+                            voxel_world.set_block(position, block_type);
+
+                            if !is_large_batch {
+                                info!(
+                                    "Web: Placed {} block at ({}, {}, {}) - stored in VoxelWorld, visual will be created by sync system",
+                                    block_type_str, x, y, z
+                                );
+                            }
                         }
                     }
                 }
@@ -1604,24 +1669,26 @@ fn execute_pending_commands_web_wrapper(
                             for x in min_x..=max_x {
                                 for y in min_y..=max_y {
                                     for z in min_z..=max_z {
-                                        place_block_web(
-                                            IVec3::new(x, y, z),
-                                            block_type,
-                                            block_type_str,
-                                            &mut voxel_world,
-                                            &mut commands,
-                                            &mut meshes,
-                                            &mut materials,
-                                            &asset_server,
-                                        );
+                                        // Use desktop pattern: only store in VoxelWorld
+                                        let position = IVec3::new(x, y, z);
+                                        voxel_world.set_block(position, block_type);
                                         blocks_added += 1;
                                     }
                                 }
                             }
 
                             info!(
-                                "Web: Created {} wall from ({},{},{}) to ({},{},{}) with {} blocks",
+                                "Web: Created {} wall from ({},{},{}) to ({},{},{}) with {} blocks - stored in VoxelWorld, visuals will be created by sync system",
                                 block_type_str, x1, y1, z1, x2, y2, z2, blocks_added
+                            );
+
+                            #[cfg(target_arch = "wasm32")]
+                            web_sys::console::log_1(
+                                &format!(
+                                    "Web: Created {} wall from ({},{},{}) to ({},{},{}) with {} blocks - stored in VoxelWorld",
+                                    block_type_str, x1, y1, z1, x2, y2, z2, blocks_added
+                                )
+                                .into(),
                             );
                         }
                     }
@@ -1681,9 +1748,29 @@ fn execute_pending_commands_web_wrapper(
                 }
             }
             _ => {
-                info!("Web: Unknown command: {}", parts[0]);
+                if !is_large_batch {
+                    info!("Web: Unknown command: {}", parts[0]);
+                }
             }
         }
+    }
+
+    // Show completion summary for large batches
+    if is_large_batch {
+        info!(
+            "Web: Completed execution of {} template commands. World now has {} blocks.",
+            total_commands,
+            voxel_world.blocks.len()
+        );
+        #[cfg(target_arch = "wasm32")]
+        web_sys::console::log_1(
+            &format!(
+                "✅ Web: Template execution complete! {} commands processed, {} blocks in world",
+                total_commands,
+                voxel_world.blocks.len()
+            )
+            .into(),
+        );
     }
 }
 
@@ -1701,71 +1788,39 @@ fn parse_block_type(block_type_str: &str) -> Option<crate::environment::BlockTyp
     }
 }
 
-/// Place a block in both VoxelWorld and create visual representation
-fn place_block_web(
-    position: IVec3,
-    block_type: crate::environment::BlockType,
-    block_type_str: &str,
-    voxel_world: &mut ResMut<crate::environment::VoxelWorld>,
-    commands: &mut Commands,
-    meshes: &mut ResMut<Assets<Mesh>>,
-    materials: &mut ResMut<Assets<StandardMaterial>>,
-    asset_server: &AssetServer,
+/// System to synchronize visual block entities with VoxelWorld data for WASM
+/// This ensures blocks added via template scripts get visual representation
+/// Same as desktop version but specifically for WASM context
+fn sync_block_visuals_web(
+    voxel_world: Res<crate::environment::VoxelWorld>,
+    existing_blocks_query: Query<&crate::environment::VoxelBlock>,
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    asset_server: Res<AssetServer>,
 ) {
-    // Add block to VoxelWorld for collision detection
-    voxel_world.set_block(position, block_type);
+    // Only run this sync when voxel world changes to avoid performance issues
+    if !voxel_world.is_changed() {
+        return;
+    }
 
-    // Create visual representation
-    let cube_mesh = meshes.add(Cuboid::new(1.0, 1.0, 1.0));
-    let material = create_block_material_web(block_type, asset_server, materials);
+    // Get all existing visual block positions
+    let existing_positions: std::collections::HashSet<bevy::math::IVec3> = existing_blocks_query
+        .iter()
+        .map(|block| block.position)
+        .collect();
 
-    commands.spawn((
-        Mesh3d(cube_mesh),
-        MeshMaterial3d(material),
-        Transform::from_translation(Vec3::new(
-            position.x as f32,
-            position.y as f32,
-            position.z as f32,
-        )),
-        crate::environment::VoxelBlock { position },
-        Name::new(format!(
-            "ScriptBlock-{}-{}-{}",
-            position.x, position.y, position.z
-        )),
-    ));
+    // Create visual entities for blocks that don't have them
+    let mut created_visuals = 0;
+    for (pos, block_type) in voxel_world.blocks.iter() {
+        if !existing_positions.contains(pos) {
+            // Create visual entity for this block
+            let cube_mesh = meshes.add(bevy::math::primitives::Cuboid::new(
+                crate::environment::CUBE_SIZE,
+                crate::environment::CUBE_SIZE,
+                crate::environment::CUBE_SIZE,
+            ));
 
-    info!(
-        "Web: Placed {} block at ({}, {}, {}) - added to both VoxelWorld and visual scene",
-        block_type_str, position.x, position.y, position.z
-    );
-
-    #[cfg(target_arch = "wasm32")]
-    web_sys::console::log_1(
-        &format!(
-            "Web: Placed {} block at ({}, {}, {}) - VoxelWorld has {} blocks",
-            block_type_str,
-            position.x,
-            position.y,
-            position.z,
-            voxel_world.blocks.len()
-        )
-        .into(),
-    );
-}
-
-/// Create block material for web version
-fn create_block_material_web(
-    block_type: crate::environment::BlockType,
-    asset_server: &AssetServer,
-    materials: &mut ResMut<Assets<StandardMaterial>>,
-) -> Handle<StandardMaterial> {
-    match block_type {
-        crate::environment::BlockType::Water => materials.add(StandardMaterial {
-            base_color: Color::srgba(0.0, 0.35, 0.9, 0.6),
-            alpha_mode: AlphaMode::Blend,
-            ..default()
-        }),
-        _ => {
             let texture_path = match block_type {
                 crate::environment::BlockType::Grass => "textures/grass.webp",
                 crate::environment::BlockType::Dirt => "textures/dirt.webp",
@@ -1773,14 +1828,42 @@ fn create_block_material_web(
                 crate::environment::BlockType::QuartzBlock => "textures/quartz_block.webp",
                 crate::environment::BlockType::GlassPane => "textures/glass_pane.webp",
                 crate::environment::BlockType::CyanTerracotta => "textures/cyan_terracotta.webp",
-                _ => "textures/stone.webp", // fallback
+                crate::environment::BlockType::Water => "textures/water.webp",
             };
+
             let texture: Handle<Image> = asset_server.load(texture_path);
-            materials.add(StandardMaterial {
+            let material = materials.add(StandardMaterial {
                 base_color_texture: Some(texture),
                 ..default()
-            })
+            });
+
+            commands.spawn((
+                Mesh3d(cube_mesh),
+                MeshMaterial3d(material),
+                Transform::from_translation(pos.as_vec3()),
+                crate::environment::VoxelBlock { position: *pos },
+                Name::new(format!("WebSyncBlock-{}-{}-{}", pos.x, pos.y, pos.z)),
+            ));
+
+            created_visuals += 1;
         }
+    }
+
+    if created_visuals > 0 {
+        info!(
+            "Web: Synced {} visual entities for VoxelWorld blocks",
+            created_visuals
+        );
+
+        #[cfg(target_arch = "wasm32")]
+        web_sys::console::log_1(
+            &format!(
+                "Web: Synced {} visual entities for VoxelWorld blocks (total blocks: {})",
+                created_visuals,
+                voxel_world.blocks.len()
+            )
+            .into(),
+        );
     }
 }
 

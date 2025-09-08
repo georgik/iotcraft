@@ -17,6 +17,12 @@ pub struct LastMessage {
     pub content: String,
 }
 
+impl std::fmt::Display for LastMessage {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.content)
+    }
+}
+
 /// Resource for managing world discovery
 #[derive(Resource)]
 pub struct WorldDiscovery {

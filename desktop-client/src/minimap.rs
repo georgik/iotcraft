@@ -1,5 +1,7 @@
+#[cfg(not(target_arch = "wasm32"))]
 use crate::devices::device_types::{DeviceEntity, DeviceType};
 use crate::environment::{BlockType, VoxelWorld};
+#[cfg(not(target_arch = "wasm32"))]
 use crate::interaction::interaction_types::LampState;
 use crate::ui::GameState;
 use bevy::asset::RenderAssetUsages;
@@ -80,7 +82,10 @@ pub struct MinimapGenerationTask {
 #[derive(Clone, Debug)]
 pub struct MinimapDevice {
     pub position: Vec3,
+    #[cfg(not(target_arch = "wasm32"))]
     pub device_type: DeviceType,
+    #[cfg(target_arch = "wasm32")]
+    pub device_type: String, // Simple string for WASM
     pub is_on: bool, // For lamps, this indicates if the lamp is on
 }
 
@@ -229,16 +234,37 @@ fn generate_minimap_texture_sync(
             && pixel_z < texture_size as i32
         {
             // Get device color based on type and state
-            let device_color = match device.device_type {
-                DeviceType::Lamp => {
-                    if device.is_on {
-                        [255, 255, 0, 255] // Bright yellow for ON lamp
-                    } else {
-                        [128, 128, 0, 255] // Dark yellow/brown for OFF lamp
+            let device_color = {
+                #[cfg(not(target_arch = "wasm32"))]
+                {
+                    match device.device_type {
+                        DeviceType::Lamp => {
+                            if device.is_on {
+                                [255, 255, 0, 255] // Bright yellow for ON lamp
+                            } else {
+                                [128, 128, 0, 255] // Dark yellow/brown for OFF lamp
+                            }
+                        }
+                        DeviceType::Door => [139, 69, 19, 255], // Brown for doors
+                        DeviceType::Sensor => [0, 255, 255, 255], // Cyan for sensors
                     }
                 }
-                DeviceType::Door => [139, 69, 19, 255], // Brown for doors
-                DeviceType::Sensor => [0, 255, 255, 255], // Cyan for sensors
+                #[cfg(target_arch = "wasm32")]
+                {
+                    // WASM version with string-based device types
+                    match device.device_type.as_str() {
+                        "lamp" => {
+                            if device.is_on {
+                                [255, 255, 0, 255] // Bright yellow for ON lamp
+                            } else {
+                                [128, 128, 0, 255] // Dark yellow/brown for OFF lamp
+                            }
+                        }
+                        "door" => [139, 69, 19, 255], // Brown for doors
+                        "sensor" => [0, 255, 255, 255], // Cyan for sensors
+                        _ => [255, 0, 255, 255],      // Magenta for unknown devices
+                    }
+                }
             };
 
             // Draw a 3x3 pixel device indicator for better visibility
@@ -338,7 +364,11 @@ fn setup_minimap(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
                 MinimapTexture {
                     image_handle: minimap_image_handle,
                     last_update: 0.0,
-                    update_interval: 0.8, // Update every 0.8 seconds (increased frequency)
+                    update_interval: if cfg!(target_arch = "wasm32") {
+                        0.3
+                    } else {
+                        0.8
+                    }, // Faster updates for WASM testing
                     last_player_pos: Vec3::ZERO,
                 },
             ));
@@ -364,6 +394,9 @@ fn setup_minimap(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
         });
 
     info!("2D Minimap system initialized - press M to toggle");
+
+    #[cfg(target_arch = "wasm32")]
+    web_sys::console::log_1(&"🗺️ Minimap system initialized for WASM - press M to toggle".into());
 }
 
 /// System to clean up minimap when exiting game
@@ -400,6 +433,9 @@ fn toggle_minimap(
 
         minimap_state.mode = new_mode;
         info!("Minimap mode: {} (M to cycle)", mode_name);
+
+        #[cfg(target_arch = "wasm32")]
+        web_sys::console::log_1(&format!("🗺️ Minimap mode: {} (M to cycle)", mode_name).into());
     }
 }
 
@@ -415,7 +451,11 @@ fn start_minimap_texture_generation(
     mut commands: Commands,
     mut minimap_textures: Query<(Entity, &mut MinimapTexture), Without<MinimapGenerationTask>>,
     player_camera_query: Query<&Transform, With<Camera>>,
-    device_query: Query<(&Transform, &DeviceEntity, Option<&LampState>)>,
+    #[cfg(not(target_arch = "wasm32"))] device_query: Query<(
+        &Transform,
+        &DeviceEntity,
+        Option<&LampState>,
+    )>,
     minimap_state: Res<MinimapState>,
     voxel_world: Res<VoxelWorld>,
     time: Res<Time>,
@@ -427,17 +467,43 @@ fn start_minimap_texture_generation(
 
     let current_time = time.elapsed_secs_f64();
 
-    // Get player position and rotation
-    let (player_pos, player_rotation) = if let Ok(player_transform) = player_camera_query.single() {
+    // Get player position and rotation - handle multiple cameras like player controllers do
+    let (player_pos, player_rotation) = {
+        // Handle multiple camera entities by taking the first one (same approach as player controllers)
+        let camera_entities: Vec<_> = player_camera_query.iter().collect();
+
+        if camera_entities.is_empty() {
+            #[cfg(target_arch = "wasm32")]
+            web_sys::console::log_1(&"🗺️ Minimap: No camera entities found!".into());
+            return;
+        }
+
+        let player_transform = camera_entities.into_iter().next().unwrap();
         let pos = player_transform.translation;
         let rotation = match minimap_state.mode {
             MinimapMode::PlayerOriented => Some(extract_yaw_from_transform(player_transform)),
             MinimapMode::FixedNorth => None,
             MinimapMode::Hidden => return, // Already handled above
         };
+
+        // Debug player position detection
+        static mut LAST_POS_DEBUG_TIME: f64 = 0.0;
+        unsafe {
+            if current_time - LAST_POS_DEBUG_TIME > 2.0 {
+                LAST_POS_DEBUG_TIME = current_time;
+                #[cfg(target_arch = "wasm32")]
+                web_sys::console::log_1(
+                    &format!(
+                        "🗺️ Minimap: Player position detected at {:?}, world has {} blocks",
+                        pos,
+                        voxel_world.blocks.len()
+                    )
+                    .into(),
+                );
+            }
+        }
+
         (pos, rotation)
-    } else {
-        return;
     };
 
     // Start async tasks for each minimap texture that needs updating
@@ -448,7 +514,12 @@ fn start_minimap_texture_generation(
         }
 
         // Only update if player moved significantly (performance optimization)
-        let movement_threshold = 3.0; // Only update if player moved 3+ units
+        // Reduced threshold for WASM testing
+        let movement_threshold = if cfg!(target_arch = "wasm32") {
+            0.5
+        } else {
+            3.0
+        };
         if minimap_texture.last_player_pos.distance(player_pos) < movement_threshold {
             continue;
         }
@@ -473,42 +544,68 @@ fn start_minimap_texture_generation(
             .collect();
 
         // Collect device data for minimap rendering
-        let devices: Vec<MinimapDevice> = device_query
-            .iter()
-            .filter_map(|(transform, device_entity, lamp_state)| {
-                // Only include devices within minimap radius
-                let device_pos = transform.translation;
-                let dx = (device_pos.x - player_pos.x).abs();
-                let dz = (device_pos.z - player_pos.z).abs();
+        let devices: Vec<MinimapDevice> = {
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                device_query
+                    .iter()
+                    .filter_map(|(transform, device_entity, lamp_state)| {
+                        // Only include devices within minimap radius
+                        let device_pos = transform.translation;
+                        let dx = (device_pos.x - player_pos.x).abs();
+                        let dz = (device_pos.z - player_pos.z).abs();
 
-                if dx <= world_radius as f32 && dz <= world_radius as f32 {
-                    // Parse device type from string
-                    if let Some(device_type) = DeviceType::from_str(&device_entity.device_type) {
-                        let is_on = match device_type {
-                            DeviceType::Lamp => {
-                                lamp_state.map(|state| state.is_on).unwrap_or(false)
+                        if dx <= world_radius as f32 && dz <= world_radius as f32 {
+                            // Parse device type from string
+                            if let Some(device_type) =
+                                DeviceType::from_str(&device_entity.device_type)
+                            {
+                                let is_on = match device_type {
+                                    DeviceType::Lamp => {
+                                        lamp_state.map(|state| state.is_on).unwrap_or(false)
+                                    }
+                                    _ => false, // For non-lamp devices, this field is not relevant
+                                };
+
+                                Some(MinimapDevice {
+                                    position: device_pos,
+                                    device_type,
+                                    is_on,
+                                })
+                            } else {
+                                None
                             }
-                            _ => false, // For non-lamp devices, this field is not relevant
-                        };
-
-                        Some(MinimapDevice {
-                            position: device_pos,
-                            device_type,
-                            is_on,
-                        })
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                }
-            })
-            .collect();
+                        } else {
+                            None
+                        }
+                    })
+                    .collect()
+            }
+            #[cfg(target_arch = "wasm32")]
+            {
+                // WASM version: No devices for now, just empty vec
+                // TODO: Add MQTT device discovery for WASM if needed
+                Vec::new()
+            }
+        };
 
         info!(
-            "Starting async minimap generation with {} relevant blocks and {} devices",
+            "Starting async minimap generation with {} relevant blocks and {} devices at player pos {:?}",
             relevant_blocks.len(),
-            devices.len()
+            devices.len(),
+            player_pos
+        );
+
+        #[cfg(target_arch = "wasm32")]
+        web_sys::console::log_1(
+            &format!(
+                "🗺️ Minimap: generating {} blocks, {} devices at {:?}, VoxelWorld has {} total blocks",
+                relevant_blocks.len(),
+                devices.len(),
+                player_pos,
+                voxel_world.blocks.len()
+            )
+            .into(),
         );
 
         // Spawn async task on compute thread pool
@@ -543,34 +640,59 @@ fn finish_minimap_texture_generation(
 ) {
     let current_time = time.elapsed_secs_f64();
 
+    // Collect entities to process to avoid borrowing issues
+    let mut completed_tasks = Vec::new();
+
     for (entity, minimap_texture, mut task_component) in query.iter_mut() {
         // Check if the async task is complete
-        if let Some(texture_data) = block_on(poll_once(&mut task_component.task)) {
-            // Apply the generated texture data
-            if let Some(image) = images.get_mut(&minimap_texture.image_handle) {
-                image.data = Some(texture_data);
+        // Use bevy's task completion checking
+        if task_component.task.is_finished() {
+            // Block to get the result since we know it's ready
+            let texture_data = bevy::tasks::block_on(&mut task_component.task);
+            completed_tasks.push((
+                entity,
+                minimap_texture.image_handle.clone(),
+                texture_data,
+                task_component.player_pos,
+            ));
+        }
+    }
 
-                // Debug logging
-                static mut LAST_DEBUG_TIME: f64 = 0.0;
-                unsafe {
-                    if current_time - LAST_DEBUG_TIME > 3.0 {
-                        LAST_DEBUG_TIME = current_time;
-                        let mode_str = match minimap_state.mode {
-                            MinimapMode::PlayerOriented => "Player-Oriented",
-                            MinimapMode::FixedNorth => "Fixed North",
-                            MinimapMode::Hidden => "Hidden",
-                        };
-                        info!(
-                            "Minimap texture completed (async) - Mode: {}, Player at {:?}",
-                            mode_str, task_component.player_pos
-                        );
-                    }
+    // Process completed tasks
+    for (entity, image_handle, texture_data, player_pos) in completed_tasks {
+        // Apply the generated texture data
+        if let Some(image) = images.get_mut(&image_handle) {
+            image.data = Some(texture_data);
+
+            // Debug logging
+            static mut LAST_DEBUG_TIME: f64 = 0.0;
+            unsafe {
+                if current_time - LAST_DEBUG_TIME > 3.0 {
+                    LAST_DEBUG_TIME = current_time;
+                    let mode_str = match minimap_state.mode {
+                        MinimapMode::PlayerOriented => "Player-Oriented",
+                        MinimapMode::FixedNorth => "Fixed North",
+                        MinimapMode::Hidden => "Hidden",
+                    };
+                    info!(
+                        "Minimap texture completed (async) - Mode: {}, Player at {:?}",
+                        mode_str, player_pos
+                    );
+
+                    #[cfg(target_arch = "wasm32")]
+                    web_sys::console::log_1(
+                        &format!(
+                            "🗺️ Minimap texture completed - Mode: {}, Player at {:?}",
+                            mode_str, player_pos
+                        )
+                        .into(),
+                    );
                 }
             }
-
-            // Remove the task component since it's complete
-            commands.entity(entity).remove::<MinimapGenerationTask>();
         }
+
+        // Remove the task component since it's complete
+        commands.entity(entity).remove::<MinimapGenerationTask>();
     }
 }
 

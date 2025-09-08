@@ -14,3 +14,6 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true }
 toml = "0.8"
+which = "6.0"
+qr2term = "0.3"
+if-addrs = "0.14"

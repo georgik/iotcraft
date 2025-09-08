@@ -215,7 +215,10 @@ pub fn update_diagnostics_content_bundled(mut params: ComprehensiveDebugParams) 
                 };
 
             #[cfg(target_arch = "wasm32")]
-            let last_messages: std::collections::HashMap<String, String> = HashMap::new();
+            let last_messages: std::collections::HashMap<
+                String,
+                crate::multiplayer::world_discovery::LastMessage,
+            > = HashMap::new();
 
             let topics_text = subscribed_topics
                 .iter()

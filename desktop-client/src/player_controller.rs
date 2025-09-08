@@ -883,10 +883,15 @@ pub fn handle_physics_free_walking_movement(
         voxel_world,
     ) {
         // Something went wrong, revert to original position
-        info!(
-            "Emergency collision revert from {:?} to {:?}",
-            transform.translation, original_position
-        );
+        // Only log if we're actually moving (avoid spam when stuck at origin)
+        if original_position != Vec3::ZERO
+            && transform.translation.distance(original_position) > 0.1
+        {
+            info!(
+                "Emergency collision revert from {:?} to {:?}",
+                transform.translation, original_position
+            );
+        }
         transform.translation = original_position;
         movement.gravity_scale = 0.0;
         movement.is_grounded = true;

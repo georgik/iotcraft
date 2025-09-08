@@ -112,6 +112,218 @@ fn load_world_info(world_path: &Path) -> Option<WorldInfo> {
     }
 }
 
+/// Load web-compatible template scripts for WASM builds
+#[cfg(target_arch = "wasm32")]
+fn load_web_template(
+    template_name: &str,
+    pending_commands: &mut ResMut<PendingCommands>,
+    world_name: &str,
+) {
+    info!(
+        "Loading web template '{}' for world {}",
+        template_name, world_name
+    );
+
+    let script_commands = match template_name {
+        "creative" => get_creative_template(),
+        "default" => get_default_template(),
+        "medieval" => get_medieval_template(),
+        "modern" => get_modern_template(),
+        _ => {
+            warn!(
+                "Unknown template '{}', falling back to default",
+                template_name
+            );
+            get_default_template()
+        }
+    };
+
+    info!(
+        "Executing web template '{}' with {} commands for world {}",
+        template_name,
+        script_commands.len(),
+        world_name
+    );
+
+    pending_commands.commands.extend(script_commands);
+}
+
+/// Get creative template script commands
+#[cfg(target_arch = "wasm32")]
+fn get_creative_template() -> Vec<String> {
+    vec![
+        "# Creative Template - Expansive world for unlimited creativity".to_string(),
+        "tp 0 50 0".to_string(),
+        "look 25 0".to_string(),
+        "".to_string(),
+        "# Create a massive flat creative platform (200x200)".to_string(),
+        "wall grass -100 10 -100 100 10 100".to_string(),
+        "".to_string(),
+        "# Create material showcase areas".to_string(),
+        "# Stone section".to_string(),
+        "wall stone -80 11 -80 -60 15 -60".to_string(),
+        "".to_string(),
+        "# Dirt hills for terraforming practice".to_string(),
+        "wall dirt -40 11 -40 -20 20 -20".to_string(),
+        "wall grass -40 21 -40 -20 21 -20".to_string(),
+        "".to_string(),
+        "# Quartz showcase building".to_string(),
+        "wall quartz_block 0 11 -50 20 25 -30".to_string(),
+        "wall glass_pane 5 16 -45 15 20 -35".to_string(),
+        "".to_string(),
+        "# Water features for landscaping".to_string(),
+        "wall water 30 11 -30 50 11 -10".to_string(),
+        "".to_string(),
+        "# Colorful terracotta section".to_string(),
+        "wall cyan_terracotta 60 11 -20 80 11 0".to_string(),
+        "".to_string(),
+        "# Starting inventory with creative materials".to_string(),
+        "give grass 200".to_string(),
+        "give dirt 200".to_string(),
+        "give stone 200".to_string(),
+        "give quartz_block 100".to_string(),
+        "give glass_pane 100".to_string(),
+        "give cyan_terracotta 100".to_string(),
+        "give water 50".to_string(),
+    ]
+}
+
+/// Get default template script commands
+#[cfg(target_arch = "wasm32")]
+fn get_default_template() -> Vec<String> {
+    vec![
+        "# Default Template - Basic world for new players".to_string(),
+        "tp -8 3 15".to_string(),
+        "look -34 -3".to_string(),
+        "".to_string(),
+        "# Create a large grass plain (80x80 area)".to_string(),
+        "wall grass -40 0 -40 40 0 40".to_string(),
+        "".to_string(),
+        "# Create some hills around the plain".to_string(),
+        "wall dirt 15 1 15 20 3 20".to_string(),
+        "wall grass 15 4 15 20 4 20".to_string(),
+        "".to_string(),
+        "wall dirt -20 1 -20 -15 4 -15".to_string(),
+        "wall grass -20 5 -20 -15 5 -15".to_string(),
+        "".to_string(),
+        "# Create a small structure".to_string(),
+        "wall stone 3 1 3 7 3 7".to_string(),
+        "wall stone 4 4 4 6 4 6".to_string(),
+        "place quartz_block 5 5 5".to_string(),
+        "".to_string(),
+        "# Basic starting inventory".to_string(),
+        "give grass 64".to_string(),
+        "give dirt 32".to_string(),
+        "give stone 32".to_string(),
+        "give quartz_block 16".to_string(),
+    ]
+}
+
+/// Get medieval template script commands
+#[cfg(target_arch = "wasm32")]
+fn get_medieval_template() -> Vec<String> {
+    vec![
+        "# Medieval Template - Castle and village setting".to_string(),
+        "tp -10 8 25".to_string(),
+        "look -15 -8".to_string(),
+        "".to_string(),
+        "# Create base terrain".to_string(),
+        "wall grass -50 0 -50 50 0 50".to_string(),
+        "wall dirt -50 -1 -50 50 -1 50".to_string(),
+        "".to_string(),
+        "# Build castle foundation".to_string(),
+        "wall stone -20 1 -20 20 1 20".to_string(),
+        "wall stone -20 1 -20 20 5 -15".to_string(),
+        "wall stone -20 1 15 20 5 20".to_string(),
+        "wall stone -20 1 -20 -15 5 20".to_string(),
+        "wall stone 15 1 -20 20 5 20".to_string(),
+        "".to_string(),
+        "# Castle towers".to_string(),
+        "wall stone -18 6 -18 -15 12 -15".to_string(),
+        "wall stone 15 6 -18 18 12 -15".to_string(),
+        "wall stone -18 6 15 -15 12 18".to_string(),
+        "wall stone 15 6 15 18 12 18".to_string(),
+        "".to_string(),
+        "# Castle gate and courtyard".to_string(),
+        "wall stone -2 2 -20 2 4 -15".to_string(),
+        "wall grass -15 2 -15 15 2 15".to_string(),
+        "".to_string(),
+        "# Village houses".to_string(),
+        "wall stone -35 1 5 -30 3 10".to_string(),
+        "wall stone -35 4 7 -30 4 8".to_string(),
+        "wall stone 30 1 5 35 3 10".to_string(),
+        "wall stone 30 4 7 35 4 8".to_string(),
+        "".to_string(),
+        "# Fields and farms".to_string(),
+        "wall dirt -45 1 -10 -25 1 5".to_string(),
+        "wall dirt 25 1 -10 45 1 5".to_string(),
+        "".to_string(),
+        "# Decorative elements".to_string(),
+        "place quartz_block 0 6 0".to_string(),
+        "place glass_pane -1 3 -17".to_string(),
+        "place glass_pane 1 3 -17".to_string(),
+        "".to_string(),
+        "# Medieval starter inventory".to_string(),
+        "give stone 128".to_string(),
+        "give dirt 64".to_string(),
+        "give grass 32".to_string(),
+        "give quartz_block 16".to_string(),
+        "give glass_pane 8".to_string(),
+    ]
+}
+
+/// Get modern template script commands
+#[cfg(target_arch = "wasm32")]
+fn get_modern_template() -> Vec<String> {
+    vec![
+        "# Modern Template - Contemporary city setting".to_string(),
+        "tp 0 15 30".to_string(),
+        "look -10 0".to_string(),
+        "".to_string(),
+        "# Create modern city base".to_string(),
+        "wall stone -60 0 -60 60 0 60".to_string(),
+        "".to_string(),
+        "# Modern skyscraper foundations".to_string(),
+        "wall quartz_block -25 1 -25 -15 1 -15".to_string(),
+        "wall quartz_block -25 2 -25 -15 20 -15".to_string(),
+        "".to_string(),
+        "wall quartz_block 15 1 -25 25 1 -15".to_string(),
+        "wall quartz_block 15 2 -25 25 15 -15".to_string(),
+        "".to_string(),
+        "wall quartz_block -10 1 10 10 1 20".to_string(),
+        "wall quartz_block -10 2 10 10 25 20".to_string(),
+        "".to_string(),
+        "# Glass windows for buildings".to_string(),
+        "wall glass_pane -23 3 -23 -17 18 -17".to_string(),
+        "wall glass_pane 17 3 -23 23 13 -17".to_string(),
+        "wall glass_pane -8 3 12 8 23 18".to_string(),
+        "".to_string(),
+        "# Modern plaza with decorative elements".to_string(),
+        "wall cyan_terracotta -5 1 -5 5 1 5".to_string(),
+        "place quartz_block 0 2 0".to_string(),
+        "".to_string(),
+        "# Urban green spaces".to_string(),
+        "wall grass -40 1 30 -25 1 45".to_string(),
+        "wall grass 25 1 30 40 1 45".to_string(),
+        "".to_string(),
+        "# Water features - modern fountains".to_string(),
+        "wall water -35 2 35 -30 2 40".to_string(),
+        "wall water 30 2 35 35 2 40".to_string(),
+        "".to_string(),
+        "# Roads and pathways".to_string(),
+        "wall stone -60 1 -2 60 1 2".to_string(),
+        "wall stone -2 1 -60 2 1 60".to_string(),
+        "".to_string(),
+        "# Modern builder inventory".to_string(),
+        "give quartz_block 200".to_string(),
+        "give glass_pane 100".to_string(),
+        "give stone 150".to_string(),
+        "give cyan_terracotta 50".to_string(),
+        "give water 20".to_string(),
+        "give grass 32".to_string(),
+    ]
+}
+
 /// Handles world loading events
 fn handle_load_world_events(
     mut load_events: EventReader<LoadWorldEvent>,
@@ -412,13 +624,24 @@ fn handle_create_world_events(
         let worlds_dir = get_worlds_directory();
         let world_path = worlds_dir.join(&event.world_name);
 
-        // Create world directory
-        if let Err(e) = fs::create_dir_all(&world_path) {
-            error!(
-                "Failed to create world directory for {}: {}",
-                event.world_name, e
+        // Create world directory (skip on WASM where filesystem operations aren't supported)
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            if let Err(e) = fs::create_dir_all(&world_path) {
+                error!(
+                    "Failed to create world directory for {}: {}",
+                    event.world_name, e
+                );
+                continue;
+            }
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            // On WASM, we can't create directories, but we can still create the world
+            info!(
+                "Skipping directory creation on WASM platform for world: {}",
+                event.world_name
             );
-            continue;
         }
 
         // Create metadata
@@ -430,22 +653,33 @@ fn handle_create_world_events(
             version: "1.0.0".to_string(),
         };
 
-        // Save metadata
-        let metadata_path = world_path.join("metadata.json");
-        match serde_json::to_string_pretty(&metadata) {
-            Ok(json) => {
-                if let Err(e) = fs::write(&metadata_path, json) {
-                    error!("Failed to write metadata for {}: {}", event.world_name, e);
+        // Save metadata (skip on WASM where filesystem operations aren't supported)
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let metadata_path = world_path.join("metadata.json");
+            match serde_json::to_string_pretty(&metadata) {
+                Ok(json) => {
+                    if let Err(e) = fs::write(&metadata_path, json) {
+                        error!("Failed to write metadata for {}: {}", event.world_name, e);
+                        continue;
+                    }
+                }
+                Err(e) => {
+                    error!(
+                        "Failed to serialize metadata for {}: {}",
+                        event.world_name, e
+                    );
                     continue;
                 }
             }
-            Err(e) => {
-                error!(
-                    "Failed to serialize metadata for {}: {}",
-                    event.world_name, e
-                );
-                continue;
-            }
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            // On WASM, we can't save to filesystem, but metadata is still used in memory
+            info!(
+                "Skipping metadata file save on WASM platform for world: {}",
+                event.world_name
+            );
         }
 
         // Create empty world
@@ -467,44 +701,25 @@ fn handle_create_world_events(
 
         // Execute world template script based on event template or default
         let template_name = event.template.as_deref().unwrap_or("default");
-        let template_path = format!("scripts/world_templates/{}.txt", template_name);
 
-        info!(
-            "Loading world template '{}' from path: {}",
-            template_name, template_path
-        );
+        #[cfg(target_arch = "wasm32")]
+        {
+            // Use web-compatible template loading
+            load_web_template(template_name, &mut pending_commands, &event.world_name);
+        }
 
-        if std::path::Path::new(&template_path).exists() {
-            match fs::read_to_string(&template_path) {
-                Ok(content) => {
-                    let script_commands = content
-                        .lines()
-                        .map(|line| line.trim())
-                        .filter(|line| !line.is_empty() && !line.starts_with('#'))
-                        .map(|line| line.to_string())
-                        .collect::<Vec<String>>();
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            // Use filesystem-based template loading for desktop
+            let template_path = format!("scripts/world_templates/{}.txt", template_name);
 
-                    info!(
-                        "Executing world template '{}' with {} commands for world {}",
-                        template_name,
-                        script_commands.len(),
-                        event.world_name
-                    );
-                    pending_commands.commands.extend(script_commands);
-                }
-                Err(e) => {
-                    error!("Failed to read world template '{}': {}", template_name, e);
-                }
-            }
-        } else {
-            // Fallback to legacy path if template doesn't exist
-            let fallback_path = "scripts/new_world.txt";
-            if std::path::Path::new(fallback_path).exists() {
-                info!(
-                    "Template '{}' not found, falling back to legacy script: {}",
-                    template_name, fallback_path
-                );
-                match fs::read_to_string(fallback_path) {
+            info!(
+                "Loading world template '{}' from path: {}",
+                template_name, template_path
+            );
+
+            if std::path::Path::new(&template_path).exists() {
+                match fs::read_to_string(&template_path) {
                     Ok(content) => {
                         let script_commands = content
                             .lines()
@@ -514,21 +729,51 @@ fn handle_create_world_events(
                             .collect::<Vec<String>>();
 
                         info!(
-                            "Executing fallback world script with {} commands for world {}",
+                            "Executing world template '{}' with {} commands for world {}",
+                            template_name,
                             script_commands.len(),
                             event.world_name
                         );
                         pending_commands.commands.extend(script_commands);
                     }
                     Err(e) => {
-                        error!("Failed to read fallback world script: {}", e);
+                        error!("Failed to read world template '{}': {}", template_name, e);
                     }
                 }
             } else {
-                warn!(
-                    "Neither template '{}' at '{}' nor fallback script at '{}' found, world will be empty",
-                    template_name, template_path, fallback_path
-                );
+                // Fallback to legacy path if template doesn't exist
+                let fallback_path = "scripts/new_world.txt";
+                if std::path::Path::new(fallback_path).exists() {
+                    info!(
+                        "Template '{}' not found, falling back to legacy script: {}",
+                        template_name, fallback_path
+                    );
+                    match fs::read_to_string(fallback_path) {
+                        Ok(content) => {
+                            let script_commands = content
+                                .lines()
+                                .map(|line| line.trim())
+                                .filter(|line| !line.is_empty() && !line.starts_with('#'))
+                                .map(|line| line.to_string())
+                                .collect::<Vec<String>>();
+
+                            info!(
+                                "Executing fallback world script with {} commands for world {}",
+                                script_commands.len(),
+                                event.world_name
+                            );
+                            pending_commands.commands.extend(script_commands);
+                        }
+                        Err(e) => {
+                            error!("Failed to read fallback world script: {}", e);
+                        }
+                    }
+                } else {
+                    warn!(
+                        "Neither template '{}' at '{}' nor fallback script at '{}' found, world will be empty",
+                        template_name, template_path, fallback_path
+                    );
+                }
             }
         }
 
@@ -558,6 +803,15 @@ fn create_empty_world(
 
     // Clear existing blocks in voxel storage
     voxel_world.blocks.clear();
+
+    // Reset scene setup guard to allow template scripts to execute
+    #[cfg(target_arch = "wasm32")]
+    {
+        // For WASM builds, reset the scene setup guard so that template scripts can execute
+        // This allows new worlds to properly run their template commands instead of being blocked
+        commands.insert_resource(crate::SceneSetupGuard(false));
+        info!("Reset scene setup guard to allow template script execution for new world");
+    }
 
     // Set current world
     commands.insert_resource(CurrentWorld {

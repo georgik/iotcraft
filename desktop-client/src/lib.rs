@@ -95,6 +95,9 @@ pub mod reply {}
 // Player controller module available for both desktop and web
 pub mod player_controller;
 
+// Minimap module available for both desktop and web
+pub mod minimap;
+
 #[cfg(not(target_arch = "wasm32"))]
 pub mod player_avatar;
 

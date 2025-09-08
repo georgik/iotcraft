@@ -164,18 +164,16 @@ wokwi-cli
 
 ### WASM Browser Support
 
-**Build and Serve Web Client:**
+**Build and Serve Web Client (Recommended - from workspace root):**
 ```bash
-cd desktop-client
-
 # Build optimized WASM version
-cargo ctask web-build --release
+cargo xtask web-build --release
 
 # Serve web client locally
-cargo ctask web-serve --port 8000
+cargo xtask web-serve --port 8000
 
 # Combined build and serve for development
-cargo ctask web-dev
+cargo xtask web-dev
 
 # Open browser (after web server is running)
 open http://localhost:8000
@@ -183,10 +181,12 @@ open http://localhost:8000
 
 **Cross-Platform Features:**
 - **Identical Functionality** - Same features as desktop (world building, MQTT, multiplayer)
+- **Interactive Minimap** - Full minimap support with player tracking and M-key toggle
 - **WebSocket MQTT** - Automatic WebSocket bridge for browser MQTT communication
 - **Shared Worlds** - Desktop and WASM clients can join the same multiplayer worlds
 - **Real-Time Sync** - Block placement, device control, and world state synchronization
 - **Browser Controls** - Full keyboard/mouse support with pointer lock for camera
+- **Stable Performance** - Fixed async task crashes and camera detection issues
 
 **For detailed WASM development:** See [desktop-client/README_WEB.md](desktop-client/README_WEB.md)
 
