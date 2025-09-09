@@ -204,7 +204,7 @@ func sdl_thread_entry_point(arg: UnsafeMutableRawPointer?) -> UnsafeMutableRawPo
     SDL_GetWindowSize(window, &width, &height)
 
     // Print the resolution
-    print("Display resolution: \(width)x\(height)")
+    print("Display resolution: 720x1280")
 
     // Create SDL renderer
     guard let renderer = SDL_CreateRenderer(window, nil) else {
@@ -229,7 +229,7 @@ func sdl_thread_entry_point(arg: UnsafeMutableRawPointer?) -> UnsafeMutableRawPo
     worldBlocks = blocks
     iotDevices = devices
     
-    print("Generated IoTCraft world with \(worldBlocks.count) blocks and \(iotDevices.count) devices")
+    print("Generated IoTCraft world with blocks and devices")
 
     // Initialize IoTCraft world state
     var lastDeviceUpdate: UInt64 = SDL_GetTicksNS()
@@ -252,7 +252,7 @@ func sdl_thread_entry_point(arg: UnsafeMutableRawPointer?) -> UnsafeMutableRawPo
                 let touchX = event.tfinger.x * screenWidth
                 let touchY = event.tfinger.y * screenHeight
                 
-                print("Touch at (\(touchX), \(touchY))")
+                print("Touch detected")
                 
                 // Check if touch intersects any device
                 let blockSize: Float = 40.0 * camera.zoom
@@ -267,12 +267,12 @@ func sdl_thread_entry_point(arg: UnsafeMutableRawPointer?) -> UnsafeMutableRawPo
                     )
                     
                     if pointInRect(x: touchX, y: touchY, rect: deviceRect) {
-                        print("Touched device: \(iotDevices[i].id)")
+                        print("Device touched")
                         
                         // Toggle device state
                         if iotDevices[i].deviceType == .lamp {
                             iotDevices[i].lightState.toggle()
-                            print("Lamp \(iotDevices[i].id) is now \(iotDevices[i].lightState ? "ON" : "OFF")")
+                            print("Lamp state toggled")
                         }
                         
                         break
@@ -287,7 +287,7 @@ func sdl_thread_entry_point(arg: UnsafeMutableRawPointer?) -> UnsafeMutableRawPo
             for i in 0..<iotDevices.count {
                 if iotDevices[i].deviceType == .lamp && Float.random(in: 0...1) < 0.3 {
                     iotDevices[i].lightState.toggle()
-                    print("Device \(iotDevices[i].id) light state changed to \(iotDevices[i].lightState)")
+                    print("Device light state changed")
                 }
             }
             lastDeviceUpdate = currentTime
