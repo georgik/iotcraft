@@ -10,6 +10,8 @@ extern "C" {
 // Service initialization functions
 esp_err_t iotcraft_dhcp_init(void);
 esp_err_t iotcraft_mqtt_broker_init(void);
+esp_err_t iotcraft_mqtt_broker_stop(void);
+bool iotcraft_mqtt_is_running(void);
 esp_err_t iotcraft_mdns_init(void);
 esp_err_t iotcraft_http_server_init(void);
 esp_err_t iotcraft_status_gui_init(void);

@@ -3,30 +3,42 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
-// Include Mosquitto broker header  
-#include "mosquitto_broker.h"
+// Include Mosquitto broker header for ESP-IDF port
+#include "mosq_broker.h"
 
 static const char *TAG = "IOTCRAFT_MQTT";
 static bool mqtt_broker_running = false;
 static TaskHandle_t mqtt_broker_task_handle = NULL;
 
-// For now, just create a placeholder for the broker configuration
+// MQTT broker configuration
 static int mqtt_broker_port = 1883;
 
 static void mqtt_broker_task(void *param)
 {
     ESP_LOGI(TAG, "Starting MQTT broker on port %d", mqtt_broker_port);
 
-    // TODO: Initialize Mosquitto broker using proper API once confirmed
-    // For now, just simulate a running broker loop
+    // Configure the broker according to ESP-IDF Mosquitto port documentation
+    struct mosq_broker_config config = {
+        .host = "0.0.0.0",  // Listen on all interfaces
+        .port = mqtt_broker_port,  // Standard MQTT port
+        .tls_cfg = NULL,   // Plain TCP (no TLS)
+        .handle_message_cb = NULL  // No message callback
+    };
+
     mqtt_broker_running = true;
-    ESP_LOGI(TAG, "(Simulated) MQTT broker started successfully");
+    ESP_LOGI(TAG, "MQTT broker started successfully on port %d", mqtt_broker_port);
 
-    while (mqtt_broker_running) {
-        vTaskDelay(pdMS_TO_TICKS(1000));
+    // Start the broker (runs in the current task)
+    // According to the documentation, this is a blocking call
+    int ret = mosq_broker_run(&config);
+    
+    if (ret != 0) {
+        ESP_LOGE(TAG, "MQTT broker failed to start or exited with error: %d", ret);
+    } else {
+        ESP_LOGI(TAG, "MQTT broker stopped normally");
     }
-
-    ESP_LOGI(TAG, "(Simulated) MQTT broker stopped");
+    
+    mqtt_broker_running = false;
     vTaskDelete(NULL);
 }
 
@@ -37,13 +49,14 @@ esp_err_t iotcraft_mqtt_broker_init(void)
         return ESP_OK;
     }
     
-    // Create MQTT broker task
+    // Create MQTT broker task with adequate stack size
+    // According to documentation: minimum 5KB stack, but we use more for safety
     BaseType_t ret = xTaskCreate(
         mqtt_broker_task,
         "mqtt_broker",
-        8192,  // Stack size - MQTT broker needs substantial stack
+        12288,  // 12KB stack size - Mosquitto broker needs substantial stack 
         NULL,
-        5,     // Priority
+        5,      // Priority
         &mqtt_broker_task_handle
     );
     

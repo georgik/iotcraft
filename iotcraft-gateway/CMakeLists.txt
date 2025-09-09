@@ -9,6 +9,11 @@ if(NOT DEFINED SDKCONFIG_DEFAULTS)
 endif()
 
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
+
+# Define FD_SETSIZE to support 100 LWIP sockets + system file descriptors
+# Need at least 100 sockets + 6 for system FDs = 106, using 128 for safety
+add_compile_definitions(FD_SETSIZE=128)
+
 project(iotcraft-gateway)
 
 get_filename_component(configName "${CMAKE_BINARY_DIR}" NAME)

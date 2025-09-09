@@ -7,6 +7,8 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_freertos_hooks.h"
+#include "esp_netif.h"
+#include "esp_wifi.h"
 #include <pthread.h>
 
 // SDL3 includes
@@ -35,6 +37,8 @@ typedef struct {
     char wifi_ssid[32];
     char wifi_password[64];
     char gateway_ip[16];
+    char sta_ip[16];
+    bool sta_connected;
 } gateway_status_t;
 
 static gateway_status_t current_status = {
@@ -46,7 +50,9 @@ static gateway_status_t current_status = {
     .mqtt_connections = 0,
     .wifi_ssid = "iotcraft",
     .wifi_password = "iotcraft123",
-    .gateway_ip = "192.168.4.1"
+    .gateway_ip = "192.168.4.1",
+    .sta_ip = "N/A",
+    .sta_connected = false
 };
 
 // CPU monitoring task
@@ -120,6 +126,35 @@ static void format_uptime(uint32_t seconds, char *buffer, size_t size)
     uint32_t minutes = (seconds % 3600) / 60;
     uint32_t secs = seconds % 60;
     snprintf(buffer, size, "%02lu:%02lu:%02lu", hours, minutes, secs);
+}
+
+// Get STA IP address if connected
+static void update_sta_ip_status(void)
+{
+    esp_netif_t *sta_netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+    if (sta_netif) {
+        esp_netif_ip_info_t ip_info;
+        if (esp_netif_get_ip_info(sta_netif, &ip_info) == ESP_OK) {
+            if (ip_info.ip.addr != 0) {
+                // STA is connected and has an IP
+                snprintf(current_status.sta_ip, sizeof(current_status.sta_ip), 
+                        IPSTR, IP2STR(&ip_info.ip));
+                current_status.sta_connected = true;
+            } else {
+                // STA interface exists but no IP assigned
+                strncpy(current_status.sta_ip, "Connecting...", sizeof(current_status.sta_ip) - 1);
+                current_status.sta_connected = false;
+            }
+        } else {
+            // Failed to get IP info
+            strncpy(current_status.sta_ip, "Error", sizeof(current_status.sta_ip) - 1);
+            current_status.sta_connected = false;
+        }
+    } else {
+        // STA interface not found
+        strncpy(current_status.sta_ip, "N/A", sizeof(current_status.sta_ip) - 1);
+        current_status.sta_connected = false;
+    }
 }
 
 // Draw status indicator circle
@@ -252,7 +287,7 @@ static void* gui_thread(void* args)
         last_update = current_time;
         
         // Update service status from other modules
-        current_status.mqtt_active = true;  // TODO: get from iotcraft_mqtt_is_running()
+        current_status.mqtt_active = iotcraft_mqtt_is_running();
         current_status.mdns_active = true;  // TODO: get from iotcraft_mdns_is_running()
         current_status.http_active = true;  // TODO: get from iotcraft_http_is_running()
         
@@ -264,6 +299,9 @@ static void* gui_thread(void* args)
             strncpy(current_status.wifi_password, wifi_config.password, sizeof(current_status.wifi_password) - 1);
             current_status.wifi_password[sizeof(current_status.wifi_password) - 1] = '\0';
         }
+        
+        // Update STA IP address status
+        update_sta_ip_status();
         
         // Clear screen with dark background
         SDL_SetRenderDrawColor(renderer, 20, 20, 30, 255);
@@ -338,8 +376,15 @@ static void* gui_thread(void* args)
             draw_text_at(renderer, small_font, network_info, right_col_x + 8.0f, right_col_y, white);
             right_col_y += 16.0f;
             
-            snprintf(network_info, sizeof(network_info), "IP: %s", current_status.gateway_ip);
+            // Show AP IP (Gateway IP)
+            snprintf(network_info, sizeof(network_info), "AP IP: %s", current_status.gateway_ip);
             draw_text_at(renderer, small_font, network_info, right_col_x + 8.0f, right_col_y, white);
+            right_col_y += 16.0f;
+            
+            // Show STA IP with connection status indicator
+            SDL_Color sta_color = current_status.sta_connected ? green : white;
+            snprintf(network_info, sizeof(network_info), "STA IP: %s", current_status.sta_ip);
+            draw_text_at(renderer, small_font, network_info, right_col_x + 8.0f, right_col_y, sta_color);
             right_col_y += 16.0f;
             
             snprintf(network_info, sizeof(network_info), "Clients: %d", current_status.connected_clients);
