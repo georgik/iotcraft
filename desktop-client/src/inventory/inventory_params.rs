@@ -85,6 +85,8 @@ pub struct ItemGivingParams<'w, 's> {
 pub struct BlockBreakingParams<'w, 's> {
     pub break_events: EventReader<'w, 's, BreakBlockEvent>,
     pub voxel_world: ResMut<'w, VoxelWorld>,
+    pub commands: Commands<'w, 's>,
+    pub existing_blocks_query: Query<'w, 's, (Entity, &'static VoxelBlock)>,
     // PhantomData to use the 's lifetime
     _phantom: std::marker::PhantomData<&'s ()>,
 }
@@ -111,6 +113,30 @@ pub struct MultiplayerBlockSyncParams<'w, 's> {
     pub multiplayer_mode: Res<'w, crate::multiplayer_web::MultiplayerMode>,
     pub player_profile: Res<'w, PlayerProfile>,
     pub inventory: Res<'w, PlayerInventory>,
+    // PhantomData to use the 's lifetime
+    _phantom: std::marker::PhantomData<&'s ()>,
+}
+
+/// Parameter bundle for multiplayer block breaking synchronization (desktop only)
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(SystemParam)]
+pub struct MultiplayerBlockBreakingSyncParams<'w, 's> {
+    pub break_events: EventReader<'w, 's, BreakBlockEvent>,
+    pub block_change_events: EventWriter<'w, crate::multiplayer::BlockChangeEvent>,
+    pub multiplayer_mode: Res<'w, crate::multiplayer::MultiplayerMode>,
+    pub player_profile: Res<'w, PlayerProfile>,
+    // PhantomData to use the 's lifetime
+    _phantom: std::marker::PhantomData<&'s ()>,
+}
+
+/// Parameter bundle for multiplayer block breaking synchronization (WASM only)
+#[cfg(target_arch = "wasm32")]
+#[derive(SystemParam)]
+pub struct MultiplayerBlockBreakingSyncParams<'w, 's> {
+    pub break_events: EventReader<'w, 's, BreakBlockEvent>,
+    pub block_change_events: EventWriter<'w, crate::multiplayer_web::BlockChangeEvent>,
+    pub multiplayer_mode: Res<'w, crate::multiplayer_web::MultiplayerMode>,
+    pub player_profile: Res<'w, PlayerProfile>,
     // PhantomData to use the 's lifetime
     _phantom: std::marker::PhantomData<&'s ()>,
 }

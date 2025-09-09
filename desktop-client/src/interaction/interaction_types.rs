@@ -36,7 +36,8 @@ pub struct HoveredEntity {
 /// Resource tracking ghost block preview state
 #[derive(Resource, Default)]
 pub struct GhostBlockState {
-    pub position: Option<IVec3>,
+    pub target_block_position: Option<IVec3>, // Position of existing block that would be broken (highlighted)
+    pub placement_position: Option<IVec3>, // Position where new block would be placed (adjacent to target)
     pub can_place: bool,
 }
 

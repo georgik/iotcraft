@@ -10,7 +10,7 @@ use crate::inventory::ItemType;
 use super::inventory_params::{
     BlockBreakingParams, BlockPlacementParams, BlockVisualsParams,
     ComprehensiveBlockPlacementParams, ConsoleAwareInventoryInputParams, InventoryInputParams,
-    ItemGivingParams, MultiplayerBlockSyncParams,
+    ItemGivingParams, MultiplayerBlockBreakingSyncParams, MultiplayerBlockSyncParams,
 };
 
 /// System to handle inventory input (console feature enabled version)
@@ -334,10 +334,107 @@ fn handle_multiplayer_block_sync(params: &mut MultiplayerBlockSyncParams) {
     }
 }
 
-/// System to handle block breaking using parameter bundles
+/// System to handle block breaking using parameter bundles with visual entity removal
 pub fn break_block_system_bundled(mut params: BlockBreakingParams) {
     for event in params.break_events.read() {
+        // Remove from voxel world data
         params.voxel_world.remove_block(&event.position);
+
+        // Remove visual entity if it exists
+        for (entity, block) in params.existing_blocks_query.iter() {
+            if block.position == event.position {
+                params.commands.entity(entity).despawn();
+                info!("Removed visual block entity at {:?}", event.position);
+                break;
+            }
+        }
+
+        info!("Block removed from VoxelWorld at {:?}", event.position);
+    }
+}
+
+/// System to handle multiplayer block breaking synchronization using parameter bundles
+pub fn break_block_multiplayer_sync_system_bundled(mut params: MultiplayerBlockBreakingSyncParams) {
+    handle_multiplayer_block_breaking_sync(&mut params);
+}
+
+/// Core multiplayer block breaking sync logic (shared between comprehensive and standalone systems)
+fn handle_multiplayer_block_breaking_sync(params: &mut MultiplayerBlockBreakingSyncParams) {
+    for event in params.break_events.read() {
+        info!(
+            "🔄 Processing block breaking event at {:?} - current multiplayer mode: {:?}",
+            event.position, &*params.multiplayer_mode
+        );
+
+        // Only send multiplayer events when in multiplayer mode
+        #[cfg(not(target_arch = "wasm32"))]
+        let is_multiplayer_with_world = matches!(
+            &*params.multiplayer_mode,
+            crate::multiplayer::MultiplayerMode::HostingWorld { world_id: _, .. }
+                | crate::multiplayer::MultiplayerMode::JoinedWorld { world_id: _, .. }
+        );
+
+        #[cfg(target_arch = "wasm32")]
+        let is_multiplayer_with_world = matches!(
+            &*params.multiplayer_mode,
+            crate::multiplayer_web::MultiplayerMode::HostingWorld { world_id: _, .. }
+                | crate::multiplayer_web::MultiplayerMode::JoinedWorld { world_id: _, .. }
+        );
+
+        if is_multiplayer_with_world {
+            let world_id = match &*params.multiplayer_mode {
+                #[cfg(not(target_arch = "wasm32"))]
+                crate::multiplayer::MultiplayerMode::HostingWorld { world_id, .. }
+                | crate::multiplayer::MultiplayerMode::JoinedWorld { world_id, .. } => world_id,
+                #[cfg(target_arch = "wasm32")]
+                crate::multiplayer_web::MultiplayerMode::HostingWorld { world_id, .. }
+                | crate::multiplayer_web::MultiplayerMode::JoinedWorld { world_id, .. } => world_id,
+                _ => unreachable!("We already checked for multiplayer mode"),
+            };
+
+            info!(
+                "✅ In multiplayer mode (world_id: {}), generating block removal event for player {} ({})",
+                world_id, params.player_profile.player_name, params.player_profile.player_id
+            );
+
+            #[cfg(not(target_arch = "wasm32"))]
+            params
+                .block_change_events
+                .write(crate::multiplayer::BlockChangeEvent {
+                    world_id: world_id.clone(),
+                    player_id: params.player_profile.player_id.clone(),
+                    player_name: params.player_profile.player_name.clone(),
+                    change_type: crate::multiplayer::BlockChangeType::Removed {
+                        x: event.position.x,
+                        y: event.position.y,
+                        z: event.position.z,
+                    },
+                });
+
+            #[cfg(target_arch = "wasm32")]
+            params
+                .block_change_events
+                .write(crate::multiplayer_web::BlockChangeEvent {
+                    world_id: world_id.clone(),
+                    player_id: params.player_profile.player_id.clone(),
+                    player_name: params.player_profile.player_name.clone(),
+                    change_type: crate::multiplayer_web::BlockChangeType::Removed {
+                        x: event.position.x,
+                        y: event.position.y,
+                        z: event.position.z,
+                    },
+                });
+
+            info!(
+                "📡 Sent multiplayer block removal event at {:?} for world {}",
+                event.position, world_id
+            );
+        } else {
+            info!(
+                "🚫 Not in multiplayer mode, skipping MQTT publish for block removal at {:?}",
+                event.position
+            );
+        }
     }
 }
 

@@ -1,12 +1,16 @@
+use crate::config::MqttConfig;
 use crate::fonts::Fonts;
 use crate::localization::{
     Language, LanguageChangeEvent, LocalizationBundle, LocalizationConfig, LocalizedText,
     get_localized_text,
 };
+use crate::multiplayer::MultiplayerConnectionStatus;
 use crate::world::{
     CreateWorldEvent, DeleteWorldEvent, DiscoveredWorlds, LoadWorldEvent, SaveWorldEvent,
 };
-use bevy::{app::AppExit, prelude::*};
+use bevy::app::AppExit;
+use bevy::prelude::*;
+use log::info;
 
 // Desktop-specific multiplayer imports
 #[cfg(not(target_arch = "wasm32"))]
@@ -146,6 +150,7 @@ impl Plugin for MainMenuPlugin {
             Update,
             (
                 main_menu_interaction.run_if(in_state(GameState::MainMenu)),
+                update_mqtt_status_indicator.run_if(in_state(GameState::MainMenu)),
                 settings_menu_interaction.run_if(in_state(GameState::Settings)),
                 language_button_interaction.run_if(in_state(GameState::Settings)),
                 world_selection_interaction.run_if(in_state(GameState::WorldSelection)),
@@ -368,6 +373,10 @@ pub struct WorldCreationState {
     pub selected_template: String,
 }
 
+/// Component to mark the MQTT status indicator
+#[derive(Component)]
+pub struct MqttStatusIndicator;
+
 /// Game state enum
 #[derive(Debug, Clone, Eq, PartialEq, Hash, States, Default)]
 pub enum GameState {
@@ -386,6 +395,8 @@ fn setup_main_menu(
     _localization_bundle: Res<LocalizationBundle>,
     _localization_config: Res<LocalizationConfig>,
     fonts: Res<Fonts>,
+    mqtt_status: Option<Res<MultiplayerConnectionStatus>>,
+    mqtt_config: Res<MqttConfig>,
 ) {
     commands
         .spawn((
@@ -494,12 +505,90 @@ fn setup_main_menu(
                             ));
                         });
                 });
+
+            // MQTT Status Indicator
+            parent
+                .spawn((Node {
+                    width: Val::Px(200.0),
+                    height: Val::Px(45.0),
+                    justify_content: JustifyContent::Center,
+                    align_items: AlignItems::Center,
+                    position_type: PositionType::Absolute,
+                    bottom: Val::Px(10.0),
+                    right: Val::Px(10.0),
+                    ..default()
+                },))
+                .with_children(|parent| {
+                    // MQTT Status text with broker address
+                    let broker_addr = format!("{}:{}", mqtt_config.host, mqtt_config.port);
+                    let (status_text, status_color) = if let Some(mqtt_status) = mqtt_status {
+                        if mqtt_status.connection_available {
+                            (
+                                format!("MQTT: Connected\n{}", broker_addr),
+                                Color::srgb(0.2, 0.7, 0.2),
+                            )
+                        } else {
+                            (
+                                format!("MQTT: Offline\n{}", broker_addr),
+                                Color::srgb(0.7, 0.2, 0.2),
+                            )
+                        }
+                    } else {
+                        // Initial state - show as connecting since we haven't tested yet
+                        (
+                            format!("MQTT: Connecting\n{}", broker_addr),
+                            Color::srgb(0.7, 0.7, 0.2),
+                        )
+                    };
+
+                    parent.spawn((
+                        Text::new(&status_text),
+                        TextFont {
+                            font: fonts.regular.clone(),
+                            font_size: 12.0, // Slightly smaller to fit two lines
+                            font_smoothing: bevy::text::FontSmoothing::default(),
+                            line_height: bevy::text::LineHeight::default(),
+                        },
+                        TextColor(status_color),
+                        MqttStatusIndicator,
+                    ));
+                });
         });
 }
-
 fn despawn_main_menu(mut commands: Commands, query: Query<Entity, With<MainMenu>>) {
     for entity in query.iter() {
         commands.entity(entity).despawn();
+    }
+}
+
+fn update_mqtt_status_indicator(
+    mqtt_status: Option<Res<MultiplayerConnectionStatus>>,
+    mqtt_config: Res<MqttConfig>,
+    mut query: Query<(&mut Text, &mut TextColor), With<MqttStatusIndicator>>,
+) {
+    for (mut text, mut color) in query.iter_mut() {
+        let broker_addr = format!("{}:{}", mqtt_config.host, mqtt_config.port);
+        let (status_text, status_color) = if let Some(ref mqtt_status) = mqtt_status {
+            if mqtt_status.connection_available {
+                (
+                    format!("MQTT: Connected\n{}", broker_addr),
+                    Color::srgb(0.2, 0.7, 0.2),
+                )
+            } else {
+                (
+                    format!("MQTT: Offline\n{}", broker_addr),
+                    Color::srgb(0.7, 0.2, 0.2),
+                )
+            }
+        } else {
+            (
+                format!("MQTT: Connecting\n{}", broker_addr),
+                Color::srgb(0.7, 0.7, 0.2),
+            )
+        };
+
+        **text = status_text;
+        *color = TextColor(status_color);
     }
 }
 

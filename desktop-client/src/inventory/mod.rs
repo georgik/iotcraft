@@ -26,6 +26,7 @@ impl Plugin for InventoryPlugin {
                     place_block_system,
                     place_block_multiplayer_sync_system,
                     break_block_system,
+                    break_block_multiplayer_sync_system,
                 ),
             );
     }

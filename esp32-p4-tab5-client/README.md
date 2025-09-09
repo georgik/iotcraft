@@ -1,129 +1,196 @@
-# ESP32 Swift Example
+# IoTCraft ESP32-P4 Tab5 Client
 
-![Test Status](https://github.com/georgik/esp32-sdl3-swift-example/actions/workflows/test.yml/badge.svg)
+**A high-performance voxel-based IoTCraft game client for the M5Stack Tab5, built with Swift and SDL3**
 
-Example of graphical application for ESP32-C3, ESP32-C6, ESP32-P4 using Swift programming language with SDL3 graphics library.
+![Platform](https://img.shields.io/badge/platform-ESP32--P4-blue.svg)
+![Swift](https://img.shields.io/badge/Swift-Embedded-orange.svg)
+![SDL3](https://img.shields.io/badge/SDL-3.0-green.svg)
+![ESP-IDF](https://img.shields.io/badge/ESP--IDF-6.0-red.svg)
+![Status](https://img.shields.io/badge/status-Working-brightgreen.svg)
 
-Read more about Swift for ESP32 at [Espressif Developer Portal](https://developer.espressif.com/tags/swift/).
+This is a specialized IoTCraft game client designed specifically for the **M5Stack Tab5** ESP32-P4 tablet. It features a top-down voxel world renderer with touchscreen interaction, IoT device control, and real-time world updates.
 
-## On-line Demo Simulation
+## ✨ Features
 
-[![ESP32-P4 SDL3 Swift Simulation](docs/img/esp32-p4-sdl3-swift.webp)](https://wokwi.com/experimental/viewer?diagram=https%3A%2F%2Fraw.githubusercontent.com%2Fgeorgik%2Fesp32-sdl3-swift-example%2Fmain%2Fboards%2Fesp32_p4_function_ev_board%2Fdiagram.json&firmware=https%3A%2F%2Fgithub.com%2Fgeorgik%2Fesp32-sdl3-swift-example%2Freleases%2Fdownload%2Fv1.0.0%2Fesp32-sdl3-swift-example-esp32_p4_function_ev_board.bin)
+- 🎮 **Interactive IoTCraft World**: Top-down voxel world with block placement and IoT device interaction
+- 📱 **Touch Interface**: Full capacitive touch support with GT911 controller
+- 🖥️ **High-Resolution Display**: 720x1280 MIPI-DSI display with SDL3 hardware acceleration
+- ⚡ **High Performance**: 200MHz PSRAM, 256KB L2 cache, dual-core RISC-V at 360MHz
+- 🏠 **IoT Integration**: Control and monitor IoT devices within the game world
+- 🌍 **Real-time Updates**: Dynamic world state with device status changes
+- 🎨 **Rich Graphics**: SDL3-powered rendering with bitmap textures and TTF fonts
+- 📁 **Asset System**: LittleFS-based asset storage for textures, fonts, and resources
 
-[Run the ESP32-P4 SDL3 Swift with Wokwi.com](https://wokwi.com/experimental/viewer?diagram=https%3A%2F%2Fraw.githubusercontent.com%2Fgeorgik%2Fesp32-sdl3-swift-example%2Fmain%2Fboards%2Fesp32_p4_function_ev_board%2Fdiagram.json&firmware=https%3A%2F%2Fgithub.com%2Fgeorgik%2Fesp32-sdl3-swift-example%2Freleases%2Fdownload%2Fv1.0.0%2Fesp32-sdl3-swift-example-esp32_p4_function_ev_board.bin)
+## 🛠️ Requirements
 
-## Requirements
+- **Swift 6.1+** - [Download from swift.org](https://www.swift.org/install/)
+- **ESP-IDF 6.0** - [ESP-IDF Installation Guide](https://docs.espressif.com/projects/esp-idf/en/latest/esp32/get-started/)
+- **M5Stack Tab5** - [Product Page](https://shop.m5stack.com/products/m5stack-tab5-esp32-p4-tablet)
 
-- Swift 6.1 - https://www.swift.org/install
-- ESP-IDF 5.4 - https://github.com/espressif/esp-idf
+## 🚀 Quick Start
 
-## Build
+### 1. Configure Build Environment
 
-### Configure build environment
+```bash
+# Setup ESP-IDF
+source /path/to/esp-idf/export.sh
 
-```shell
-source esp-idf/export.sh
-```
-
-If you want to use specific Swift toolchain, you can set the environment variable `TOOLCHAINS`.
-The step is not required for Swift 6.1 and newer.
-```shell
+# Optional: Set specific Swift toolchain (for development builds)
 export TOOLCHAINS=$(plutil -extract CFBundleIdentifier raw /Library/Developer/Toolchains/swift-DEVELOPMENT-SNAPSHOT-2024-10-30-a.xctoolchain/Info.plist)
 ```
 
-## Supported Boards
+### 2. Build and Flash
 
-This project supports multiple ESP32 development boards with different display configurations:
+```bash
+# Build the project
+idf.py @boards/m5stack_tab5.cfg build
 
-| Board | MCU | Display | Resolution | Interface | Status |
-|-------|-----|---------|------------|-----------|--------|
-| ESP32-P4 Function Evaluation Board | ESP32-P4 | RGB LCD | 480x480 | RGB | ✅ Working |
-| M5Stack Tab5 | ESP32-P4 | MIPI-DSI LCD | 720x1280 | MIPI-DSI | ✅ Working |
-| ESP32-C3 LCD Kit | ESP32-C3 | SPI LCD | 240x240 | SPI | ✅ Working |
-| ESP32-C6 DevKit | ESP32-C6 | SPI LCD | 320x240 | SPI | ✅ Working |
-| Waveshare ESP32-C6-LCD-1.47 | ESP32-C6 | SPI LCD | 172x320 | SPI | ✅ Working |
-
-## Build Instructions
-
-### Build for ESP32-P4 Function Evaluation Board
-
-```shell
-idf.py @boards/esp32_p4_function_ev_board.cfg flash monitor
-```
-
-### Build for M5Stack Tab5
-
-![M5Stack Tab5](docs/img/m5stack-tab5.webp)
-
-The M5Stack Tab5 is a premium ESP32-P4 tablet with a high-resolution 5-inch MIPI-DSI display (720x1280) and GT911 capacitive touch controller.
-
-- **Board**: [M5Stack Tab5](https://shop.m5stack.com/products/m5stack-tab5-esp32-p4-tablet)
-- **MCU**: ESP32-P4 RISC-V dual-core
-- **Display**: 5-inch IPS LCD, 720x1280 resolution
-- **Touch**: GT911 capacitive touch controller
-- **Interface**: MIPI-DSI for display
-
-```shell
+# Flash to M5Stack Tab5
 idf.py @boards/m5stack_tab5.cfg flash monitor
 ```
 
-### Build for ESP32-C3-LcdKit
+### 3. Interact with IoTCraft World
 
-![ESP32-C3-LcdKit](docs/img/esp32-c3-lcdkit.webp)
+- **Touch the screen** to interact with IoT devices
+- **Observe device states** changing in real-time
+- **View the voxel world** rendered with different block types
+- **Monitor console output** for device status updates
 
-```shell
-idf.py @boards/esp32_c3_lcdkit.cfg flash monitor
+## 🎯 Target Hardware
+
+**This project is specifically optimized for the M5Stack Tab5:**
+
+| Specification | Details |
+|---------------|--------|
+| **MCU** | ESP32-P4 RISC-V Dual-Core @ 360MHz |
+| **Memory** | 768KB SRAM + 32MB PSRAM @ 200MHz |
+| **Display** | 5" IPS LCD, 720×1280, MIPI-DSI Interface |
+| **Touch** | GT911 Capacitive Touch Controller |
+| **Storage** | 16MB Flash + LittleFS for Assets |
+| **Cache** | 256KB L2 Cache, 128B Cache Lines |
+| **Graphics** | SDL3 with Hardware Acceleration |
+| **Status** | ✅ **Fully Working** |
+
+## 📋 Project Structure
+
+```
+esp32-p4-tab5-client/
+├── main/                    # Swift application code
+│   ├── Main.swift          # IoTCraft game logic & SDL3 integration
+│   └── FileSystem.swift    # LittleFS asset management
+├── components/
+│   ├── sdl/                # Customized SDL3 component (ESP-IDF 6 compatible)
+│   └── m5stack_tab5/       # M5Stack Tab5 BSP component
+├── assets/                 # Game assets (fonts, textures)
+├── boards/                 # Board-specific configurations
+└── sdkconfig.*             # ESP-IDF configuration files
 ```
 
-### Build for ESP32-C6-DevKit
+## 🎮 IoTCraft Game Features
 
-![ESP32-C6-DevKit](docs/img/esp32-c6-devkit.webp)
+### World Rendering
+- **Top-down voxel view** with multiple block types:
+  - 🌱 Grass blocks (forest green)
+  - 🟫 Dirt blocks (saddle brown) 
+  - ⚫ Stone blocks (gray)
+  - ⬜ Quartz blocks (beige)
+  - 🔷 Glass panes (light blue)
+  - 🔷 Cyan terracotta (cadet blue)
 
-The configuration of this board is based on [ESP-BSP Generic](https://developer.espressif.com/blog/using-esp-bsp-with-devkits/) which allows configuration using menuconfig.
+### IoT Device Integration
+- **Smart Lamps** 💡: Touch to toggle on/off (yellow when on)
+- **Smart Doors** 🚪: Interactive door controls (brown)
+- **Sensors** 📡: Environmental monitoring devices (green)
+- **Real-time Status**: Devices change state automatically
+- **Online/Offline Indication**: Visual feedback for device connectivity
 
-SPI Display configuration:
+### Touch Controls
+- **Device Interaction**: Touch IoT devices to control them
+- **Visual Feedback**: Devices highlight when touched
+- **Capacitive Touch**: GT911 controller with precise input
 
+## 🔧 Technical Implementation
+
+### ESP-IDF 6.0 Compatibility Fixes
+- ✅ **Native pthread support**: Removed duplicate SDL pthread declarations
+- ✅ **Updated SPIRAM settings**: `CONFIG_FREERTOS_TASK_CREATE_ALLOW_EXT_MEM=y`
+- ✅ **SDL3 driver fixes**: Corrected VideoBootStrap initialization
+- ✅ **BSP integration**: Working M5Stack Tab5 display initialization
+
+### Performance Optimizations
+- 🚀 **200MHz PSRAM**: Critical for smooth graphics performance
+- 🎯 **256KB L2 Cache**: Optimized cache configuration for ESP32-P4
+- ⚡ **Swift Embedded**: No string interpolation runtime dependencies
+- 🖥️ **Hardware Acceleration**: SDL3 with ESP-IDF video drivers
+
+### Memory Configuration
 ```ini
-CONFIG_BSP_DISPLAY_ENABLED=y
-CONFIG_BSP_DISPLAY_SCLK_GPIO=6
-CONFIG_BSP_DISPLAY_MOSI_GPIO=7
-CONFIG_BSP_DISPLAY_MISO_GPIO=-1
-CONFIG_BSP_DISPLAY_CS_GPIO=20
-CONFIG_BSP_DISPLAY_DC_GPIO=21
-CONFIG_BSP_DISPLAY_RST_GPIO=3
-CONFIG_BSP_DISPLAY_DRIVER_ILI9341=y
+# Critical PSRAM settings for high performance
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_SPEED_200M=y
+CONFIG_SPIRAM_USE_MALLOC=y
+CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL=32768
+CONFIG_CACHE_L2_CACHE_256KB=y
+CONFIG_CACHE_L2_CACHE_LINE_128B=y
 ```
 
-You can change the configuration by running:
+## 🐛 Troubleshooting
 
-```shell
-idf.py @boards/esp32_c6_devkit.cfg menuconfig
-```
+### Common Issues
 
-```shell
-idf.py @boards/esp32_c6_devkit.cfg flash monitor
-```
+**Display not initializing:**
+- Ensure proper PSRAM configuration (200MHz)
+- Verify M5Stack Tab5 BSP component is properly loaded
+- Check MIPI-DSI initialization in console output
 
-### Build for Waveshare ESP32-C6-LCD-1.47
+**Touch not working:**
+- GT911 touch controller should initialize automatically
+- Check I2C communication in console logs
+- Verify touch coordinates are being detected
 
-![SP32-C6-LCD-1.47](docs/img/waveshare-esp32-c6-lcd-1.47.webp)
+**Build errors:**
+- Ensure ESP-IDF 6.0 is properly installed
+- Verify Swift 6.1+ toolchain
+- Check component dependencies are resolved
 
-- board: [ESP32-C6-LCD-1.47](https://www.waveshare.com/esp32-c6-lcd-1.47.htm)
-- display: 172x320
+**Performance issues:**
+- PSRAM **must** run at 200MHz for smooth graphics
+- Monitor memory usage in console
+- Ensure L2 cache is properly configured
 
-```shell
-idf.py @boards/waveshare-esp32-c6-lcd-1.47.cfg flash monitor
-```
+## 📚 Development Notes
 
-### Run simulation in VS Code
+### Key Architectural Decisions
+- **Embedded Swift**: No standard library dependencies, optimized for microcontrollers
+- **SDL3 Integration**: Direct hardware-accelerated graphics rendering
+- **Component Architecture**: Modular design with customizable SDL and BSP components
+- **Asset Management**: LittleFS filesystem for efficient asset storage
+- **Memory Management**: Heap allocation preferred over stack for large objects
 
-- Build the project, to get binaries for simulation.
-- Install [Wokwi for VS Code](https://docs.wokwi.com/vscode/getting-started/).
-- Open file `boards/esp32_.../diagram.json`.
-- Click Play button to start simulation.
-- Click Pause button to freeze simulation and display states of GPIOs.
+### ESP-IDF 6.0 Migration
+This project has been fully updated for ESP-IDF 6.0 compatibility, including:
+- Native pthread support (removed custom implementations)
+- Updated SPIRAM configuration names
+- Fixed SDL3 video driver initialization
+- Resolved component dependency conflicts
 
-## Credits
+## 🤝 Contributing
 
-- Graphical assets: https://opengameart.org/content/platformer-tiles
-- Font FreeSans.ttf: https://github.com/opensourcedesign/fonts/blob/master/gnu-freefont_freesans/FreeSans.ttf
+Contributions are welcome! Key areas for improvement:
+- Additional IoT device types
+- Enhanced graphics and effects
+- Network multiplayer features
+- More interactive world elements
+
+## 📄 License
+
+This project is part of the IoTCraft ecosystem. See the main IoTCraft repository for licensing information.
+
+## 🙏 Credits
+
+- **IoTCraft Project**: Part of the larger IoTCraft voxel game ecosystem
+- **M5Stack**: Tab5 hardware platform and BSP components
+- **Espressif**: ESP-IDF framework and ESP32-P4 platform
+- **SDL3**: Cross-platform graphics and input library
+- **Swift Community**: Embedded Swift development
+- **Assets**: FreeSans.ttf font and game textures

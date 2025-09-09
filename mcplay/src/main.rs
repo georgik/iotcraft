@@ -312,7 +312,7 @@ use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap},
+    widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap},
     Frame, Terminal,
 };
 #[cfg(feature = "tui")]
@@ -378,11 +378,15 @@ struct ScenarioInfo {
 #[cfg(feature = "tui")]
 struct App {
     scenarios: Vec<ScenarioInfo>,
+    filtered_scenarios: Vec<ScenarioInfo>,
     list_state: ListState,
     should_quit: bool,
     show_details: bool,
     selected_scenario: Option<ScenarioInfo>,
     message: Option<String>,
+    // Search functionality
+    search_mode: bool,
+    search_query: String,
 }
 
 #[cfg(feature = "tui")]
@@ -2756,16 +2760,19 @@ async fn show_tui() -> Result<(), Box<dyn std::error::Error>> {
     let scenarios = load_scenarios().await;
 
     let mut app = App {
+        filtered_scenarios: scenarios.clone(),
         scenarios,
         list_state: ListState::default(),
         should_quit: false,
         show_details: false,
         selected_scenario: None,
         message: None,
+        search_mode: false,
+        search_query: String::new(),
     };
 
     // Select first scenario if available
-    if !app.scenarios.is_empty() {
+    if !app.filtered_scenarios.is_empty() {
         app.list_state.select(Some(0));
     }
 
@@ -2840,6 +2847,33 @@ async fn load_scenarios() -> Vec<ScenarioInfo> {
 }
 
 #[cfg(feature = "tui")]
+impl App {
+    fn filter_scenarios(&mut self) {
+        if self.search_query.is_empty() {
+            self.filtered_scenarios = self.scenarios.clone();
+        } else {
+            let query_lower = self.search_query.to_lowercase();
+            self.filtered_scenarios = self
+                .scenarios
+                .iter()
+                .filter(|scenario| {
+                    scenario.name.to_lowercase().contains(&query_lower)
+                        || scenario.description.to_lowercase().contains(&query_lower)
+                })
+                .cloned()
+                .collect();
+        }
+
+        // Reset selection to first item
+        if !self.filtered_scenarios.is_empty() {
+            self.list_state.select(Some(0));
+        } else {
+            self.list_state.select(None);
+        }
+    }
+}
+
+#[cfg(feature = "tui")]
 async fn run_tui(
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
     app: &mut App,
@@ -2850,86 +2884,149 @@ async fn run_tui(
         if event::poll(Duration::from_millis(100))? {
             if let Event::Key(key) = event::read()? {
                 if key.kind == KeyEventKind::Press {
-                    match key.code {
-                        KeyCode::Char('q') | KeyCode::Esc => {
-                            if app.show_details {
-                                app.show_details = false;
-                                app.selected_scenario = None;
-                            } else {
-                                app.should_quit = true;
-                            }
+                    // Handle Ctrl+C
+                    if let KeyCode::Char('c') = key.code {
+                        if key
+                            .modifiers
+                            .contains(crossterm::event::KeyModifiers::CONTROL)
+                        {
+                            app.should_quit = true;
                         }
-                        KeyCode::Up => {
-                            if let Some(selected) = app.list_state.selected() {
-                                if selected > 0 {
-                                    app.list_state.select(Some(selected - 1));
-                                }
-                            }
-                        }
-                        KeyCode::Down => {
-                            if let Some(selected) = app.list_state.selected() {
-                                if selected < app.scenarios.len().saturating_sub(1) {
-                                    app.list_state.select(Some(selected + 1));
-                                }
-                            } else if !app.scenarios.is_empty() {
-                                app.list_state.select(Some(0));
-                            }
-                        }
-                        KeyCode::Enter => {
-                            if let Some(selected) = app.list_state.selected() {
-                                if selected < app.scenarios.len() {
-                                    let scenario = &app.scenarios[selected];
-                                    if scenario.is_valid {
-                                        // Exit TUI and run scenario
-                                        disable_raw_mode()?;
-                                        execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
-                                        terminal.show_cursor()?;
+                    }
 
-                                        return run_selected_scenario(&scenario.file_path).await;
-                                    } else {
-                                        app.message =
-                                            Some("Cannot run invalid scenario".to_string());
+                    if app.search_mode {
+                        // Search mode key handling
+                        match key.code {
+                            KeyCode::Esc => {
+                                // Exit search mode
+                                app.search_mode = false;
+                                app.search_query.clear();
+                                app.filtered_scenarios = app.scenarios.clone();
+                                app.message = None;
+                                if !app.filtered_scenarios.is_empty() {
+                                    app.list_state.select(Some(0));
+                                } else {
+                                    app.list_state.select(None);
+                                }
+                            }
+                            KeyCode::Enter => {
+                                // Exit search mode and keep filter
+                                app.search_mode = false;
+                                app.message = None;
+                            }
+                            KeyCode::Backspace => {
+                                // Remove last character from search query
+                                app.search_query.pop();
+                                app.filter_scenarios();
+                            }
+                            KeyCode::Char(c) => {
+                                // Add character to search query
+                                app.search_query.push(c);
+                                app.filter_scenarios();
+                            }
+                            _ => {}
+                        }
+                    } else {
+                        // Normal mode key handling
+                        match key.code {
+                            KeyCode::Char('q') | KeyCode::Esc => {
+                                if app.show_details {
+                                    app.show_details = false;
+                                    app.selected_scenario = None;
+                                } else {
+                                    app.should_quit = true;
+                                }
+                            }
+                            KeyCode::Char('/') => {
+                                // Enter search mode
+                                app.search_mode = true;
+                                app.search_query.clear();
+                                app.message = Some(
+                                    "🔍 Search scenarios (type to filter, Esc to cancel)"
+                                        .to_string(),
+                                );
+                            }
+                            KeyCode::Up => {
+                                if let Some(selected) = app.list_state.selected() {
+                                    if selected > 0 {
+                                        app.list_state.select(Some(selected - 1));
                                     }
                                 }
                             }
-                        }
-                        KeyCode::Char('d') => {
-                            if let Some(selected) = app.list_state.selected() {
-                                if selected < app.scenarios.len() {
-                                    app.selected_scenario = Some(app.scenarios[selected].clone());
-                                    app.show_details = true;
+                            KeyCode::Down => {
+                                if let Some(selected) = app.list_state.selected() {
+                                    if selected < app.filtered_scenarios.len().saturating_sub(1) {
+                                        app.list_state.select(Some(selected + 1));
+                                    }
+                                } else if !app.filtered_scenarios.is_empty() {
+                                    app.list_state.select(Some(0));
                                 }
                             }
-                        }
-                        KeyCode::Char('v') => {
-                            if let Some(selected) = app.list_state.selected() {
-                                if selected < app.scenarios.len() {
-                                    let scenario_path = &app.scenarios[selected].file_path;
-                                    app.message =
-                                        Some(format!("Validating {}...", scenario_path.display()));
+                            KeyCode::Enter => {
+                                if let Some(selected) = app.list_state.selected() {
+                                    if selected < app.filtered_scenarios.len() {
+                                        let scenario = &app.filtered_scenarios[selected];
+                                        if scenario.is_valid {
+                                            // Exit TUI and run scenario
+                                            disable_raw_mode()?;
+                                            execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
+                                            terminal.show_cursor()?;
 
-                                    // Validate scenario
-                                    match validate_scenario_file(scenario_path).await {
-                                        Ok(_) => {
-                                            app.message = Some("✅ Scenario is valid".to_string());
-                                        }
-                                        Err(e) => {
+                                            return run_selected_scenario(&scenario.file_path)
+                                                .await;
+                                        } else {
                                             app.message =
-                                                Some(format!("❌ Validation failed: {}", e));
+                                                Some("Cannot run invalid scenario".to_string());
                                         }
                                     }
                                 }
                             }
-                        }
-                        KeyCode::Char('r') => {
-                            // Refresh scenario list
-                            app.scenarios = load_scenarios().await;
-                            app.message = Some("🔄 Scenarios refreshed".to_string());
-                            if !app.scenarios.is_empty() && app.list_state.selected().is_none() {
-                                app.list_state.select(Some(0));
+                            KeyCode::Char('d') => {
+                                if let Some(selected) = app.list_state.selected() {
+                                    if selected < app.filtered_scenarios.len() {
+                                        app.selected_scenario =
+                                            Some(app.filtered_scenarios[selected].clone());
+                                        app.show_details = true;
+                                    }
+                                }
                             }
+                            KeyCode::Char('v') => {
+                                if let Some(selected) = app.list_state.selected() {
+                                    if selected < app.filtered_scenarios.len() {
+                                        let scenario_path =
+                                            &app.filtered_scenarios[selected].file_path;
+                                        app.message = Some(format!(
+                                            "Validating {}...",
+                                            scenario_path.display()
+                                        ));
+
+                                        // Validate scenario
+                                        match validate_scenario_file(scenario_path).await {
+                                            Ok(_) => {
+                                                app.message =
+                                                    Some("✅ Scenario is valid".to_string());
+                                            }
+                                            Err(e) => {
+                                                app.message =
+                                                    Some(format!("❌ Validation failed: {}", e));
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            KeyCode::Char('r') => {
+                                // Refresh scenario list
+                                app.scenarios = load_scenarios().await;
+                                app.filtered_scenarios = app.scenarios.clone();
+                                app.message = Some("🔄 Scenarios refreshed".to_string());
+                                if !app.filtered_scenarios.is_empty()
+                                    && app.list_state.selected().is_none()
+                                {
+                                    app.list_state.select(Some(0));
+                                }
+                            }
+                            _ => {}
                         }
-                        _ => {}
                     }
                 }
             }
@@ -2979,28 +3076,106 @@ fn draw_main(f: &mut Frame, app: &mut App) {
 
     // Scenario list
     let items: Vec<ListItem> = app
-        .scenarios
+        .filtered_scenarios
         .iter()
         .map(|scenario| {
             let status_icon = if scenario.is_valid { "✅" } else { "❌" };
-            let content = format!(
-                "{} {} - {} clients, {} steps",
-                status_icon, scenario.name, scenario.clients, scenario.steps
-            );
-            ListItem::new(content)
+
+            // Create highlighted text if we have a search query
+            if !app.search_query.is_empty() && !app.search_mode {
+                let query_lower = app.search_query.to_lowercase();
+                let name_lower = scenario.name.to_lowercase();
+                let desc_lower = scenario.description.to_lowercase();
+
+                // Create spans with highlighting
+                let mut spans = vec![Span::raw(format!("{} ", status_icon))];
+
+                // Highlight matches in name
+                if let Some(pos) = name_lower.find(&query_lower) {
+                    let name = &scenario.name;
+                    spans.push(Span::raw(&name[..pos]));
+                    spans.push(Span::styled(
+                        &name[pos..pos + app.search_query.len()],
+                        Style::default()
+                            .bg(Color::Yellow)
+                            .fg(Color::Black)
+                            .add_modifier(Modifier::BOLD),
+                    ));
+                    spans.push(Span::raw(&name[pos + app.search_query.len()..]));
+                } else {
+                    spans.push(Span::raw(&scenario.name));
+                }
+
+                spans.push(Span::raw(format!(
+                    " - {} clients, {} steps",
+                    scenario.clients, scenario.steps
+                )));
+
+                // Add description with highlighting if it matches
+                if desc_lower.contains(&query_lower) && desc_lower != name_lower {
+                    spans.push(Span::raw(" ("));
+                    if let Some(pos) = desc_lower.find(&query_lower) {
+                        let desc = &scenario.description;
+                        let preview_start = pos.saturating_sub(10);
+                        let preview_end = (pos + app.search_query.len() + 10).min(desc.len());
+                        let preview = &desc[preview_start..preview_end];
+
+                        let relative_pos = pos - preview_start;
+                        spans.push(Span::raw(&preview[..relative_pos]));
+                        spans.push(Span::styled(
+                            &preview[relative_pos..relative_pos + app.search_query.len()],
+                            Style::default()
+                                .bg(Color::Yellow)
+                                .fg(Color::Black)
+                                .add_modifier(Modifier::BOLD),
+                        ));
+                        spans.push(Span::raw(&preview[relative_pos + app.search_query.len()..]));
+                    }
+                    spans.push(Span::raw(")"));
+                }
+
+                ListItem::new(Line::from(spans))
+            } else {
+                // No highlighting needed
+                let content = format!(
+                    "{} {} - {} clients, {} steps",
+                    status_icon, scenario.name, scenario.clients, scenario.steps
+                );
+                ListItem::new(content)
+            }
         })
         .collect();
 
-    let scenarios_list = List::new(items)
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title(format!("📋 Scenarios ({} found)", app.scenarios.len())),
+    // Build title with search indicator
+    let title = if app.search_mode {
+        format!(
+            "📋 Scenarios - Search: '{}' ({}/{})",
+            app.search_query,
+            app.filtered_scenarios.len(),
+            app.scenarios.len()
         )
+    } else if app.search_query.is_empty() {
+        format!("📋 Scenarios ({} found)", app.filtered_scenarios.len())
+    } else {
+        format!(
+            "📋 Scenarios - Filtered: '{}' ({}/{})",
+            app.search_query,
+            app.filtered_scenarios.len(),
+            app.scenarios.len()
+        )
+    };
+
+    let scenarios_list = List::new(items)
+        .block(Block::default().borders(Borders::ALL).title(title))
         .highlight_style(Style::default().bg(Color::Yellow).fg(Color::Black))
         .highlight_symbol(">> ");
 
     f.render_stateful_widget(scenarios_list, chunks[1], &mut app.list_state);
+
+    // Render search modal if in search mode
+    if app.search_mode {
+        draw_search_modal(f, app);
+    }
 
     // Instructions and status
     let mut instructions = vec![
@@ -3011,13 +3186,18 @@ fn draw_main(f: &mut Frame, app: &mut App) {
             Span::raw(" Run  "),
             Span::styled("d", Style::default().add_modifier(Modifier::BOLD)),
             Span::raw(" Details  "),
+            Span::styled("/", Style::default().add_modifier(Modifier::BOLD)),
+            Span::raw(" Search"),
         ]),
         Line::from(vec![
             Span::styled("v", Style::default().add_modifier(Modifier::BOLD)),
             Span::raw(" Validate  "),
             Span::styled("r", Style::default().add_modifier(Modifier::BOLD)),
             Span::raw(" Refresh  "),
-            Span::styled("q/Esc", Style::default().add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "q/Esc/Ctrl+C",
+                Style::default().add_modifier(Modifier::BOLD),
+            ),
             Span::raw(" Quit"),
         ]),
     ];
@@ -3034,6 +3214,127 @@ fn draw_main(f: &mut Frame, app: &mut App) {
         .block(Block::default().borders(Borders::ALL).title("🔗 Controls"))
         .wrap(Wrap { trim: true });
     f.render_widget(help, chunks[2]);
+}
+
+#[cfg(feature = "tui")]
+fn draw_search_modal(f: &mut Frame, app: &App) {
+    // Calculate modal size - center it on screen
+    let area = f.area();
+    let modal_width = 60.min(area.width.saturating_sub(4));
+    let modal_height = 8;
+
+    let modal_x = (area.width.saturating_sub(modal_width)) / 2;
+    let modal_y = (area.height.saturating_sub(modal_height)) / 2;
+
+    let modal_area = ratatui::layout::Rect {
+        x: modal_x,
+        y: modal_y,
+        width: modal_width,
+        height: modal_height,
+    };
+
+    // Clear the background area
+    f.render_widget(Clear, modal_area);
+
+    // Create modal content layout
+    let modal_chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .margin(1)
+        .constraints([
+            Constraint::Length(3), // Title and input
+            Constraint::Length(2), // Results count
+            Constraint::Min(1),    // Instructions
+        ])
+        .split(modal_area);
+
+    // Modal border
+    let modal_block = Block::default()
+        .borders(Borders::ALL)
+        .title("🔍 Search Scenarios")
+        .title_alignment(Alignment::Center)
+        .border_style(Style::default().fg(Color::Cyan))
+        .style(Style::default().bg(Color::Black));
+
+    f.render_widget(modal_block, modal_area);
+
+    // Search input field
+    let input_text = if app.search_query.is_empty() {
+        "Type to search scenarios...".to_string()
+    } else {
+        app.search_query.clone()
+    };
+
+    let input_style = if app.search_query.is_empty() {
+        Style::default()
+            .fg(Color::Gray)
+            .add_modifier(Modifier::ITALIC)
+    } else {
+        Style::default().fg(Color::White)
+    };
+
+    let input_paragraph = Paragraph::new(input_text).style(input_style).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title("Query")
+            .border_style(Style::default().fg(Color::Yellow)),
+    );
+
+    f.render_widget(input_paragraph, modal_chunks[0]);
+
+    // Show cursor in input field
+    let cursor_x = modal_chunks[0].x + 1 + app.search_query.len() as u16;
+    let cursor_y = modal_chunks[0].y + 1;
+    if cursor_x < modal_chunks[0].x + modal_chunks[0].width.saturating_sub(1) {
+        f.set_cursor_position((cursor_x, cursor_y));
+    }
+
+    // Results count
+    let results_text = if app.search_query.is_empty() {
+        format!("Total scenarios: {}", app.scenarios.len())
+    } else {
+        format!(
+            "Found: {} of {} scenarios",
+            app.filtered_scenarios.len(),
+            app.scenarios.len()
+        )
+    };
+
+    let results_paragraph = Paragraph::new(results_text)
+        .style(Style::default().fg(Color::Green))
+        .alignment(Alignment::Center);
+
+    f.render_widget(results_paragraph, modal_chunks[1]);
+
+    // Instructions
+    let instructions = vec![Line::from(vec![
+        Span::styled(
+            "Enter",
+            Style::default()
+                .add_modifier(Modifier::BOLD)
+                .fg(Color::Cyan),
+        ),
+        Span::raw(" Apply filter  "),
+        Span::styled(
+            "Esc",
+            Style::default()
+                .add_modifier(Modifier::BOLD)
+                .fg(Color::Cyan),
+        ),
+        Span::raw(" Cancel  "),
+        Span::styled(
+            "Backspace",
+            Style::default()
+                .add_modifier(Modifier::BOLD)
+                .fg(Color::Cyan),
+        ),
+        Span::raw(" Delete"),
+    ])];
+
+    let instructions_paragraph = Paragraph::new(instructions)
+        .alignment(Alignment::Center)
+        .wrap(Wrap { trim: true });
+
+    f.render_widget(instructions_paragraph, modal_chunks[2]);
 }
 
 #[cfg(feature = "tui")]
@@ -3751,9 +4052,10 @@ fn draw_log_viewing_ui(f: &mut Frame, app: &LoggingApp) {
         .split(f.area());
 
     // Now split the main area horizontally for left and right panels
+    // Make left panel broader to accommodate progress bar better
     let chunks = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(25), Constraint::Percentage(75)])
+        .constraints([Constraint::Percentage(35), Constraint::Percentage(65)])
         .split(main_chunks[0]);
 
     // Split the left panel into log selector, step progress, and system info
@@ -3842,7 +4144,7 @@ fn draw_log_viewing_ui(f: &mut Frame, app: &LoggingApp) {
         0.0
     };
 
-    let progress_width = 30; // Width of progress bar
+    let progress_width = 20; // Width of progress bar (reduced to fit better in left pane)
     let filled_width = (progress_width as f64 * progress_ratio) as usize;
     let progress_bar = format!(
         "[{}{}] {}/{}",

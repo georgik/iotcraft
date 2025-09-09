@@ -187,7 +187,7 @@ fn build_web(release: bool) -> Result<()> {
     println!("🌐 Building IoTCraft for web (WASM)...");
 
     // Detect if we're in workspace root or desktop-client directory
-    let (workspace_root, desktop_client_dir) = if Path::new("desktop-client").exists() {
+    let (_workspace_root, desktop_client_dir) = if Path::new("desktop-client").exists() {
         // We're in workspace root
         (
             Path::new(".").to_path_buf(),

@@ -61,6 +61,12 @@ struct PoseRx(pub Mutex<mpsc::Receiver<PoseMessage>>);
 #[derive(Resource)]
 struct PoseTx(pub Mutex<mpsc::Sender<PoseMessage>>);
 
+#[derive(Resource)]
+struct MqttStatusTx(pub Mutex<mpsc::Sender<bool>>);
+
+#[derive(Resource)]
+struct MqttStatusRx(pub Mutex<mpsc::Receiver<bool>>);
+
 #[derive(Resource, Default)]
 pub struct MultiplayerConnectionStatus {
     pub connection_available: bool,
@@ -80,7 +86,14 @@ impl Plugin for MultiplayerPlugin {
             .insert_resource(InitialPoseSent::default())
             .insert_resource(MultiplayerConnectionStatus::default())
             .add_systems(Startup, start_multiplayer_connections)
-            .add_systems(Update, (publish_local_pose, apply_remote_poses))
+            .add_systems(
+                Update,
+                (
+                    publish_local_pose,
+                    apply_remote_poses,
+                    update_mqtt_connection_status,
+                ),
+            )
             .add_systems(Update, update_position_timer);
     }
 }
@@ -121,16 +134,19 @@ fn start_multiplayer_connections(
 ) {
     let (pose_tx, pose_rx) = mpsc::channel::<PoseMessage>();
     let (outgoing_tx, outgoing_rx) = mpsc::channel::<PoseMessage>();
+    let (mqtt_status_tx, mqtt_status_rx) = mpsc::channel::<bool>();
 
     commands.insert_resource(PoseRx(Mutex::new(pose_rx)));
     commands.insert_resource(PoseTx(Mutex::new(outgoing_tx)));
+    commands.insert_resource(MqttStatusTx(Mutex::new(mqtt_status_tx.clone())));
+    commands.insert_resource(MqttStatusRx(Mutex::new(mqtt_status_rx)));
     commands.insert_resource(PositionTimer::default());
 
-    // Enable multiplayer since MQTT is available (we know this because device announcements work)
+    // Start with multiplayer disabled - will be enabled when MQTT connection succeeds
     commands.insert_resource(MultiplayerConnectionStatus {
-        connection_available: true,
+        connection_available: false,
     });
-    info!("Multiplayer enabled - MQTT broker is available");
+    info!("Multiplayer starting - checking MQTT broker availability...");
 
     let subscribe_topic = format!("iotcraft/worlds/{}/players/+/pose", world.0);
     let host = mqtt.host.clone();
@@ -139,6 +155,7 @@ fn start_multiplayer_connections(
     // Subscriber thread - persistent connection for receiving poses
     let sub_host = host.clone();
     let sub_client_id = generate_unique_client_id("multiplayer-pose-sub");
+    let status_tx_sub = mqtt_status_tx.clone();
     thread::spawn(move || {
         info!("Starting multiplayer pose subscriber...");
 
@@ -160,6 +177,9 @@ fn start_multiplayer_connections(
                 Ok(Event::Incoming(Incoming::ConnAck(_))) => {
                     info!("Pose subscriber connected successfully - multiplayer enabled");
                     initial_connection_success = true;
+
+                    // Send connection success status
+                    let _ = status_tx_sub.send(true);
 
                     // Subscribe to the topic
                     if let Err(e) = client.subscribe(&subscribe_topic, QoS::AtLeastOnce) {
@@ -184,6 +204,7 @@ fn start_multiplayer_connections(
 
         if !initial_connection_success {
             info!("MQTT connection not available - multiplayer disabled");
+            let _ = status_tx_sub.send(false);
             return; // Exit thread - multiplayer is disabled
         }
 
@@ -387,6 +408,28 @@ fn start_multiplayer_connections(
 
 fn update_position_timer(mut timer: ResMut<PositionTimer>, time: Res<Time>) {
     timer.timer.tick(time.delta());
+}
+
+// System to update MQTT connection status based on messages from background threads
+fn update_mqtt_connection_status(
+    mqtt_status_rx: Option<Res<MqttStatusRx>>,
+    mut connection_status: ResMut<MultiplayerConnectionStatus>,
+) {
+    if let Some(rx) = mqtt_status_rx {
+        if let Ok(rx_guard) = rx.0.try_lock() {
+            // Process all pending status updates
+            while let Ok(status) = rx_guard.try_recv() {
+                if connection_status.connection_available != status {
+                    connection_status.connection_available = status;
+                    if status {
+                        info!("MQTT connection established - multiplayer enabled");
+                    } else {
+                        info!("MQTT connection lost - multiplayer disabled");
+                    }
+                }
+            }
+        }
+    }
 }
 
 fn publish_local_pose(

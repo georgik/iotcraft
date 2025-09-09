@@ -742,13 +742,13 @@ fn handle_create_world_events(
                 }
             } else {
                 // Fallback to legacy path if template doesn't exist
-                let fallback_path = "scripts/new_world.txt";
-                if std::path::Path::new(fallback_path).exists() {
+                let fallback_script_path = "scripts/new_world.txt";
+                if std::path::Path::new(fallback_script_path).exists() {
                     info!(
                         "Template '{}' not found, falling back to legacy script: {}",
-                        template_name, fallback_path
+                        template_name, fallback_script_path
                     );
-                    match fs::read_to_string(fallback_path) {
+                    match fs::read_to_string(fallback_script_path) {
                         Ok(content) => {
                             let script_commands = content
                                 .lines()
@@ -771,7 +771,7 @@ fn handle_create_world_events(
                 } else {
                     warn!(
                         "Neither template '{}' at '{}' nor fallback script at '{}' found, world will be empty",
-                        template_name, template_path, fallback_path
+                        template_name, template_path, fallback_script_path
                     );
                 }
             }
