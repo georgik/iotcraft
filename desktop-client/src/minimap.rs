@@ -7,7 +7,7 @@ use crate::ui::GameState;
 use bevy::asset::RenderAssetUsages;
 use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
-use bevy::tasks::{AsyncComputeTaskPool, Task, block_on, poll_once};
+use bevy::tasks::{AsyncComputeTaskPool, Task};
 use std::collections::HashMap;
 
 /// Plugin for minimap/radar functionality

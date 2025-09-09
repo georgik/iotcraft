@@ -28,8 +28,7 @@ use serde::{Deserialize, Serialize};
 
 #[cfg(target_arch = "wasm32")]
 use crate::ui::main_menu::multiplayer_stubs::{
-    JoinSharedWorldEvent, MultiplayerMode, OnlineWorlds, PublishWorldEvent,
-    RefreshOnlineWorldsEvent, SharedWorldInfo,
+    OnlineWorlds, PublishWorldEvent, RefreshOnlineWorldsEvent, SharedWorldInfo,
 };
 
 #[cfg(not(target_arch = "wasm32"))]

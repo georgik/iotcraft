@@ -160,12 +160,59 @@ pub fn touch_camera_control_system(
     mut camera_controller: Option<ResMut<CameraController>>,
     keyboard_input: Res<ButtonInput<KeyCode>>,
     mut camera_query: Query<&mut Transform, With<Camera3d>>,
-    mut windows: Query<&mut Window>,
+    windows: Query<&mut Window>,
     mouse_button_input: Res<ButtonInput<MouseButton>>,
     mut cursor_moved_events: EventReader<CursorMoved>,
     mut touch_events: EventReader<TouchInput>,
     mut touch_state: ResMut<TouchInputState>,
+    // Check for UI interactions to avoid conflicts
+    ui_interactions: Query<&Interaction, Changed<Interaction>>,
+    game_state: Res<State<GameState>>,
 ) {
+    // Only run in InGame state to avoid conflicts with menu systems
+    if **game_state != GameState::InGame {
+        #[cfg(target_arch = "wasm32")]
+        web_sys::console::log_1(
+            &format!(
+                "📱 Touch control system: Not in InGame state, current state: {:?}",
+                **game_state
+            )
+            .into(),
+        );
+        return;
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    web_sys::console::log_1(&"📱 Touch control system: Running in InGame state".into());
+
+    // Check if any UI elements are currently being interacted with
+    let ui_is_active = ui_interactions
+        .iter()
+        .any(|interaction| !matches!(interaction, Interaction::None));
+
+    if ui_is_active {
+        // Don't process touch events if UI is being used
+        #[cfg(target_arch = "wasm32")]
+        web_sys::console::log_1(
+            &"⚠️ Touch control system: UI is active, clearing touch events".into(),
+        );
+        touch_events.clear(); // Clear the events to prevent processing
+        return;
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    {
+        let touch_count = touch_events.len();
+        if touch_count > 0 {
+            web_sys::console::log_1(
+                &format!(
+                    "📱 Touch control system: Processing {} touch events, UI active: {}",
+                    touch_count, ui_is_active
+                )
+                .into(),
+            );
+        }
+    }
     // Check if camera controller exists and is enabled
     let Some(ref controller) = camera_controller else {
         return; // No camera controller resource available
@@ -1156,9 +1203,9 @@ pub fn enable_camera_controller(
 
 /// Guarded version of scene setup to prevent duplicates
 pub fn setup_basic_scene_once(
-    mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
+    commands: Commands,
+    meshes: ResMut<Assets<Mesh>>,
+    materials: ResMut<Assets<StandardMaterial>>,
     asset_server: Res<AssetServer>,
     mut setup_guard: ResMut<SceneSetupGuard>,
     voxel_world: ResMut<crate::environment::VoxelWorld>,
@@ -1190,7 +1237,7 @@ fn camera_control_system(
     mut camera_controller: ResMut<CameraController>,
     keyboard_input: Res<ButtonInput<KeyCode>>,
     mut camera_query: Query<&mut Transform, With<Camera3d>>,
-    mut windows: Query<&mut Window>,
+    windows: Query<&mut Window>,
     mouse_button_input: Res<ButtonInput<MouseButton>>,
     mut cursor_moved_events: EventReader<CursorMoved>,
 ) {
@@ -1483,14 +1530,14 @@ fn execute_pending_commands_web_wrapper(
     mut pending_commands: ResMut<PendingCommands>,
     mut blink_state: ResMut<crate::console::BlinkState>,
     temperature: Res<crate::mqtt::TemperatureResource>,
-    mqtt_config: Res<MqttConfig>,
+    _mqtt_config: Res<MqttConfig>,
     mut voxel_world: ResMut<crate::environment::VoxelWorld>,
-    mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-    asset_server: Res<AssetServer>,
-    query: Query<(Entity, &crate::environment::VoxelBlock)>,
-    device_query: Query<(&DeviceEntity, &Transform), Without<Camera>>,
+    _commands: Commands,
+    _meshes: ResMut<Assets<Mesh>>,
+    _materials: ResMut<Assets<StandardMaterial>>,
+    _asset_server: Res<AssetServer>,
+    _query: Query<(Entity, &crate::environment::VoxelBlock)>,
+    _device_query: Query<(&DeviceEntity, &Transform), Without<Camera>>,
     mut inventory: ResMut<crate::inventory::PlayerInventory>,
     mut camera_query: Query<
         (
@@ -2342,24 +2389,23 @@ pub fn handle_block_interaction_input_web(
             if mouse_button_input.just_pressed(MouseButton::Right) {
                 // Get the currently selected item from inventory
                 if let Some(selected_item) = player_inventory.get_selected_item() {
-                    if let ItemType::Block(block_type) = selected_item.item_type {
-                        // Use ghost block state position if available (like desktop)
-                        if let Some(ghost_state) = &ghost_block_state {
-                            if let Some(placement_position) = ghost_state.position {
-                                if ghost_state.can_place {
-                                    place_block_events.write(PlaceBlockEvent {
-                                        position: placement_position,
-                                    });
+                    let ItemType::Block(block_type) = selected_item.item_type;
+                    // Use ghost block state position if available (like desktop)
+                    if let Some(ghost_state) = &ghost_block_state {
+                        if let Some(placement_position) = ghost_state.position {
+                            if ghost_state.can_place {
+                                place_block_events.write(PlaceBlockEvent {
+                                    position: placement_position,
+                                });
 
-                                    #[cfg(target_arch = "wasm32")]
-                                    web_sys::console::log_1(
-                                        &format!(
-                                            "🧱 Placing {:?} block at {:?}",
-                                            block_type, placement_position
-                                        )
-                                        .into(),
-                                    );
-                                }
+                                #[cfg(target_arch = "wasm32")]
+                                web_sys::console::log_1(
+                                    &format!(
+                                        "🧱 Placing {:?} block at {:?}",
+                                        block_type, placement_position
+                                    )
+                                    .into(),
+                                );
                             }
                         }
                     }

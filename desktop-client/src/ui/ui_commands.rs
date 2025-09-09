@@ -386,7 +386,7 @@ pub fn handle_main_menu_interaction_bundled(
 /// Grab cursor on game start using parameter bundles
 pub fn grab_cursor_on_game_start_bundled(
     mut cursor_params: CursorUIParams,
-    game_state_params: GameStateUIParams,
+    mut game_state_params: GameStateUIParams,
 ) {
     // Check if this transition was triggered by MCP (only if MCP is enabled)
     #[cfg(not(target_arch = "wasm32"))]
@@ -434,7 +434,7 @@ pub fn release_cursor_for_main_menu_bundled(mut cursor_params: CursorUIParams) {
 }
 
 /// Handle escape key navigation using parameter bundles
-pub fn handle_escape_key_bundled(game_state_params: GameStateUIParams) {
+pub fn handle_escape_key_bundled(mut game_state_params: GameStateUIParams) {
     let mut next_state = game_state_params.next_state;
     if game_state_params
         .keyboard_input

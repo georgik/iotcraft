@@ -26,21 +26,29 @@ impl Plugin for EnvironmentPlugin {
             .add_systems(
                 Update,
                 (
-                    #[cfg(not(target_arch = "wasm32"))]
-                    setup_background_world
-                        .run_if(|setup_complete: Res<BackgroundWorldSetupComplete>| {
-                            !setup_complete.0
-                        })
-                        .run_if(resource_exists::<PendingCommands>),
-                    #[cfg(feature = "console")]
-                    blinking_system,
-                    #[cfg(not(feature = "console"))]
-                    noop_blinking_system,
                     rotate_logo_system,
                     update_thermometer_material,
                     update_thermometer_scale,
                 ),
+            )
+            .add_systems(
+                Update,
+                (
+                    #[cfg(feature = "console")]
+                    blinking_system,
+                    #[cfg(not(feature = "console"))]
+                    noop_blinking_system,
+                ),
             );
+
+        // Add background world setup system for desktop only
+        #[cfg(not(target_arch = "wasm32"))]
+        app.add_systems(
+            Update,
+            setup_background_world
+                .run_if(|setup_complete: Res<BackgroundWorldSetupComplete>| !setup_complete.0)
+                .run_if(resource_exists::<PendingCommands>),
+        );
     }
 }
 

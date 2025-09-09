@@ -93,7 +93,7 @@ pub mod multiplayer_stubs {
 #[cfg(target_arch = "wasm32")]
 use multiplayer_stubs::{
     JoinSharedWorldEvent, MultiplayerMode, OnlineWorlds, PublishWorldEvent,
-    RefreshOnlineWorldsEvent, SharedWorldInfo, WorldStateReceivedEvent,
+    RefreshOnlineWorldsEvent, WorldStateReceivedEvent,
 };
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -155,6 +155,7 @@ impl Plugin for MainMenuPlugin {
                 update_online_worlds_ui.run_if(in_state(GameState::WorldSelection)),
                 world_creation_interaction.run_if(in_state(GameState::WorldCreation)),
                 world_name_input_system.run_if(in_state(GameState::WorldCreation)),
+                world_name_input_interaction.run_if(in_state(GameState::WorldCreation)),
                 gameplay_menu_interaction.run_if(in_state(GameState::GameplayMenu)),
                 handle_escape_key.run_if(not(in_state(GameState::MainMenu))),
             ),
@@ -334,7 +335,12 @@ pub struct WorldCreationMenu;
 pub struct WorldNameInput {
     pub text: String,
     pub focused: bool,
+    pub just_clicked: bool, // Track if we just clicked on this input
 }
+
+/// Component to mark the world name input UI button/container
+#[derive(Component)]
+pub struct WorldNameInputButton;
 
 /// Component to mark the text display for world name input
 #[derive(Component)]
@@ -1917,8 +1923,9 @@ fn setup_world_creation_menu(
     mut creation_state: ResMut<WorldCreationState>,
     fonts: Res<Fonts>,
 ) {
-    // Reset creation state
-    creation_state.world_name = String::new();
+    // Reset creation state with prefilled default world name
+    let default_world_name = format!("MyWorld-{}", chrono::Utc::now().timestamp() % 10000);
+    creation_state.world_name = default_world_name.clone();
     creation_state.selected_template = "default".to_string();
 
     commands
@@ -1993,30 +2000,35 @@ fn setup_world_creation_menu(
                             // World name input field
                             parent
                                 .spawn((
+                                    Button, // Make it clickable
                                     Node {
                                         width: Val::Percent(100.0),
                                         height: Val::Px(40.0),
                                         padding: UiRect::all(Val::Px(10.0)),
                                         border: UiRect::all(Val::Px(1.0)),
+                                        justify_content: JustifyContent::FlexStart,
+                                        align_items: AlignItems::Center,
                                         ..default()
                                     },
                                     BorderColor::all(Color::srgb(0.5, 0.5, 0.5)),
                                     BackgroundColor(Color::srgba(0.2, 0.2, 0.3, 1.0)),
                                     WorldNameInput {
-                                        text: String::new(),
-                                        focused: false,
+                                        text: default_world_name.clone(),
+                                        focused: true,
+                                        just_clicked: false,
                                     },
+                                    WorldNameInputButton, // Mark as input button
                                 ))
                                 .with_children(|parent| {
                                     parent.spawn((
-                                        Text::new("Enter world name..."),
+                                        Text::new(format!("{}|", default_world_name)),
                                         TextFont {
                                             font: fonts.regular.clone(),
                                             font_size: 16.0,
                                             font_smoothing: bevy::text::FontSmoothing::default(),
                                             line_height: bevy::text::LineHeight::default(),
                                         },
-                                        TextColor(Color::srgb(0.7, 0.7, 0.7)),
+                                        TextColor(Color::WHITE),
                                         WorldNameInputText,
                                     ));
                                 });
@@ -2339,22 +2351,129 @@ fn world_creation_interaction(
     }
 }
 
+fn world_name_input_interaction(
+    mut input_button_query: Query<
+        (&Interaction, &mut WorldNameInput, &mut BackgroundColor),
+        (Changed<Interaction>, With<WorldNameInputButton>),
+    >,
+    mouse_button_input: Res<ButtonInput<MouseButton>>,
+    #[cfg(target_arch = "wasm32")] _touches: Res<Touches>,
+    current_state: Res<State<GameState>>,
+) {
+    // Only handle input interactions in WorldCreation state
+    // This prevents interference with in-game touch controls
+    if **current_state != GameState::WorldCreation {
+        return;
+    }
+
+    for (interaction, mut input, mut color) in input_button_query.iter_mut() {
+        match *interaction {
+            Interaction::Pressed => {
+                input.just_clicked = true;
+                *color = Color::srgba(0.3, 0.3, 0.4, 1.0).into();
+            }
+            Interaction::Hovered => {
+                *color = Color::srgba(0.25, 0.25, 0.35, 1.0).into();
+            }
+            Interaction::None => {
+                // If we just clicked and now released, focus the input
+                if input.just_clicked {
+                    input.focused = true;
+                    input.just_clicked = false;
+                    #[cfg(target_arch = "wasm32")]
+                    {
+                        web_sys::console::log_1(&"⌨️ Triggering mobile keyboard".into());
+                        trigger_mobile_keyboard();
+                    }
+                }
+                *color = Color::srgba(0.2, 0.2, 0.3, 1.0).into();
+            }
+        }
+    }
+
+    // Handle clicking outside the input to dismiss keyboard
+    // Only check for dismissal if we're in WorldCreation state
+    // TEMPORARILY DISABLE touch dismissal to prevent conflicts with in-game touch controls
+    let should_dismiss_keyboard = {
+        #[cfg(target_arch = "wasm32")]
+        {
+            // touches.any_just_released() || // DISABLED: conflicts with touch controls
+            mouse_button_input.just_released(MouseButton::Left)
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            mouse_button_input.just_released(MouseButton::Left)
+        }
+    };
+
+    if should_dismiss_keyboard {
+        // Check if the click/touch was outside any input button
+        let clicked_on_input = input_button_query.iter().any(|(interaction, _, _)| {
+            matches!(*interaction, Interaction::Pressed | Interaction::Hovered)
+        });
+
+        if !clicked_on_input {
+            for (_, mut input, _) in input_button_query.iter_mut() {
+                if input.focused {
+                    input.focused = false;
+                    #[cfg(target_arch = "wasm32")]
+                    {
+                        web_sys::console::log_1(
+                            &"⌨️ Dismissing mobile keyboard (outside tap)".into(),
+                        );
+                        dismiss_mobile_keyboard();
+                    }
+                }
+            }
+        }
+    }
+}
+
 fn world_name_input_system(
     mut char_events: EventReader<bevy::input::keyboard::KeyboardInput>,
     keys: Res<ButtonInput<KeyCode>>,
     mut input_query: Query<&mut WorldNameInput>,
     mut text_query: Query<&mut Text, With<WorldNameInputText>>,
     mut creation_state: ResMut<WorldCreationState>,
+    time: Res<Time>,
+    current_state: Res<State<GameState>>,
 ) {
+    // Only handle keyboard input in WorldCreation state
+    // This prevents interference with in-game controls
+    if **current_state != GameState::WorldCreation {
+        return;
+    }
     for mut input in input_query.iter_mut() {
-        if !input.focused {
-            input.focused = true; // Auto-focus for now
-        }
-
         if input.focused {
             // Handle character input
             for event in char_events.read() {
                 if let bevy::input::ButtonState::Pressed = event.state {
+                    // Handle Enter key to confirm input and dismiss keyboard
+                    if event.key_code == KeyCode::Enter {
+                        input.focused = false; // Unfocus input
+                        #[cfg(target_arch = "wasm32")]
+                        {
+                            web_sys::console::log_1(
+                                &"⌨️ Dismissing mobile keyboard (Enter key)".into(),
+                            );
+                            dismiss_mobile_keyboard();
+                        }
+                        continue;
+                    }
+
+                    // Handle Escape key to dismiss keyboard without changing text
+                    if event.key_code == KeyCode::Escape {
+                        input.focused = false; // Unfocus input
+                        #[cfg(target_arch = "wasm32")]
+                        {
+                            web_sys::console::log_1(
+                                &"⌨️ Dismissing mobile keyboard (Escape key)".into(),
+                            );
+                            dismiss_mobile_keyboard();
+                        }
+                        continue;
+                    }
+
                     // Use the same approach as the console for character input
                     if let Some(character) = keycode_to_char(event.key_code) {
                         if character.is_alphanumeric()
@@ -2374,15 +2493,130 @@ fn world_name_input_system(
                 input.text.pop();
                 creation_state.world_name = input.text.clone();
             }
+        }
 
-            // Update display text - only update WorldNameInputText components
-            for mut text in text_query.iter_mut() {
+        // Update display text with animated cursor (only when focused)
+        for mut text in text_query.iter_mut() {
+            if input.focused {
+                let cursor_visible = (time.elapsed_secs() * 2.0) % 2.0 > 1.0;
                 if input.text.is_empty() {
-                    **text = "Enter world name...".to_string();
+                    **text = if cursor_visible {
+                        "|".to_string()
+                    } else {
+                        " ".to_string()
+                    };
                 } else {
-                    **text = input.text.clone();
+                    **text = if cursor_visible {
+                        format!("{}|", input.text)
+                    } else {
+                        input.text.clone()
+                    };
                 }
+            } else {
+                // When unfocused, just show the text without cursor
+                **text = if input.text.is_empty() {
+                    " ".to_string()
+                } else {
+                    input.text.clone()
+                };
             }
+        }
+    }
+}
+
+/// Trigger mobile keyboard for iOS/Android on WASM
+#[cfg(target_arch = "wasm32")]
+fn trigger_mobile_keyboard() {
+    use wasm_bindgen::prelude::*;
+
+    #[wasm_bindgen]
+    extern "C" {
+        #[wasm_bindgen(js_namespace = console)]
+        fn log(s: &str);
+
+        #[wasm_bindgen(js_namespace = ["document"])]
+        fn createElement(tag: &str) -> web_sys::HtmlElement;
+
+        #[wasm_bindgen(js_namespace = ["document", "body"])]
+        fn appendChild(child: &web_sys::Node);
+
+        #[wasm_bindgen(js_namespace = ["window"])]
+        fn setTimeout(callback: &Closure<dyn FnMut()>, delay: i32);
+    }
+
+    // This creates a temporary invisible input field that mobile browsers
+    // will recognize and show the virtual keyboard for
+    let window = web_sys::window().unwrap();
+    let document = window.document().unwrap();
+
+    // Create a temporary input element
+    let input = document.create_element("input").unwrap();
+    let input_element = input.dyn_into::<web_sys::HtmlInputElement>().unwrap();
+
+    // Set properties to make it invisible but functional
+    input_element.set_type("text");
+    input_element.set_id("iotcraft-mobile-input"); // Give it an ID for dismissal
+    input_element
+        .style()
+        .set_property("position", "absolute")
+        .unwrap();
+    input_element
+        .style()
+        .set_property("left", "-9999px")
+        .unwrap();
+    input_element.style().set_property("opacity", "0").unwrap();
+    input_element
+        .style()
+        .set_property("pointer-events", "none")
+        .unwrap();
+
+    // Add to DOM
+    document
+        .body()
+        .unwrap()
+        .append_child(&input_element)
+        .unwrap();
+
+    // Focus to trigger mobile keyboard
+    let _ = input_element.focus();
+
+    // Clean up after a short delay (but keep it longer for user interaction)
+    let input_clone = input_element.clone();
+    let cleanup = Closure::wrap(Box::new(move || {
+        if let Some(parent) = input_clone.parent_node() {
+            let _ = parent.remove_child(&input_clone);
+        }
+    }) as Box<dyn FnMut()>);
+
+    window
+        .set_timeout_with_callback_and_timeout_and_arguments_0(
+            cleanup.as_ref().unchecked_ref(),
+            30000, // Keep for 30 seconds instead of 100ms
+        )
+        .unwrap();
+
+    cleanup.forget(); // Prevent Rust from cleaning up the closure
+}
+
+/// Dismiss mobile keyboard for iOS/Android on WASM
+#[cfg(target_arch = "wasm32")]
+fn dismiss_mobile_keyboard() {
+    use wasm_bindgen::prelude::*;
+
+    let window = web_sys::window().unwrap();
+    let document = window.document().unwrap();
+
+    // Find and remove the mobile input element
+    if let Some(input_element) = document.get_element_by_id("iotcraft-mobile-input") {
+        if let Some(parent) = input_element.parent_node() {
+            let _ = parent.remove_child(&input_element);
+        }
+    }
+
+    // Also blur any currently focused element to ensure keyboard dismissal
+    if let Some(active_element) = document.active_element() {
+        if let Ok(input_element) = active_element.dyn_into::<web_sys::HtmlInputElement>() {
+            let _ = input_element.blur();
         }
     }
 }

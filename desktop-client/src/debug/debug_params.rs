@@ -25,8 +25,8 @@ use crate::{
 // WASM-specific imports
 #[cfg(target_arch = "wasm32")]
 use crate::{
-    config::MqttConfig as TemperatureResource, // Stub for temperature resource
-    multiplayer_web::{MultiplayerMode, RemotePlayer},
+    // config::MqttConfig as TemperatureResource, // Stub for temperature resource - unused
+    multiplayer_web::RemotePlayer,
     player_avatar::PlayerAvatar,
 };
 

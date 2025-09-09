@@ -8,9 +8,6 @@ use crate::ui::GameState;
 
 // Import different console implementations based on features
 
-#[cfg(feature = "console-bevy")]
-use crate::console::bevy_console_adapter::BevyConsoleAdapter;
-
 /// Plugin that provides console functionality with swappable backends
 pub struct ConsolePlugin;
 
@@ -19,19 +16,10 @@ impl Plugin for ConsolePlugin {
         // Initialize the console config and state
         app.init_resource::<ConsoleConfig>();
 
-        // Choose console implementation based on available features
+        // Choose console implementation - using BevyUiConsole
         let console_impl: Box<dyn Console> = {
-            #[cfg(feature = "console-bevy")]
-            {
-                info!("Using legacy Bevy console implementation");
-                Box::new(BevyConsoleAdapter::new())
-            }
-
-            #[cfg(not(feature = "console-bevy"))]
-            {
-                info!("Using Bevy UI console implementation");
-                Box::new(BevyUiConsole::new())
-            }
+            info!("Using Bevy UI console implementation");
+            Box::new(BevyUiConsole::new())
         };
 
         // Create and insert the console manager

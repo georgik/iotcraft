@@ -307,7 +307,7 @@ fn handle_double_spacebar_flight_toggle(
 fn handle_physics_free_walking_movement(
     time: &Res<Time>,
     keyboard_input: &Res<ButtonInput<KeyCode>>,
-    mut transform: Mut<Transform>,
+    transform: Mut<Transform>,
     movement: &mut PlayerMovement,
     voxel_world: &Res<crate::environment::VoxelWorld>,
     should_skip_jump: bool,
@@ -325,7 +325,7 @@ fn handle_physics_free_walking_movement(
 
 fn handle_physics_free_walking_movement_menu_only(
     time: &Res<Time>,
-    mut transform: Mut<Transform>,
+    transform: Mut<Transform>,
     movement: &mut PlayerMovement,
     voxel_world: &Res<crate::environment::VoxelWorld>,
 ) {

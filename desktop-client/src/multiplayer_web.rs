@@ -111,9 +111,9 @@ impl Plugin for WebMultiplayerPlugin {
 /// Set up MQTT connections for block change synchronization
 fn setup_block_change_connections(
     mut commands: Commands,
-    mqtt_config: Res<crate::config::MqttConfig>,
-    world_id: Res<WorldId>,
-    profile: Res<crate::profile::PlayerProfile>,
+    _mqtt_config: Res<crate::config::MqttConfig>,
+    _world_id: Res<WorldId>,
+    _profile: Res<crate::profile::PlayerProfile>,
 ) {
     let (outgoing_tx, _outgoing_rx) = mpsc::channel::<BlockChangeEvent>();
     let (_incoming_tx, incoming_rx) = mpsc::channel::<BlockChangeEvent>();
