@@ -1,0 +1,17 @@
+## IDF Component Manager Manifest File
+dependencies:
+  joltwallet/littlefs: ==1.14.8
+  idf:
+    version: '>=5.5.0'
+
+  espressif/mdns: ^1.8.2
+  mosquitto:
+    git: https://github.com/espressif/esp-protocols.git
+    path: components/mosquitto
+    version: '*'
+  georgik/sdl: "==3.2.5~1"
+  georgik/sdl_ttf: "^3.1.2~3"
+  
+  # ESP32-S3-BOX-3 BSP for SDL GUI (no LVGL variant)
+  espressif/esp-box-3_noglib:
+    version: "^3.0.2"

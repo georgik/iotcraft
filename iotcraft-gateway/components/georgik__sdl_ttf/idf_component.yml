@@ -1,0 +1,18 @@
+dependencies:
+  espressif/freetype: ^2.13.3
+  georgik/sdl: '>=3.2.5~1'
+  idf:
+    version: '>=5.0.0'
+description: SDL_ttf 3.1
+files:
+  exclude:
+  - SDL_ttf/Android.mk
+  - SDL_ttf/VisualC*/**
+  - SDL_ttf/Xcode/**
+  - SDL_ttf/mingw/**
+  - SDL_ttf/external/**
+  - SDL_ttf/build-scripts/**
+license: Zlib
+repository: https://github.com/georgik/esp-idf-component-SDL_ttf
+url: https://github.com/libsdl-org/SDL_ttf
+version: 3.1.2~3

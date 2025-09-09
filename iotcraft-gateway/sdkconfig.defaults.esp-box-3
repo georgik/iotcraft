@@ -1,0 +1,43 @@
+# ESP32-S3-BOX-3 Configuration
+# - 320x240 IPS display via SPI
+# - Capacitive touch controller
+# - 16MB Flash, 8MB PSRAM  
+# - ESP32-S3 dual-core Xtensa
+
+CONFIG_IDF_TARGET="esp32s3"
+CONFIG_ESPTOOLPY_FLASHMODE_QIO=y
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+
+# PSRAM Configuration
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCT=y
+CONFIG_SPIRAM_SPEED_80M=y
+
+# Compiler optimization for performance
+CONFIG_COMPILER_OPTIMIZATION_PERF=y
+
+# FreeRTOS configuration
+CONFIG_FREERTOS_HZ=1000
+
+# BSP specific configuration for ESP32-S3-BOX-3
+# Display resolution 320x240 via SPI
+CONFIG_BSP_LCD_RGB_BUFFER_NUMS=2
+CONFIG_BSP_LCD_RGB_BOUNCE_BUFFER_MODE=y
+
+# Required for SDL3 and TTF rendering
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=16000
+
+# Enable experimental features for latest BSP
+CONFIG_IDF_EXPERIMENTAL_FEATURES=y
+
+# FreeRTOS configuration for task monitoring
+CONFIG_FREERTOS_GENERATE_RUN_TIME_STATS=y
+CONFIG_FREERTOS_USE_STATS_FORMATTING_FUNCTIONS=y
+
+# USB Console configuration - keep USB working when WiFi is on
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+CONFIG_ESP_CONSOLE_SECONDARY_USB_SERIAL_JTAG=y
+
+# Disable LVGL in ESP-BOX-3 BSP (we're using SDL3)
+# This is equivalent to BSP_CONFIG_NO_GRAPHIC_LIB=1
+CONFIG_BSP_CONFIG_NO_GRAPHIC_LIB=y
