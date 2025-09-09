@@ -1,0 +1,30 @@
+## IDF Component Manager Manifest File
+dependencies:
+  joltwallet/littlefs: "==1.14.8"
+  georgik/sdl:
+    version: "==3.2.5~2"
+    #path: "../../esp-idf-component-SDL/sdl"
+  georgik/sdl_ttf: "^3.1.2~3"
+  idf:
+    version: ">=5.5.0"
+
+  espressif/esp32_p4_function_ev_board_noglib:
+    version: "5.0.0"
+    rules:
+    - if: "${BUILD_BOARD} == esp32_p4_function_ev_board_noglib"
+
+  espressif/esp32_c3_lcdkit:
+    version: "^2.0.0~1"
+    rules:
+    - if: "${BUILD_BOARD} == esp32_c3_lcdkit"
+
+  espressif/esp_bsp_generic:
+    version: "==3.0.0~1"
+    rules:
+    - if: "${BUILD_BOARD} == esp_bsp_generic"
+
+  # Dependencies for M5Stack Tab5 BSP
+  espressif/esp_lcd_ili9881c: "^1.0.1"
+
+  # Local M5Stack Tab5 BSP component (until official BSP is published)
+  # Uses components/m5stack_tab5 local component
