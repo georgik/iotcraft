@@ -3,10 +3,18 @@
 # - GT911 touch controller
 # - 16MB Flash, 32MB PSRAM
 # - ESP32-P4 dual-core RISC-V
+# This file was updated using idf.py save-defconfig to capture current configuration
 
 CONFIG_IDF_TARGET="esp32p4"
 CONFIG_ESPTOOLPY_FLASHMODE_QIO=y
 CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+
+# Partition table configuration
+CONFIG_PARTITION_TABLE_CUSTOM=y
+
+# Compiler optimization for performance
+CONFIG_COMPILER_OPTIMIZATION_PERF=y
+CONFIG_COMPILER_CXX_EXCEPTIONS=y
 
 # PSRAM Configuration - CRITICAL for ESP32-P4 performance
 CONFIG_SPIRAM=y
@@ -17,9 +25,6 @@ CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=16384
 CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL=32768
 CONFIG_FREERTOS_TASK_CREATE_ALLOW_EXT_MEM=y
 
-# Compiler optimization for performance
-CONFIG_COMPILER_OPTIMIZATION_PERF=y
-
 # Cache configuration for P4 - CRITICAL for graphics performance
 CONFIG_CACHE_L2_CACHE_256KB=y
 CONFIG_CACHE_L2_CACHE_LINE_128B=y
@@ -27,11 +32,12 @@ CONFIG_CACHE_L2_CACHE_LINE_128B=y
 # FreeRTOS configuration
 CONFIG_FREERTOS_HZ=1000
 
+# Experimental features (required for ESP32-P4)
+CONFIG_IDF_EXPERIMENTAL_FEATURES=y
+
 # BSP specific configuration for M5Stack Tab5
 # Display resolution 720x1280 via MIPI-DSI (portrait mode)
 # Configuration is handled by the M5Stack Tab5 BSP component
-CONFIG_COMPILER_CXX_EXCEPTIONS=y
-CONFIG_COMPILER_CXX_EXCEPTIONS_EMG_POOL_SIZE=0
 
 # Disable LVGL in M5Stack Tab5 BSP (we're using SDL3)
 # This is equivalent to BSP_CONFIG_NO_GRAPHIC_LIB=1

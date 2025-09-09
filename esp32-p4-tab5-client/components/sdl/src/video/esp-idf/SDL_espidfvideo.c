@@ -75,7 +75,7 @@ static bool ESPIDF_VideoInit(SDL_VideoDevice *_this)
     }
 
     const bsp_display_config_t bsp_disp_cfg = {
-        .dummy = 0,
+        .dummy = 0
     };
 
     // Add delay to ensure proper initialization timing
