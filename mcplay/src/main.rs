@@ -1575,26 +1575,38 @@ async fn run_scenario_inner(
     // Start infrastructure if any services are required
     let needs_infrastructure = {
         let state = state.lock().await;
-        state.scenario.infrastructure.mqtt_server.required
-            || state
-                .scenario
-                .infrastructure
-                .mcp_server
-                .as_ref()
-                .map(|mcp| mcp.required)
-                .unwrap_or(false)
-            || state
-                .scenario
-                .infrastructure
-                .mqtt_observer
-                .as_ref()
-                .map(|obs| obs.required)
-                .unwrap_or(false)
+        let mqtt_server_required = state.scenario.infrastructure.mqtt_server.required;
+        let mcp_server_required = state
+            .scenario
+            .infrastructure
+            .mcp_server
+            .as_ref()
+            .map(|mcp| mcp.required)
+            .unwrap_or(false);
+        let mqtt_observer_required = state
+            .scenario
+            .infrastructure
+            .mqtt_observer
+            .as_ref()
+            .map(|obs| obs.required)
+            .unwrap_or(false);
+
+        println!("[DEBUG] Non-TUI Infrastructure requirements: mqtt_server={}, mcp_server={}, mqtt_observer={}", 
+                mqtt_server_required, mcp_server_required, mqtt_observer_required);
+
+        mqtt_server_required || mcp_server_required || mqtt_observer_required
     };
+
+    println!(
+        "[DEBUG] Non-TUI needs_infrastructure = {}",
+        needs_infrastructure
+    );
 
     if needs_infrastructure {
         let mut state = state.lock().await;
         start_infrastructure(&mut *state, verbose).await?;
+    } else {
+        println!("[DEBUG] Non-TUI Skipping infrastructure startup - no services required");
     }
 
     // Start clients
@@ -1663,6 +1675,19 @@ async fn start_infrastructure(
     println!("🔧 Starting infrastructure...");
     state.write_to_log_file(&LogSource::Orchestrator, "🔧 Starting infrastructure...");
 
+    println!(
+        "[DEBUG] start_infrastructure: mqtt_server.required = {}",
+        state.scenario.infrastructure.mqtt_server.required
+    );
+    if let Some(ref obs) = state.scenario.infrastructure.mqtt_observer {
+        println!(
+            "[DEBUG] start_infrastructure: mqtt_observer.required = {}",
+            obs.required
+        );
+    } else {
+        println!("[DEBUG] start_infrastructure: mqtt_observer = None");
+    }
+
     // Check if MQTT port is already in use before starting
     if state.scenario.infrastructure.mqtt_server.required {
         let port = state.scenario.infrastructure.mqtt_server.port;
@@ -1679,24 +1704,46 @@ async fn start_infrastructure(
     // Start MQTT server directly if required (instead of delegating to xtask)
     if state.scenario.infrastructure.mqtt_server.required {
         let port = state.scenario.infrastructure.mqtt_server.port;
+        println!("[DEBUG] Starting MQTT server on port {}", port);
         if verbose {
             println!("  Starting MQTT server on port {}", port);
         }
 
         // Start MQTT server from ../mqtt-server directory
+        println!(
+            "[DEBUG] About to spawn MQTT server process: cargo run --release -- --port {}",
+            port
+        );
+        println!("[DEBUG] Working directory: ../mqtt-server");
+
+        // Check if the mqtt-server directory exists
+        if !std::path::Path::new("../mqtt-server").exists() {
+            return Err("../mqtt-server directory does not exist".into());
+        }
+
         let mqtt_process = TokioCommand::new("cargo")
             .current_dir("../mqtt-server")
             .args(&["run", "--release", "--", "--port", &port.to_string()])
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
             .spawn()
-            .map_err(|e| format!("Failed to start MQTT server: {}", e))?;
+            .map_err(|e| {
+                let error_msg = format!("Failed to start MQTT server: {}", e);
+                println!("[DEBUG] MQTT server spawn failed: {}", error_msg);
+                error_msg
+            })?;
+
+        println!(
+            "[DEBUG] MQTT server process spawned successfully with PID: {:?}",
+            mqtt_process.id()
+        );
 
         state
             .infrastructure_processes
             .insert("mqtt_server".to_string(), mqtt_process);
 
         // Wait for MQTT server to be ready
+        println!("[DEBUG] About to wait for MQTT server port {}", port);
         if verbose {
             println!(
                 "  Waiting for MQTT server to become ready on port {}...",
@@ -1712,6 +1759,10 @@ async fn start_infrastructure(
             Some("cargo run --release (mqtt-server)"),
         )
         .await;
+        println!(
+            "[DEBUG] wait_for_port_with_retries_and_context returned: {}",
+            mqtt_ready
+        );
         if !mqtt_ready {
             return Err(format!(
                 "MQTT server failed to start on port {} within 10 minute timeout",
@@ -1720,6 +1771,7 @@ async fn start_infrastructure(
             .into());
         }
 
+        println!("[DEBUG] MQTT server is ready on port {}", port);
         if verbose {
             println!("  ✅ MQTT server ready on port {}", port);
         }
@@ -1728,11 +1780,20 @@ async fn start_infrastructure(
     // Start MQTT observer if required
     if let Some(ref mqtt_observer) = state.scenario.infrastructure.mqtt_observer {
         if mqtt_observer.required {
+            println!("[DEBUG] Starting MQTT observer");
             if verbose {
                 println!("  Starting MQTT observer");
             }
 
             let mqtt_port = state.scenario.infrastructure.mqtt_server.port;
+            println!("[DEBUG] About to spawn MQTT observer process: cargo run --bin mqtt-observer -- -h localhost -p {} -t # -i mcplay_observer", mqtt_port);
+            println!("[DEBUG] Working directory: ../mqtt-client");
+
+            // Check if the mqtt-client directory exists
+            if !std::path::Path::new("../mqtt-client").exists() {
+                return Err("../mqtt-client directory does not exist".into());
+            }
+
             let observer_process = TokioCommand::new("cargo")
                 .current_dir("../mqtt-client")
                 .args(&[
@@ -1752,7 +1813,16 @@ async fn start_infrastructure(
                 .stdout(std::process::Stdio::piped())
                 .stderr(std::process::Stdio::piped())
                 .spawn()
-                .map_err(|e| format!("Failed to start MQTT observer: {}. Make sure mqtt-client is available in ../mqtt-client.", e))?;
+                .map_err(|e| {
+                    let error_msg = format!("Failed to start MQTT observer: {}. Make sure mqtt-client is available in ../mqtt-client.", e);
+                    println!("[DEBUG] MQTT observer spawn failed: {}", error_msg);
+                    error_msg
+                })?;
+
+            println!(
+                "[DEBUG] MQTT observer process spawned successfully with PID: {:?}",
+                observer_process.id()
+            );
 
             state
                 .infrastructure_processes
@@ -2350,6 +2420,7 @@ async fn execute_mcp_call(
             | "get_multiplayer_status"
             | "get_client_info"
             | "get_world_status"
+            | "get_mqtt_status"
             | "tools/list" => {
                 // Always show detailed responses for important commands
                 println!(
@@ -2402,6 +2473,7 @@ fn is_queued_command(tool: &str) -> bool {
             | "create_wall"
             | "get_client_info"
             | "get_world_status"
+            | "get_mqtt_status"
             | "spawn_device"
             | "move_device"
             | "save_world"
@@ -2709,8 +2781,35 @@ async fn cleanup(
     Ok(())
 }
 
+/// Ensure log files are synced to disk for accurate size reporting
+fn sync_log_files_to_disk(state: &OrchestratorState) {
+    use std::fs::OpenOptions;
+    use std::io::Write;
+
+    // Explicitly flush each log file to ensure accurate size reporting
+    for (_pane_name, log_file_path) in &state.log_files {
+        if log_file_path.exists() {
+            // Open the file in append mode and flush it
+            if let Ok(mut file) = OpenOptions::new()
+                .create(false)
+                .append(true)
+                .open(log_file_path)
+            {
+                let _ = file.flush();
+                let _ = file.sync_all(); // Force OS to write to disk
+            }
+        }
+    }
+
+    // Small additional delay to ensure filesystem consistency
+    std::thread::sleep(std::time::Duration::from_millis(100));
+}
+
 /// Show log file summary for non-TUI mode
 fn show_log_summary_non_tui(state: &OrchestratorState) {
+    // Sync log files to disk first to ensure accurate sizes
+    sync_log_files_to_disk(state);
+
     println!("\n📁 Log Files Summary");
     println!("====================");
 
@@ -4947,27 +5046,38 @@ async fn run_scenario_inner_with_logging(
     // Start infrastructure if any services are required
     let needs_infrastructure = {
         let state = state.lock().await;
-        state.scenario.infrastructure.mqtt_server.required
-            || state
-                .scenario
-                .infrastructure
-                .mcp_server
-                .as_ref()
-                .map(|mcp| mcp.required)
-                .unwrap_or(false)
-            || state
-                .scenario
-                .infrastructure
-                .mqtt_observer
-                .as_ref()
-                .map(|obs| obs.required)
-                .unwrap_or(false)
+        let mqtt_server_required = state.scenario.infrastructure.mqtt_server.required;
+        let mcp_server_required = state
+            .scenario
+            .infrastructure
+            .mcp_server
+            .as_ref()
+            .map(|mcp| mcp.required)
+            .unwrap_or(false);
+        let mqtt_observer_required = state
+            .scenario
+            .infrastructure
+            .mqtt_observer
+            .as_ref()
+            .map(|obs| obs.required)
+            .unwrap_or(false);
+
+        println!(
+            "[DEBUG] Infrastructure requirements: mqtt_server={}, mcp_server={}, mqtt_observer={}",
+            mqtt_server_required, mcp_server_required, mqtt_observer_required
+        );
+
+        mqtt_server_required || mcp_server_required || mqtt_observer_required
     };
+
+    println!("[DEBUG] needs_infrastructure = {}", needs_infrastructure);
 
     if needs_infrastructure {
         let mut state = state.lock().await;
         start_infrastructure_with_logging(&mut *state, log_collector.clone(), quit_flag.clone())
             .await?;
+    } else {
+        println!("[DEBUG] Skipping infrastructure startup - no services required");
     }
 
     // Start clients
@@ -6762,6 +6872,27 @@ async fn send_mcp_message_to_client(
 
 #[cfg(feature = "tui")]
 fn show_log_summary(app: &LoggingApp) {
+    use std::fs::OpenOptions;
+    use std::io::Write;
+
+    // Explicitly flush each log file to ensure accurate size reporting
+    for (_pane_name, log_file_path) in &app.log_files {
+        if log_file_path.exists() {
+            // Open the file in append mode and flush it
+            if let Ok(mut file) = OpenOptions::new()
+                .create(false)
+                .append(true)
+                .open(log_file_path)
+            {
+                let _ = file.flush();
+                let _ = file.sync_all(); // Force OS to write to disk
+            }
+        }
+    }
+
+    // Small additional delay to ensure filesystem consistency
+    std::thread::sleep(std::time::Duration::from_millis(100));
+
     println!("\n📁 Log Files Summary");
     println!("====================");
 

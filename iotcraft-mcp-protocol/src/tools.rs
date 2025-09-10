@@ -103,6 +103,15 @@ fn system_tools() -> Vec<McpTool> {
                 "required": []
             }),
         },
+        McpTool {
+            name: "get_mqtt_status".to_string(),
+            description: "Get MQTT connection status and health information".to_string(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {},
+                "required": []
+            }),
+        },
     ]
 }
 

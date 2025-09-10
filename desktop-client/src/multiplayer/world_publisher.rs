@@ -1,11 +1,8 @@
 use bevy::prelude::*;
-use log::{error, info, warn};
-use rumqttc::{Client, Event, Incoming, MqttOptions, QoS};
+use log::{error, info};
+use rumqttc::{Client, QoS};
 use std::sync::mpsc;
-use std::thread;
-use std::time::Duration;
 
-use super::mqtt_utils::generate_unique_client_id;
 use super::shared_world::*;
 use crate::config::MqttConfig;
 use crate::profile::PlayerProfile;
@@ -130,9 +127,11 @@ fn chunk_world_data(
     Ok(chunks)
 }
 
-/// Resource for managing world publishing
+/// Resource for managing world publishing - now uses Core MQTT Service
 #[derive(Resource)]
 pub struct WorldPublisher {
+    // Legacy field kept for compatibility but no longer used
+    #[allow(dead_code)]
     pub publish_tx: std::sync::Mutex<Option<mpsc::Sender<PublishMessage>>>,
 }
 
@@ -179,141 +178,17 @@ impl Plugin for WorldPublisherPlugin {
 
 fn initialize_world_publisher(
     _commands: Commands,
-    mqtt_config: Res<MqttConfig>,
-    world_publisher: ResMut<WorldPublisher>,
+    _mqtt_config: Res<MqttConfig>,
+    _world_publisher: ResMut<WorldPublisher>,
 ) {
-    let (publish_tx, publish_rx) = mpsc::channel::<PublishMessage>();
-
-    // Store the sender in the resource
-    *world_publisher.publish_tx.lock().unwrap() = Some(publish_tx);
-
-    let mqtt_host = mqtt_config.host.clone();
-    let mqtt_port = mqtt_config.port;
-
-    // Spawn publisher thread
-    thread::spawn(move || {
-        info!("Starting world publisher thread...");
-
-        // Test initial connection
-        let client_id = generate_unique_client_id("iotcraft-world-publisher");
-        info!("World publisher using client ID: {}", client_id);
-        let mut opts = MqttOptions::new(&client_id, &mqtt_host, mqtt_port);
-        opts.set_keep_alive(Duration::from_secs(30));
-        opts.set_clean_session(true);
-        opts.set_max_packet_size(1048576, 1048576); // Set max packet size to 1MB to match server
-
-        let (_client, mut conn) = Client::new(opts, 10);
-
-        let mut initial_connection_success = false;
-        let mut connection_attempts = 0;
-
-        // Try initial connection
-        for event in conn.iter() {
-            match event {
-                Ok(Event::Incoming(Incoming::ConnAck(_))) => {
-                    info!("World publisher connected successfully - world sharing enabled");
-                    initial_connection_success = true;
-                    break;
-                }
-                Err(e) => {
-                    error!("Initial world publisher connection failed: {:?}", e);
-                    connection_attempts += 1;
-                    if connection_attempts > 2 {
-                        break;
-                    }
-                }
-                Ok(_) => {}
-            }
-        }
-
-        if !initial_connection_success {
-            info!("MQTT connection not available - world publishing disabled");
-            return; // Exit thread - world publishing is disabled
-        }
-
-        // Continue with normal world publishing
-        loop {
-            let client_id = generate_unique_client_id("iotcraft-world-publisher");
-            info!("World publisher reconnecting with client ID: {}", client_id);
-            let mut opts = MqttOptions::new(&client_id, &mqtt_host, mqtt_port);
-            opts.set_keep_alive(Duration::from_secs(30));
-            opts.set_clean_session(true);
-            opts.set_max_packet_size(1048576, 1048576); // Set max packet size to 1MB to match server
-
-            let (client, mut conn) = Client::new(opts, 10);
-            let mut connected = false;
-            let mut reconnect = false;
-
-            // Wait for connection
-            for event in conn.iter() {
-                match event {
-                    Ok(Event::Incoming(Incoming::ConnAck(_))) => {
-                        connected = true;
-                        break;
-                    }
-                    Err(e) => {
-                        error!("World publisher connection error: {:?}", e);
-                        reconnect = true;
-                        break;
-                    }
-                    Ok(_) => {}
-                }
-            }
-
-            if !connected {
-                error!("Failed to establish world publisher connection");
-                thread::sleep(Duration::from_secs(5));
-                continue;
-            }
-
-            // Handle messages
-            loop {
-                // Handle connection events (non-blocking)
-                match conn.try_recv() {
-                    Ok(Ok(_)) => {}
-                    Ok(Err(e)) => {
-                        error!("World publisher connection error: {:?}", e);
-                        let _ = reconnect; // Intentionally unused for now
-                        break;
-                    }
-                    Err(rumqttc::TryRecvError::Empty) => {}
-                    Err(rumqttc::TryRecvError::Disconnected) => {
-                        error!("World publisher connection lost");
-                        let _ = reconnect; // Intentionally unused for now
-                        break;
-                    }
-                }
-
-                // Handle publish messages (non-blocking)
-                match publish_rx.try_recv() {
-                    Ok(msg) => {
-                        if connected {
-                            handle_publish_message(&client, msg);
-                        }
-                    }
-                    Err(mpsc::TryRecvError::Empty) => {}
-                    Err(mpsc::TryRecvError::Disconnected) => {
-                        warn!("World publisher channel disconnected");
-                        break;
-                    }
-                }
-
-                if reconnect {
-                    break;
-                }
-
-                thread::sleep(Duration::from_millis(10));
-            }
-
-            error!("World publisher disconnected, reconnecting in 5 seconds...");
-            thread::sleep(Duration::from_secs(5));
-        }
-    });
-
-    info!("World publisher initialized");
+    // No longer creates internal channels - uses Core MQTT Service directly
+    info!("✅ World publisher initialized - using Core MQTT Service for publishing");
 }
 
-fn handle_publish_message(client: &Client, message: PublishMessage) {
+// Note: handle_publish_message is now handled by Core MQTT Service
+// The function below is kept for reference but no longer used
+#[allow(dead_code)]
+fn _legacy_handle_publish_message(client: &Client, message: PublishMessage) {
     match message {
         PublishMessage::PublishWorld {
             world_info,
@@ -507,7 +382,7 @@ fn handle_publish_message(client: &Client, message: PublishMessage) {
 fn handle_world_publishing(
     mut publish_events: EventReader<PublishWorldEvent>,
     mut unpublish_events: EventReader<UnpublishWorldEvent>,
-    world_publisher: Res<WorldPublisher>,
+    mqtt_outgoing_tx: Option<Res<crate::mqtt::core_service::MqttOutgoingTx>>,
     current_world: Option<Res<crate::world::CurrentWorld>>,
     voxel_world: Res<crate::environment::VoxelWorld>,
     inventory: Res<crate::inventory::PlayerInventory>,
@@ -518,7 +393,7 @@ fn handle_world_publishing(
     // Handle publish events
     for event in publish_events.read() {
         if let Some(current_world) = &current_world {
-            if let Some(tx) = world_publisher.publish_tx.lock().unwrap().as_ref() {
+            if let Some(mqtt_tx) = &mqtt_outgoing_tx {
                 // Get current player position
                 let (player_position, player_rotation) =
                     if let Ok(transform) = camera_query.single() {
@@ -562,54 +437,176 @@ fn handle_world_publishing(
                         version: current_world.metadata.version.clone(),
                     };
 
-                    if let Err(e) = tx.send(PublishMessage::PublishWorld {
-                        world_info,
-                        world_data,
-                    }) {
-                        error!("Failed to send publish message: {}", e);
+                    // Publish world info via Core MQTT Service
+                    let info_topic = format!("iotcraft/worlds/{}/info", world_info.world_id);
+                    if let Ok(info_payload) = serde_json::to_string(&world_info) {
+                        let info_msg =
+                            crate::mqtt::core_service::OutgoingMqttMessage::PublishWorldInfo {
+                                topic: info_topic.clone(),
+                                payload: info_payload,
+                                retain: true,
+                            };
+
+                        if let Ok(tx) = mqtt_tx.0.lock() {
+                            if let Err(e) = tx.send(info_msg) {
+                                error!("Failed to send world info via Core MQTT Service: {}", e);
+                            } else {
+                                info!(
+                                    "📡 Published world info to {} via Core MQTT Service",
+                                    info_topic
+                                );
+                            }
+                        }
+                    }
+
+                    // Publish world data via Core MQTT Service
+                    let data_topic = format!("iotcraft/worlds/{}/data", world_info.world_id);
+                    if let Ok(data_payload_bytes) = serde_json::to_vec(&world_data) {
+                        let data_size = data_payload_bytes.len();
+                        if data_size <= MAX_MQTT_MESSAGE_SIZE {
+                            // Small enough for single message
+                            let data_msg =
+                                crate::mqtt::core_service::OutgoingMqttMessage::PublishWorldChunk {
+                                    topic: data_topic.clone(),
+                                    payload: data_payload_bytes,
+                                };
+
+                            if let Ok(tx) = mqtt_tx.0.lock() {
+                                if let Err(e) = tx.send(data_msg) {
+                                    error!(
+                                        "Failed to send world data via Core MQTT Service: {}",
+                                        e
+                                    );
+                                } else {
+                                    info!(
+                                        "📡 Published world data to {} via Core MQTT Service ({} bytes)",
+                                        data_topic, data_size
+                                    );
+                                }
+                            }
+                        } else {
+                            // TODO: Implement chunking for large world data
+                            error!(
+                                "World data too large ({} bytes), chunking not yet implemented for Core MQTT Service",
+                                data_size
+                            );
+                        }
                     }
                 }
+            } else {
+                error!("Core MQTT Service not available for world publishing");
             }
         }
     }
 
     // Handle unpublish events
     for event in unpublish_events.read() {
-        if let Some(tx) = world_publisher.publish_tx.lock().unwrap().as_ref() {
-            if let Err(e) = tx.send(PublishMessage::UnpublishWorld {
-                world_id: event.world_id.clone(),
-            }) {
-                error!("Failed to send unpublish message: {}", e);
+        if let Some(mqtt_tx) = &mqtt_outgoing_tx {
+            // Unpublish by sending empty retained messages
+            let info_topic = format!("iotcraft/worlds/{}/info", event.world_id);
+            let data_topic = format!("iotcraft/worlds/{}/data", event.world_id);
+
+            let unpublish_info_msg =
+                crate::mqtt::core_service::OutgoingMqttMessage::PublishWorldInfo {
+                    topic: info_topic.clone(),
+                    payload: String::new(), // Empty payload clears retained message
+                    retain: true,
+                };
+
+            let unpublish_data_msg =
+                crate::mqtt::core_service::OutgoingMqttMessage::PublishWorldChunk {
+                    topic: data_topic.clone(),
+                    payload: Vec::new(), // Empty payload clears retained message
+                };
+
+            if let Ok(tx) = mqtt_tx.0.lock() {
+                if let Err(e) = tx.send(unpublish_info_msg) {
+                    error!(
+                        "Failed to unpublish world info via Core MQTT Service: {}",
+                        e
+                    );
+                }
+                if let Err(e) = tx.send(unpublish_data_msg) {
+                    error!(
+                        "Failed to unpublish world data via Core MQTT Service: {}",
+                        e
+                    );
+                }
+                info!(
+                    "📡 Unpublished world {} via Core MQTT Service",
+                    event.world_id
+                );
             }
+        } else {
+            error!("Core MQTT Service not available for world unpublishing");
         }
     }
 }
 
 fn handle_world_changes_for_publishing(
     mut change_events: EventReader<WorldChangeEvent>,
-    world_publisher: Res<WorldPublisher>,
+    mqtt_outgoing_tx: Option<Res<crate::mqtt::core_service::MqttOutgoingTx>>,
     multiplayer_mode: Res<MultiplayerMode>,
 ) {
     for event in change_events.read() {
         match &*multiplayer_mode {
-            MultiplayerMode::HostingWorld { .. } => {
+            MultiplayerMode::HostingWorld { world_id, .. } => {
                 // Broadcast changes when hosting
-                if let Some(tx) = world_publisher.publish_tx.lock().unwrap().as_ref() {
-                    if let Err(e) = tx.send(PublishMessage::BroadcastChange {
-                        change: event.change.clone(),
-                    }) {
-                        error!("Failed to send broadcast message: {}", e);
+                if let Some(mqtt_tx) = &mqtt_outgoing_tx {
+                    let change_topic = format!("iotcraft/worlds/{}/changes", world_id);
+                    if let Ok(payload) = serde_json::to_string(&event.change) {
+                        let change_msg =
+                            crate::mqtt::core_service::OutgoingMqttMessage::GenericPublish {
+                                topic: change_topic.clone(),
+                                payload,
+                                qos: rumqttc::QoS::AtLeastOnce,
+                                retain: false,
+                            };
+
+                        if let Ok(tx) = mqtt_tx.0.lock() {
+                            if let Err(e) = tx.send(change_msg) {
+                                error!(
+                                    "Failed to broadcast world change via Core MQTT Service: {}",
+                                    e
+                                );
+                            } else {
+                                info!(
+                                    "📡 Broadcasted world change to {} via Core MQTT Service",
+                                    change_topic
+                                );
+                            }
+                        }
                     }
+                } else {
+                    error!("Core MQTT Service not available for world change broadcasting");
                 }
             }
-            MultiplayerMode::JoinedWorld { .. } => {
+            MultiplayerMode::JoinedWorld { world_id, .. } => {
                 // Forward changes to host when joined
-                if let Some(tx) = world_publisher.publish_tx.lock().unwrap().as_ref() {
-                    if let Err(e) = tx.send(PublishMessage::BroadcastChange {
-                        change: event.change.clone(),
-                    }) {
-                        error!("Failed to send change message: {}", e);
+                if let Some(mqtt_tx) = &mqtt_outgoing_tx {
+                    let change_topic = format!("iotcraft/worlds/{}/changes", world_id);
+                    if let Ok(payload) = serde_json::to_string(&event.change) {
+                        let change_msg =
+                            crate::mqtt::core_service::OutgoingMqttMessage::GenericPublish {
+                                topic: change_topic.clone(),
+                                payload,
+                                qos: rumqttc::QoS::AtLeastOnce,
+                                retain: false,
+                            };
+
+                        if let Ok(tx) = mqtt_tx.0.lock() {
+                            if let Err(e) = tx.send(change_msg) {
+                                error!("Failed to send world change via Core MQTT Service: {}", e);
+                            } else {
+                                info!(
+                                    "📡 Sent world change to {} via Core MQTT Service",
+                                    change_topic
+                                );
+                            }
+                        }
                     }
+                } else {
+                    error!("Core MQTT Service not available for world change forwarding");
                 }
             }
             MultiplayerMode::SinglePlayer => {

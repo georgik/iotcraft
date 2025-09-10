@@ -1,11 +1,9 @@
 use bevy::prelude::*;
 use log::{error, info, warn};
-use rumqttc::{Client, Event, Incoming, MqttOptions, QoS};
 use std::collections::HashMap;
 use std::sync::mpsc;
 use std::time::Duration;
 
-use super::mqtt_utils::generate_unique_client_id;
 use super::shared_world::*;
 use super::world_publisher::ChunkedWorldData; // Import from publisher
 use crate::config::MqttConfig;
@@ -80,6 +78,8 @@ impl Plugin for WorldDiscoveryPlugin {
                 (
                     handle_discovery_requests,
                     process_discovery_responses,
+                    process_core_mqtt_world_info,
+                    process_core_mqtt_world_data,
                     auto_refresh_worlds,
                 ),
             );
@@ -88,185 +88,19 @@ impl Plugin for WorldDiscoveryPlugin {
 
 fn initialize_world_discovery(
     _commands: Commands,
-    mqtt_config: Res<MqttConfig>,
+    _mqtt_config: Res<MqttConfig>,
     world_discovery: ResMut<WorldDiscovery>,
 ) {
-    info!(
-        "🚀 Initializing world discovery plugin with MQTT broker: {}:{}",
-        mqtt_config.host, mqtt_config.port
-    );
+    info!("🚀 Initializing world discovery plugin - using Core MQTT Service");
 
-    let (discovery_tx, discovery_rx) = mpsc::channel::<DiscoveryMessage>();
-    let (response_tx, response_rx) = mpsc::channel::<DiscoveryResponse>();
+    let (discovery_tx, _discovery_rx) = mpsc::channel::<DiscoveryMessage>();
+    let (_response_tx, response_rx) = mpsc::channel::<DiscoveryResponse>();
 
     // Store channels in the resource
     *world_discovery.discovery_tx.lock().unwrap() = Some(discovery_tx);
     *world_discovery.world_rx.lock().unwrap() = Some(response_rx);
 
-    info!("📡 World discovery channels created");
-
-    let mqtt_host = mqtt_config.host.clone();
-    let mqtt_port = mqtt_config.port;
-
-    // Spawn synchronous world discovery thread (similar to world publisher)
-    std::thread::spawn(move || {
-        info!("🌍 Starting world discovery thread...");
-
-        // Test initial connection
-        let client_id = generate_unique_client_id("iotcraft-world-discovery");
-        info!("World discovery using client ID: {}", client_id);
-        let mut opts = MqttOptions::new(&client_id, &mqtt_host, mqtt_port);
-        opts.set_keep_alive(Duration::from_secs(30));
-        opts.set_clean_session(false); // Important: Use persistent session to receive retained messages
-        opts.set_max_packet_size(2097152, 2097152); // Increase to 2MB for large world data
-
-        let (_client, mut conn) = Client::new(opts, 100); // Increase channel capacity for large messages
-
-        let mut initial_connection_success = false;
-        let mut connection_attempts = 0;
-
-        // Try initial connection
-        for event in conn.iter() {
-            match event {
-                Ok(Event::Incoming(Incoming::ConnAck(_))) => {
-                    info!("🔗 World discovery connected successfully - world discovery enabled");
-                    initial_connection_success = true;
-                    break;
-                }
-                Err(e) => {
-                    error!("Initial world discovery connection failed: {:?}", e);
-                    connection_attempts += 1;
-                    if connection_attempts > 2 {
-                        break;
-                    }
-                }
-                Ok(_) => {}
-            }
-        }
-
-        if !initial_connection_success {
-            info!("MQTT connection not available - world discovery disabled");
-            return; // Exit thread - world discovery is disabled
-        }
-
-        // Continue with normal world discovery loop
-        loop {
-            let client_id = generate_unique_client_id("iotcraft-world-discovery");
-            info!("World discovery reconnecting with client ID: {}", client_id);
-            let mut opts = MqttOptions::new(&client_id, &mqtt_host, mqtt_port);
-            opts.set_keep_alive(Duration::from_secs(30));
-            opts.set_clean_session(false); // Important: Use persistent session to receive retained messages
-            opts.set_max_packet_size(2097152, 2097152); // Increase to 2MB for large world data
-
-            let (client, mut conn) = Client::new(opts, 100);
-            let mut connected = false;
-            let mut subscribed = false;
-            let mut reconnect = false;
-
-            // World discovery state
-            let mut world_cache: HashMap<String, SharedWorldInfo> = HashMap::new();
-            let mut chunk_cache: HashMap<String, HashMap<u32, ChunkedWorldData>> = HashMap::new();
-            let mut last_messages: HashMap<String, LastMessage> = HashMap::new();
-
-            // Wait for connection and handle messages
-            for event in conn.iter() {
-                match event {
-                    Ok(Event::Incoming(Incoming::ConnAck(_))) => {
-                        info!("🔗 World discovery connected to MQTT broker");
-                        connected = true;
-
-                        // Subscribe to all world discovery topics
-                        let topics = [
-                            "iotcraft/worlds/+/info",
-                            "iotcraft/worlds/+/data",
-                            "iotcraft/worlds/+/data/chunk",
-                            "iotcraft/worlds/+/changes",
-                            "iotcraft/worlds/+/state/blocks/placed",
-                            "iotcraft/worlds/+/state/blocks/removed",
-                        ];
-
-                        for topic in &topics {
-                            if let Err(e) = client.subscribe(*topic, QoS::AtLeastOnce) {
-                                error!("Failed to subscribe to {}: {}", topic, e);
-                                reconnect = true;
-                                break;
-                            }
-                            info!("📬 Subscribed to: {}", topic);
-                        }
-                    }
-                    Ok(Event::Incoming(Incoming::SubAck(_))) => {
-                        if !subscribed {
-                            info!("✅ World discovery subscriptions acknowledged");
-                            subscribed = true;
-                        }
-                    }
-                    Ok(Event::Incoming(Incoming::Publish(publish))) => {
-                        if connected {
-                            info!(
-                                "📨 Received world discovery message on '{}' [retain: {}, payload_size: {} bytes]",
-                                publish.topic,
-                                publish.retain,
-                                publish.payload.len()
-                            );
-
-                            // Handle the discovery message
-                            handle_sync_discovery_message(
-                                &publish,
-                                &mut world_cache,
-                                &mut chunk_cache,
-                                &mut last_messages,
-                                &response_tx,
-                            );
-
-                            // Send world list update for info messages
-                            if publish.topic.contains("/info") {
-                                let _ = response_tx.send(DiscoveryResponse::WorldListUpdated {
-                                    worlds: world_cache.clone(),
-                                });
-                            }
-                        }
-                    }
-                    Ok(_) => {
-                        // Other MQTT events - ignore but continue processing
-                    }
-                    Err(e) => {
-                        error!("🚫 World discovery connection error: {:?}", e);
-                        break;
-                    }
-                }
-
-                if reconnect {
-                    break;
-                }
-
-                // Process discovery requests (non-blocking)
-                while let Ok(message) = discovery_rx.try_recv() {
-                    match message {
-                        DiscoveryMessage::RefreshWorlds => {
-                            info!(
-                                "🔄 RefreshWorlds request - sending {} cached worlds",
-                                world_cache.len()
-                            );
-                            let _ = response_tx.send(DiscoveryResponse::WorldListUpdated {
-                                worlds: world_cache.clone(),
-                            });
-                        }
-                    }
-                }
-            }
-
-            if !connected {
-                error!("Failed to establish world discovery connection");
-                std::thread::sleep(Duration::from_secs(5));
-                continue;
-            }
-
-            error!("World discovery disconnected, reconnecting in 5 seconds...");
-            std::thread::sleep(Duration::from_secs(5));
-        }
-    });
-
-    info!("✅ World discovery initialized");
+    info!("✅ World discovery initialized - Core MQTT Service will handle MQTT routing");
 }
 
 // Synchronous version of handle_discovery_message for the synchronous thread
@@ -981,5 +815,80 @@ fn auto_refresh_worlds(
     } else {
         // First time, refresh immediately
         refresh_events.write(RefreshOnlineWorldsEvent);
+    }
+}
+
+/// Process world info messages from Core MQTT Service
+/// These arrive from the unified MQTT connection and need to be injected into world discovery
+fn process_core_mqtt_world_info(
+    world_discovery_rx: Option<Res<crate::mqtt::core_service::WorldDiscoveryReceiver>>,
+    mut online_worlds: ResMut<OnlineWorlds>,
+) {
+    if let Some(receiver) = world_discovery_rx {
+        if let Ok(rx) = receiver.0.lock() {
+            while let Ok(world_info) = rx.try_recv() {
+                info!(
+                    "🌍 Processing world info from Core MQTT Service: {} ({})",
+                    world_info.world_name, world_info.world_id
+                );
+
+                // Add to online worlds cache directly
+                online_worlds
+                    .worlds
+                    .insert(world_info.world_id.clone(), world_info);
+                online_worlds.last_updated = Some(std::time::Instant::now());
+
+                info!(
+                    "✅ Added world to cache. Total online worlds: {}",
+                    online_worlds.worlds.len()
+                );
+            }
+        } else {
+            warn!("⚠️ Could not lock WorldDiscoveryReceiver mutex");
+        }
+    } else {
+        // Add periodic debug logging to see if this system is running but resource missing
+        use std::sync::atomic::{AtomicU32, Ordering};
+        static DEBUG_COUNTER: AtomicU32 = AtomicU32::new(0);
+
+        let count = DEBUG_COUNTER.fetch_add(1, Ordering::Relaxed);
+        if count % 300 == 0 {
+            // Log every ~5 seconds (60fps * 5 = 300 frames)
+            warn!(
+                "⚠️ process_core_mqtt_world_info: WorldDiscoveryReceiver resource not found (check #{}: {})",
+                count / 300,
+                count
+            );
+        }
+    }
+}
+
+/// Process world data messages from Core MQTT Service
+/// These arrive from the unified MQTT connection for complete world synchronization
+fn process_core_mqtt_world_data(
+    world_data_rx: Option<Res<crate::mqtt::core_service::WorldDataReceiver>>,
+    mut online_worlds: ResMut<OnlineWorlds>,
+) {
+    if let Some(receiver) = world_data_rx {
+        if let Ok(rx) = receiver.0.lock() {
+            while let Ok((world_id, world_data)) = rx.try_recv() {
+                info!(
+                    "🌍 Processing world data from Core MQTT Service: {} ({} blocks)",
+                    world_id,
+                    world_data.blocks.len()
+                );
+
+                // Cache the world data for joining
+                online_worlds
+                    .world_data_cache
+                    .insert(world_id.clone(), world_data);
+
+                info!(
+                    "✅ Cached world data for {}. Total cached worlds: {}",
+                    world_id,
+                    online_worlds.world_data_cache.len()
+                );
+            }
+        }
     }
 }
