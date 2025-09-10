@@ -36,6 +36,12 @@ enum Commands {
         #[arg(short, long, default_value = "8000")]
         port: u16,
     },
+    /// Clean up problematic lines that break formatting
+    Cleanup {
+        /// Only check for issues without fixing them
+        #[arg(short, long)]
+        check: bool,
+    },
 }
 
 #[derive(Deserialize)]
@@ -60,6 +66,9 @@ fn main() -> Result<()> {
         }
         Commands::WebServe { port } => {
             serve_web(*port)?;
+        }
+        Commands::Cleanup { check } => {
+            cleanup_source_files(*check)?;
         }
     }
 
@@ -717,4 +726,149 @@ fn get_network_ip() -> Option<String> {
             _ => None,
         })
         .next()
+}
+
+/// Clean up problematic lines in source files that can break formatting
+fn cleanup_source_files(check_only: bool) -> Result<()> {
+    let members = read_workspace_members().context("Failed to read workspace members")?;
+
+    if check_only {
+        println!("🔍 Checking for problematic lines in source files...");
+    } else {
+        println!("🧹 Cleaning up problematic lines in source files...");
+    }
+
+    let mut total_issues = 0;
+    let mut total_files_checked = 0;
+
+    for member in &members {
+        let member_path = Path::new(member);
+
+        // Skip members that don't exist or don't have a src directory
+        if !member_path.exists() || !member_path.join("src").exists() {
+            continue;
+        }
+
+        print!("📦 Processing {}... ", member);
+
+        let src_dir = member_path.join("src");
+        let (files_checked, issues_found) = cleanup_rust_files_in_dir(&src_dir, check_only)?;
+
+        total_files_checked += files_checked;
+        total_issues += issues_found;
+
+        if issues_found > 0 {
+            if check_only {
+                println!(
+                    "⚠️  {} issues found in {} files",
+                    issues_found, files_checked
+                );
+            } else {
+                println!(
+                    "✅ {} issues fixed in {} files",
+                    issues_found, files_checked
+                );
+            }
+        } else {
+            println!("✅ clean ({} files)", files_checked);
+        }
+    }
+
+    println!();
+    println!("📊 Summary:");
+    println!("   Files checked: {}", total_files_checked);
+    println!("   Issues found: {}", total_issues);
+
+    if total_issues == 0 {
+        println!("   ✅ All source files are clean");
+    } else if check_only {
+        println!("   ⚠️  Run 'cargo xtask cleanup' (without --check) to fix these issues.");
+        return Err(anyhow::anyhow!("Found {} problematic lines", total_issues));
+    } else {
+        println!("   ✅ All issues have been fixed");
+    }
+
+    Ok(())
+}
+
+/// Recursively clean up Rust files in a directory
+fn cleanup_rust_files_in_dir(dir: &Path, check_only: bool) -> Result<(usize, usize)> {
+    let mut files_checked = 0;
+    let mut total_issues = 0;
+
+    for entry in
+        fs::read_dir(dir).with_context(|| format!("Failed to read directory {}", dir.display()))?
+    {
+        let entry = entry.context("Failed to read directory entry")?;
+        let path = entry.path();
+
+        if path.is_dir() {
+            let (sub_files, sub_issues) = cleanup_rust_files_in_dir(&path, check_only)?;
+            files_checked += sub_files;
+            total_issues += sub_issues;
+        } else if let Some(extension) = path.extension().and_then(|e| e.to_str()) {
+            if extension == "rs" {
+                files_checked += 1;
+                let issues = cleanup_rust_file(&path, check_only)?;
+                total_issues += issues;
+            }
+        }
+    }
+
+    Ok((files_checked, total_issues))
+}
+
+/// Clean up a single Rust file
+fn cleanup_rust_file(file_path: &Path, check_only: bool) -> Result<usize> {
+    let content = fs::read_to_string(file_path)
+        .with_context(|| format!("Failed to read file {}", file_path.display()))?;
+
+    let lines: Vec<&str> = content.lines().collect();
+    let mut cleaned_lines = Vec::new();
+    let mut issues_found = 0;
+
+    for line in lines {
+        // Check for problematic patterns that should cause entire line removal
+        let should_remove_line =
+            // Bell characters
+            line.contains('\x07') ||
+            // Other control characters that might appear from terminal output
+            line.chars().any(|c| c.is_control() && c != '\t' && c != '\n' && c != '\r') ||
+            // Suspiciously long lines that might be terminal output
+            (line.len() > 500 && line.contains("INFO") && line.contains("DEBUG")) ||
+            // Lines that look like terminal command artifacts
+            line.trim().starts_with("[1]") && line.contains("killed") ||
+            line.trim().starts_with("[2]") && line.contains("interrupt");
+
+        // Check for trailing whitespace
+        let has_trailing_whitespace = line.len() != line.trim_end().len();
+
+        if should_remove_line {
+            issues_found += 1;
+            // Skip the problematic line (don't add it to cleaned_lines)
+        } else if has_trailing_whitespace {
+            issues_found += 1;
+            // Remove trailing whitespace but keep the line
+            cleaned_lines.push(line.trim_end());
+        } else {
+            cleaned_lines.push(line);
+        }
+    }
+
+    // Write the cleaned content if we found issues and we're not in check-only mode
+    if issues_found > 0 && !check_only {
+        let cleaned_content = cleaned_lines.join("\n");
+        // Add final newline if the original content had one
+        let final_content = if content.ends_with('\n') {
+            format!("{}\n", cleaned_content)
+        } else {
+            cleaned_content
+        };
+        if final_content != content {
+            fs::write(file_path, &final_content)
+                .with_context(|| format!("Failed to write cleaned file {}", file_path.display()))?;
+        }
+    }
+
+    Ok(issues_found)
 }

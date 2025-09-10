@@ -1591,7 +1591,7 @@ async fn run_scenario_inner(
             .map(|obs| obs.required)
             .unwrap_or(false);
 
-        println!("[DEBUG] Non-TUI Infrastructure requirements: mqtt_server={}, mcp_server={}, mqtt_observer={}", 
+        println!("[DEBUG] Non-TUI Infrastructure requirements: mqtt_server={}, mcp_server={}, mqtt_observer={}",
                 mqtt_server_required, mcp_server_required, mqtt_observer_required);
 
         mqtt_server_required || mcp_server_required || mqtt_observer_required
@@ -1697,83 +1697,91 @@ async fn start_infrastructure(
 
         // Check if port is already occupied
         if is_port_occupied("localhost", port).await {
-            return Err(format!("MQTT port {} is already in use. Please stop any existing MQTT brokers or choose a different port.", port).into());
-        }
-    }
-
-    // Start MQTT server directly if required (instead of delegating to xtask)
-    if state.scenario.infrastructure.mqtt_server.required {
-        let port = state.scenario.infrastructure.mqtt_server.port;
-        println!("[DEBUG] Starting MQTT server on port {}", port);
-        if verbose {
-            println!("  Starting MQTT server on port {}", port);
-        }
-
-        // Start MQTT server from ../mqtt-server directory
-        println!(
-            "[DEBUG] About to spawn MQTT server process: cargo run --release -- --port {}",
-            port
-        );
-        println!("[DEBUG] Working directory: ../mqtt-server");
-
-        // Check if the mqtt-server directory exists
-        if !std::path::Path::new("../mqtt-server").exists() {
-            return Err("../mqtt-server directory does not exist".into());
+            println!("🔄 MQTT port {} is already in use - reusing existing server instead of starting new one", port);
+            if verbose {
+                println!(
+                    "  ℹ️  Detected existing MQTT server on port {}, will reuse it",
+                    port
+                );
+            }
+            // Skip starting our own MQTT server, but continue with observer if needed
+        } else {
         }
 
-        let mqtt_process = TokioCommand::new("cargo")
-            .current_dir("../mqtt-server")
-            .args(&["run", "--release", "--", "--port", &port.to_string()])
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            .spawn()
-            .map_err(|e| {
-                let error_msg = format!("Failed to start MQTT server: {}", e);
-                println!("[DEBUG] MQTT server spawn failed: {}", error_msg);
-                error_msg
-            })?;
+        // Start MQTT server directly if required (instead of delegating to xtask)
+        if state.scenario.infrastructure.mqtt_server.required {
+            let port = state.scenario.infrastructure.mqtt_server.port;
+            println!("[DEBUG] Starting MQTT server on port {}", port);
+            if verbose {
+                println!("  Starting MQTT server on port {}", port);
+            }
 
-        println!(
-            "[DEBUG] MQTT server process spawned successfully with PID: {:?}",
-            mqtt_process.id()
-        );
-
-        state
-            .infrastructure_processes
-            .insert("mqtt_server".to_string(), mqtt_process);
-
-        // Wait for MQTT server to be ready
-        println!("[DEBUG] About to wait for MQTT server port {}", port);
-        if verbose {
+            // Start MQTT server from ../mqtt-server directory
             println!(
-                "  Waiting for MQTT server to become ready on port {}...",
+                "[DEBUG] About to spawn MQTT server process: cargo run --release -- --port {}",
                 port
             );
-        }
+            println!("[DEBUG] Working directory: ../mqtt-server");
 
-        let mqtt_ready = wait_for_port_with_retries_and_context(
-            "localhost",
-            port,
-            600, // Increased from 300 (5 min) to 600 (10 min) for Rust build time
-            verbose,
-            Some("cargo run --release (mqtt-server)"),
-        )
-        .await;
-        println!(
-            "[DEBUG] wait_for_port_with_retries_and_context returned: {}",
-            mqtt_ready
-        );
-        if !mqtt_ready {
-            return Err(format!(
-                "MQTT server failed to start on port {} within 10 minute timeout",
-                port
+            // Check if the mqtt-server directory exists
+            if !std::path::Path::new("../mqtt-server").exists() {
+                return Err("../mqtt-server directory does not exist".into());
+            }
+
+            let mqtt_process = TokioCommand::new("cargo")
+                .current_dir("../mqtt-server")
+                .args(&["run", "--release", "--", "--port", &port.to_string()])
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped())
+                .spawn()
+                .map_err(|e| {
+                    let error_msg = format!("Failed to start MQTT server: {}", e);
+                    println!("[DEBUG] MQTT server spawn failed: {}", error_msg);
+                    error_msg
+                })?;
+
+            println!(
+                "[DEBUG] MQTT server process spawned successfully with PID: {:?}",
+                mqtt_process.id()
+            );
+
+            state
+                .infrastructure_processes
+                .insert("mqtt_server".to_string(), mqtt_process);
+
+            // Wait for MQTT server to be ready
+            println!("[DEBUG] About to wait for MQTT server port {}", port);
+            if verbose {
+                println!(
+                    "  Waiting for MQTT server to become ready on port {}...",
+                    port
+                );
+            }
+
+            let mqtt_ready = wait_for_port_with_retries_and_context(
+                "localhost",
+                port,
+                600, // Increased from 300 (5 min) to 600 (10 min) for Rust build time
+                verbose,
+                Some("cargo run --release (mqtt-server)"),
             )
-            .into());
-        }
+            .await;
+            println!(
+                "[DEBUG] wait_for_port_with_retries_and_context returned: {}",
+                mqtt_ready
+            );
+            if !mqtt_ready {
+                return Err(format!(
+                    "MQTT server failed to start on port {} within 10 minute timeout",
+                    port
+                )
+                .into());
+            }
 
-        println!("[DEBUG] MQTT server is ready on port {}", port);
-        if verbose {
-            println!("  ✅ MQTT server ready on port {}", port);
+            println!("[DEBUG] MQTT server is ready on port {}", port);
+            if verbose {
+                println!("  ✅ MQTT server ready on port {}", port);
+            }
         }
     }
 
@@ -5121,113 +5129,117 @@ async fn start_infrastructure_with_logging(
 
         // Check if port is already occupied
         if is_port_occupied("localhost", port).await {
-            let error_msg = format!(
-                "MQTT port {} is already in use. Please stop any existing MQTT brokers or choose a different port.",
-                port
+            log_collector.log_str(
+                LogSource::Orchestrator,
+                &format!("🔄 MQTT port {} is already in use - reusing existing server instead of starting new one", port),
             );
-            log_collector.log_str(LogSource::Orchestrator, &format!("❌ {}", error_msg));
-            return Err(error_msg.into());
+            log_collector.log_str(
+                LogSource::MqttServer,
+                "🟢 Using existing MQTT Server (reused)",
+            );
+            // Skip starting our own MQTT server, but continue with observer if needed
+        } else {
         }
-    }
 
-    // Start MQTT server directly if required (instead of delegating to xtask)
-    if state.scenario.infrastructure.mqtt_server.required {
-        let port = state.scenario.infrastructure.mqtt_server.port;
-        log_collector.log_str(
-            LogSource::Orchestrator,
-            &format!("  Starting MQTT server on port {}", port),
-        );
+        // Start MQTT server directly if required (instead of delegating to xtask)
+        if state.scenario.infrastructure.mqtt_server.required {
+            let port = state.scenario.infrastructure.mqtt_server.port;
+            log_collector.log_str(
+                LogSource::Orchestrator,
+                &format!("  Starting MQTT server on port {}", port),
+            );
 
-        // Update MQTT server status to starting
-        log_collector.log_str(LogSource::MqttServer, "🟡 MQTT Server starting...");
+            // Update MQTT server status to starting
+            log_collector.log_str(LogSource::MqttServer, "🟡 MQTT Server starting...");
 
-        // Log the exact command being executed
-        let mqtt_cmd = format!("cargo run --release -- --port {}", port);
-        log_collector.log_str(
-            LogSource::MqttServer,
-            &format!("🚀 Executing command: {}", mqtt_cmd),
-        );
-        log_collector.log_str(
-            LogSource::MqttServer,
-            &format!("📁 Working directory: ../mqtt-server"),
-        );
+            // Log the exact command being executed
+            let mqtt_cmd = format!("cargo run --release -- --port {}", port);
+            log_collector.log_str(
+                LogSource::MqttServer,
+                &format!("🚀 Executing command: {}", mqtt_cmd),
+            );
+            log_collector.log_str(
+                LogSource::MqttServer,
+                &format!("📁 Working directory: ../mqtt-server"),
+            );
 
-        // Start MQTT server from ../mqtt-server directory
-        let mut mqtt_process = TokioCommand::new("cargo")
-            .current_dir("../mqtt-server")
-            .args(&["run", "--release", "--", "--port", &port.to_string()])
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            .spawn()
-            .map_err(|e| {
-                let error_msg = format!("Failed to start MQTT server: {}", e);
+            // Start MQTT server from ../mqtt-server directory
+            let mut mqtt_process = TokioCommand::new("cargo")
+                .current_dir("../mqtt-server")
+                .args(&["run", "--release", "--", "--port", &port.to_string()])
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped())
+                .spawn()
+                .map_err(|e| {
+                    let error_msg = format!("Failed to start MQTT server: {}", e);
+                    log_collector.log_str(LogSource::Orchestrator, &format!("❌ {}", error_msg));
+                    error_msg
+                })?;
+
+            // Capture stdout and stderr from the MQTT server process
+            if let Some(stdout) = mqtt_process.stdout.take() {
+                let log_collector = log_collector.clone();
+                tokio::spawn(async move {
+                    let mut reader = BufReader::new(stdout);
+                    let mut line = String::new();
+                    while reader.read_line(&mut line).await.is_ok() && !line.is_empty() {
+                        log_collector.log_str(LogSource::MqttServer, line.trim());
+                        line.clear();
+                    }
+                });
+            }
+
+            if let Some(stderr) = mqtt_process.stderr.take() {
+                let log_collector = log_collector.clone();
+                tokio::spawn(async move {
+                    let mut reader = BufReader::new(stderr);
+                    let mut line = String::new();
+                    while reader.read_line(&mut line).await.is_ok() && !line.is_empty() {
+                        log_collector
+                            .log_str(LogSource::MqttServer, &format!("[stderr] {}", line.trim()));
+                        line.clear();
+                    }
+                });
+            }
+
+            state
+                .infrastructure_processes
+                .insert("mqtt_server".to_string(), mqtt_process);
+
+            // Wait for MQTT server to be ready
+            log_collector.log_str(
+                LogSource::Orchestrator,
+                &format!(
+                    "  Waiting for MQTT server to become ready on port {}...",
+                    port
+                ),
+            );
+
+            let mqtt_ready = wait_for_port_with_retries_and_context_with_logging(
+                "localhost",
+                port,
+                600, // Increased from 300 (5 min) to 600 (10 min) for Rust build time
+                Some("cargo run --release (mqtt-server)"),
+                log_collector.clone(),
+            )
+            .await;
+            if !mqtt_ready {
+                let error_msg = format!(
+                    "MQTT server failed to start on port {} within 10 minute timeout",
+                    port
+                );
                 log_collector.log_str(LogSource::Orchestrator, &format!("❌ {}", error_msg));
-                error_msg
-            })?;
+                return Err(error_msg.into());
+            }
 
-        // Capture stdout and stderr from the MQTT server process
-        if let Some(stdout) = mqtt_process.stdout.take() {
-            let log_collector = log_collector.clone();
-            tokio::spawn(async move {
-                let mut reader = BufReader::new(stdout);
-                let mut line = String::new();
-                while reader.read_line(&mut line).await.is_ok() && !line.is_empty() {
-                    log_collector.log_str(LogSource::MqttServer, line.trim());
-                    line.clear();
-                }
-            });
-        }
-
-        if let Some(stderr) = mqtt_process.stderr.take() {
-            let log_collector = log_collector.clone();
-            tokio::spawn(async move {
-                let mut reader = BufReader::new(stderr);
-                let mut line = String::new();
-                while reader.read_line(&mut line).await.is_ok() && !line.is_empty() {
-                    log_collector
-                        .log_str(LogSource::MqttServer, &format!("[stderr] {}", line.trim()));
-                    line.clear();
-                }
-            });
-        }
-
-        state
-            .infrastructure_processes
-            .insert("mqtt_server".to_string(), mqtt_process);
-
-        // Wait for MQTT server to be ready
-        log_collector.log_str(
-            LogSource::Orchestrator,
-            &format!(
-                "  Waiting for MQTT server to become ready on port {}...",
-                port
-            ),
-        );
-
-        let mqtt_ready = wait_for_port_with_retries_and_context_with_logging(
-            "localhost",
-            port,
-            600, // Increased from 300 (5 min) to 600 (10 min) for Rust build time
-            Some("cargo run --release (mqtt-server)"),
-            log_collector.clone(),
-        )
-        .await;
-        if !mqtt_ready {
-            let error_msg = format!(
-                "MQTT server failed to start on port {} within 10 minute timeout",
-                port
+            log_collector.log_str(
+                LogSource::Orchestrator,
+                &format!("  ✅ MQTT server ready on port {}", port),
             );
-            log_collector.log_str(LogSource::Orchestrator, &format!("❌ {}", error_msg));
-            return Err(error_msg.into());
+
+            // Update MQTT server status to ready
+            log_collector.log_str(LogSource::MqttServer, "🟢 MQTT Server ready");
         }
-
-        log_collector.log_str(
-            LogSource::Orchestrator,
-            &format!("  ✅ MQTT server ready on port {}", port),
-        );
-
-        // Update MQTT server status to ready
-        log_collector.log_str(LogSource::MqttServer, "🟢 MQTT Server ready");
     }
 
     // Start MQTT observer if required

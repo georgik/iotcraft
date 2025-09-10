@@ -734,6 +734,12 @@ fn handle_create_world_events(
                             script_commands.len(),
                             event.world_name
                         );
+
+                        // Debug: show first few commands being added
+                        for (i, cmd) in script_commands.iter().take(5).enumerate() {
+                            info!("  Template command {}: '{}'", i, cmd);
+                        }
+
                         pending_commands.commands.extend(script_commands);
                     }
                     Err(e) => {

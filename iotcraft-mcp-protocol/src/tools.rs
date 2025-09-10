@@ -234,7 +234,7 @@ fn world_building_tools() -> Vec<McpTool> {
     vec![] // Placeholder for non-serde implementation
 }
 
-/// Device management commands  
+/// Device management commands
 #[cfg(feature = "serde")]
 fn device_management_tools() -> Vec<McpTool> {
     let device_types: Vec<String> = DeviceType::all()

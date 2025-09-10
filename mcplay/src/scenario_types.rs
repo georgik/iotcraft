@@ -313,7 +313,7 @@ pub enum ClientActionType {
     MoveTo,
     /// Place a block
     PlaceBlock,
-    /// Break a block  
+    /// Break a block
     BreakBlock,
     /// Use an item
     UseItem,
@@ -512,7 +512,7 @@ mod tests {
     fn test_mcplay_scenario_compatibility() {
         let json = r#"{
             "name": "test",
-            "description": "test description", 
+            "description": "test description",
             "version": "1.0.0",
             "clients": [{
                 "id": "alice",

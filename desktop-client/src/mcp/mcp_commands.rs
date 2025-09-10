@@ -1,7 +1,7 @@
 use bevy::prelude::*;
+use chrono;
 use log::info;
 use serde_json::{Value, json};
-use chrono;
 
 use super::mcp_params::*;
 
@@ -57,29 +57,7 @@ pub fn execute_mcp_command_bundled(
             .to_string()
         }
         "get_mqtt_status" => {
-            // Check MQTT connection status comprehensively
-            // For bundled MCP commands, we need to access MQTT status via multiplayer_params
-            let mqtt_connected = multiplayer_params.online_worlds
-                .as_ref()
-                .map(|ow| !ow.worlds.is_empty())
-                .unwrap_or(false);
-            let has_mqtt_outgoing = true; // In bundled version, assume Core MQTT Service availability
-
-            json!({
-                "mqtt_connected": mqtt_connected,
-                "core_mqtt_service_available": has_mqtt_outgoing,
-                "multiplayer_available": multiplayer_params.multiplayer_mode.is_some(),
-                "status": if mqtt_connected && has_mqtt_outgoing { "healthy" } else { "degraded" },
-                "timestamp": chrono::Utc::now().to_rfc3339(),
-                "details": {
-                    "bundled_mcp_version": true,
-                    "multiplayer_mode": multiplayer_params.multiplayer_mode
-                        .as_ref()
-                        .map(|mode| format!("{:?}", **mode))
-                        .unwrap_or("SinglePlayer".to_string())
-                }
-            })
-            .to_string()
+            execute_get_mqtt_status_command(_core_params, multiplayer_params)
         }
         "get_world_status" => {
             let block_count = world_params.voxel_world.blocks.len();
@@ -475,6 +453,36 @@ fn execute_get_multiplayer_status_command(multiplayer_params: &MultiplayerMcpPar
     }
 }
 
+/// Get MQTT status command implementation
+fn execute_get_mqtt_status_command(
+    core_params: &CoreMcpParams,
+    multiplayer_params: &MultiplayerMcpParams,
+) -> String {
+    // Get actual MQTT connection status from Core MQTT Service
+    let mqtt_connected = core_params
+        .core_mqtt_status
+        .as_ref()
+        .map(|status| status.is_connected)
+        .unwrap_or(false);
+    let core_mqtt_service_available = core_params.core_mqtt_status.is_some();
+
+    json!({
+        "mqtt_connected": mqtt_connected,
+        "core_mqtt_service_available": core_mqtt_service_available,
+        "multiplayer_available": multiplayer_params.multiplayer_mode.is_some(),
+        "status": if mqtt_connected && core_mqtt_service_available { "healthy" } else { "degraded" },
+        "timestamp": chrono::Utc::now().to_rfc3339(),
+        "details": {
+            "bundled_mcp_version": true,
+            "multiplayer_mode": multiplayer_params.multiplayer_mode
+                .as_ref()
+                .map(|mode| format!("{:?}", **mode))
+                .unwrap_or("SinglePlayer".to_string())
+        }
+    })
+    .to_string()
+}
+
 /// List online worlds command implementation
 fn execute_list_online_worlds_command(multiplayer_params: &mut MultiplayerMcpParams) -> String {
     // Refresh online worlds first
@@ -561,7 +569,7 @@ fn execute_leave_world_command(multiplayer_params: &mut MultiplayerMcpParams) ->
     "Left shared world and returned to single-player mode".to_string()
 }
 
-/// Publish world command implementation  
+/// Publish world command implementation
 fn execute_publish_world_command(
     arguments: &Value,
     multiplayer_params: &mut MultiplayerMcpParams,

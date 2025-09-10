@@ -448,11 +448,14 @@ fn handle_world_publishing(
                             };
 
                         if let Ok(tx) = mqtt_tx.0.lock() {
+                            info!(
+                                "📡 Attempting to send world info message via Core MQTT Service..."
+                            );
                             if let Err(e) = tx.send(info_msg) {
-                                error!("Failed to send world info via Core MQTT Service: {}", e);
+                                error!("❌ Failed to send world info via Core MQTT Service: {}", e);
                             } else {
                                 info!(
-                                    "📡 Published world info to {} via Core MQTT Service",
+                                    "✅ Successfully sent world info to Core MQTT Service queue for topic: {}",
                                     info_topic
                                 );
                             }

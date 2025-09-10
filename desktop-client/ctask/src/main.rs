@@ -341,7 +341,7 @@ fn generate_default_html() -> String {
             font-family: 'Arial', sans-serif;
             overflow: hidden;
         }
-        
+
         canvas {
             display: block;
             position: absolute;
@@ -351,7 +351,7 @@ fn generate_default_html() -> String {
             height: 100vh;
             background: #000;
         }
-        
+
         .loading {
             position: fixed;
             top: 50%;
@@ -362,19 +362,19 @@ fn generate_default_html() -> String {
             z-index: 1000;
             text-align: center;
         }
-        
+
         .loading::after {
             content: '';
             animation: dots 1.5s steps(4, end) infinite;
         }
-        
+
         @keyframes dots {
             0%, 20% { content: ''; }
             40% { content: '.'; }
             60% { content: '..'; }
             80%, 100% { content: '...'; }
         }
-        
+
         .error {
             position: fixed;
             top: 50%;
@@ -402,22 +402,22 @@ fn generate_default_html() -> String {
 
     <script type="module">
         import init, { main } from './iotcraft_web.js';
-        
+
         async function run() {
             try {
                 // Initialize the WASM module
                 await init();
-                
+
                 // Hide loading indicator
                 document.getElementById('loading').style.display = 'none';
-                
+
                 // Start the application
                 main();
-                
+
                 console.log('IoTCraft Web Client started successfully');
             } catch (error) {
                 console.error('Failed to start IoTCraft:', error);
-                
+
                 // Show error message
                 document.getElementById('loading').style.display = 'none';
                 document.getElementById('error').style.display = 'block';
@@ -2404,28 +2404,28 @@ fn create_wasm_test_html(mqtt_port: u16) -> String {
 
     <script type="module">
         import init, {{ main }} from './iotcraft_web.js';
-        
+
         let testsPassed = 0;
         let testsTotal = 0;
-        
+
         function logTest(name, success, details = '') {{
             testsTotal++;
             if (success) testsPassed++;
-            
+
             const status = success ? '✅' : '❌';
             const msg = `${{status}} Test: ${{name}} - ${{success ? 'PASSED' : 'FAILED'}} ${{details}}`;
             console.log(msg);
-            
+
             const output = document.getElementById('test-output');
             const div = document.createElement('div');
             div.textContent = msg;
             output.appendChild(div);
         }}
-        
+
         function finishTests() {{
             const success = testsPassed === testsTotal && testsTotal > 0;
             const resultsDiv = document.getElementById('test-results');
-            
+
             if (success) {{
                 resultsDiv.innerHTML = '<div>WASM_TEST_SUCCESS: All tests passed (' + testsPassed + '/' + testsTotal + ')</div>';
                 console.log('WASM_TEST_SUCCESS: All tests passed');
@@ -2433,23 +2433,23 @@ fn create_wasm_test_html(mqtt_port: u16) -> String {
                 resultsDiv.innerHTML = '<div>WASM_TEST_FAILURE: ' + (testsTotal - testsPassed) + ' tests failed (' + testsPassed + '/' + testsTotal + ')</div>';
                 console.log('WASM_TEST_FAILURE: Tests failed');
             }}
-            
+
             // Give time for the DOM to update before browser closes
             setTimeout(() => {{
                 // This will be picked up by headless browser
                 document.title = success ? 'WASM_TEST_SUCCESS' : 'WASM_TEST_FAILURE';
             }}, 100);
         }}
-        
+
         async function runTests() {{
             try {{
                 // Test 1: WASM module initialization
                 logTest('WASM Module Init', true, '- Module imported successfully');
-                
+
                 // Test 2: WASM module loading
                 await init();
                 logTest('WASM Module Load', true, '- Module loaded successfully');
-                
+
                 // Test 3: Basic functionality test
                 // We'll just try to call main() and see if it doesn't crash immediately
                 let mainCallSuccess = false;
@@ -2459,40 +2459,40 @@ fn create_wasm_test_html(mqtt_port: u16) -> String {
                         window.MQTT_PORT = {mqtt_port};
                         window.MQTT_HOST = 'localhost';
                     }}
-                    
+
                     // This starts the Bevy app, but in headless mode it should initialize quickly
                     setTimeout(() => {{
                         // Check if the WASM is running without crashing
                         mainCallSuccess = true;
                         logTest('WASM App Start', mainCallSuccess, '- App started without immediate crash');
-                        
+
                         // Test 4: Basic DOM interaction
                         const canvas = document.getElementById('canvas');
                         const canvasTest = canvas !== null;
                         logTest('DOM Canvas Access', canvasTest, '- Canvas element accessible');
-                        
+
                         // Test 5: Environment variables
                         const envTest = window.MQTT_PORT === {mqtt_port};
                         logTest('Environment Setup', envTest, '- Test environment configured');
-                        
+
                         finishTests();
                     }}, 2000); // Give 2 seconds for initialization
-                    
+
                     main();
                 }} catch (e) {{
                     logTest('WASM App Start', false, '- Error: ' + e.message);
                     finishTests();
                 }}
-                
+
             }} catch (error) {{
                 logTest('WASM Test Suite', false, '- Fatal error: ' + error.message);
                 finishTests();
             }}
         }}
-        
+
         // Start tests after page load
         document.addEventListener('DOMContentLoaded', runTests);
-        
+
         // Fallback timeout
         setTimeout(() => {{
             if (testsTotal === 0) {{
@@ -2500,9 +2500,9 @@ fn create_wasm_test_html(mqtt_port: u16) -> String {
                 finishTests();
             }}
         }}, 25000); // 25 second fallback timeout
-        
+
     </script>
-    
+
     <canvas id="canvas" style="width: 100px; height: 100px;"></canvas>
 </body>
 </html>"#,

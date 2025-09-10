@@ -1,9 +1,9 @@
 use bevy::prelude::*;
-use rumqttc::{Client, Event, Incoming, MqttOptions, QoS};
+use rumqttc::{AsyncClient, Event, Incoming, MqttOptions, QoS};
 use std::sync::Mutex;
-use std::sync::mpsc;
 use std::thread;
-use std::time::Duration;
+use tokio::sync::mpsc;
+use tokio::time::Duration;
 
 use super::mqtt_types::*;
 use crate::config::MqttConfig;
@@ -47,19 +47,29 @@ pub enum OutgoingMqttMessage {
 
 /// Resource for sending outgoing MQTT messages
 #[derive(Resource)]
-pub struct MqttOutgoingTx(pub Mutex<mpsc::Sender<OutgoingMqttMessage>>);
+pub struct MqttOutgoingTx(pub Mutex<mpsc::UnboundedSender<OutgoingMqttMessage>>);
 
 /// Resource for receiving world discovery messages
 #[derive(Resource)]
-pub struct WorldDiscoveryReceiver(pub Mutex<mpsc::Receiver<SharedWorldInfo>>);
+pub struct WorldDiscoveryReceiver(pub Mutex<std::sync::mpsc::Receiver<SharedWorldInfo>>);
 
 /// Resource for receiving world data messages (complete world save data)
 #[derive(Resource)]
-pub struct WorldDataReceiver(pub Mutex<mpsc::Receiver<(String, WorldSaveData)>>);
+pub struct WorldDataReceiver(pub Mutex<std::sync::mpsc::Receiver<(String, WorldSaveData)>>);
 
 /// Resource for sending world publishing events
 #[derive(Resource)]
-pub struct WorldPublishEventTx(pub Mutex<mpsc::Sender<PublishWorldEvent>>);
+pub struct WorldPublishEventTx(pub Mutex<std::sync::mpsc::Sender<PublishWorldEvent>>);
+
+/// Resource for receiving MQTT connection status updates
+#[derive(Resource)]
+pub struct MqttConnectionStatusReceiver(pub Mutex<std::sync::mpsc::Receiver<bool>>);
+
+/// Resource tracking the Core MQTT Service connection status
+#[derive(Resource, Default)]
+pub struct CoreMqttConnectionStatus {
+    pub is_connected: bool,
+}
 
 /// Core MQTT service plugin that consolidates all MQTT functionality
 pub struct CoreMqttServicePlugin;
@@ -67,8 +77,9 @@ pub struct CoreMqttServicePlugin;
 impl Plugin for CoreMqttServicePlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(TemperatureResource::default())
+            .insert_resource(CoreMqttConnectionStatus::default())
             .add_systems(Startup, initialize_core_mqtt_service)
-            .add_systems(Update, update_temperature);
+            .add_systems(Update, (update_temperature, update_mqtt_connection_status));
     }
 }
 
@@ -81,14 +92,16 @@ pub fn initialize_core_mqtt_service(
     info!("🚀 Initializing Core MQTT Service (unified connection)");
 
     // Create channels for all message types
-    let (temp_tx, temp_rx) = mpsc::channel::<f32>();
-    let (device_tx, device_rx) = mpsc::channel::<String>();
-    let (pose_tx, pose_rx) = mpsc::channel::<PoseMessage>();
-    let (outgoing_pose_tx, outgoing_pose_rx) = mpsc::channel::<PoseMessage>();
-    let (world_discovery_tx, world_discovery_rx) = mpsc::channel::<SharedWorldInfo>();
-    let (world_data_tx, world_data_rx) = mpsc::channel::<(String, WorldSaveData)>();
-    let (world_publish_event_tx, world_publish_event_rx) = mpsc::channel::<PublishWorldEvent>();
-    let (mqtt_outgoing_tx, mqtt_outgoing_rx) = mpsc::channel::<OutgoingMqttMessage>();
+    let (temp_tx, temp_rx) = std::sync::mpsc::channel::<f32>();
+    let (device_tx, device_rx) = std::sync::mpsc::channel::<String>();
+    let (pose_tx, pose_rx) = std::sync::mpsc::channel::<PoseMessage>();
+    let (outgoing_pose_tx, outgoing_pose_rx) = std::sync::mpsc::channel::<PoseMessage>();
+    let (world_discovery_tx, world_discovery_rx) = std::sync::mpsc::channel::<SharedWorldInfo>();
+    let (world_data_tx, world_data_rx) = std::sync::mpsc::channel::<(String, WorldSaveData)>();
+    let (world_publish_event_tx, world_publish_event_rx) =
+        std::sync::mpsc::channel::<PublishWorldEvent>();
+    let (mqtt_outgoing_tx, mut mqtt_outgoing_rx) = mpsc::unbounded_channel::<OutgoingMqttMessage>();
+    let (connection_status_tx, connection_status_rx) = std::sync::mpsc::channel::<bool>();
 
     // Insert resources for other systems to use
     commands.insert_resource(TemperatureReceiver(Mutex::new(temp_rx)));
@@ -99,6 +112,9 @@ pub fn initialize_core_mqtt_service(
     commands.insert_resource(WorldDataReceiver(Mutex::new(world_data_rx)));
     commands.insert_resource(WorldPublishEventTx(Mutex::new(world_publish_event_tx)));
     commands.insert_resource(MqttOutgoingTx(Mutex::new(mqtt_outgoing_tx)));
+    commands.insert_resource(MqttConnectionStatusReceiver(Mutex::new(
+        connection_status_rx,
+    )));
 
     let client_id = generate_unique_client_id("iotcraft-core-service");
     let mqtt_host = mqtt_config.host.clone();
@@ -110,236 +126,198 @@ pub fn initialize_core_mqtt_service(
         client_id
     );
 
-    // Spawn the unified MQTT service thread
+    // Spawn the unified MQTT service thread with Tokio runtime
     thread::spawn(move || {
-        info!("🔌 Starting Core MQTT Service thread...");
+        // Create Tokio runtime inside the thread
+        let rt = match tokio::runtime::Runtime::new() {
+            Ok(rt) => rt,
+            Err(e) => {
+                error!(
+                    "❌ Failed to create Tokio runtime for Core MQTT Service: {}",
+                    e
+                );
+                return;
+            }
+        };
 
+        rt.block_on(async move {
+        info!("🔔 Starting async Core MQTT Service...");
+
+        let mut reconnect_attempts = 0;
         loop {
             let reconnect_client_id = generate_unique_client_id("iotcraft-core-service");
             info!(
-                "🔄 Connecting Core MQTT Service with ID: {}",
-                reconnect_client_id
+                "🔄 Connecting Core MQTT Service with ID: {} (attempt {})",
+                reconnect_client_id, reconnect_attempts + 1
             );
 
             let mut opts = MqttOptions::new(&reconnect_client_id, &mqtt_host, mqtt_port);
-            opts.set_keep_alive(Duration::from_secs(30));
+            opts.set_keep_alive(std::time::Duration::from_secs(30));
             opts.set_clean_session(true);
-            opts.set_max_packet_size(1048576, 1048576); // 1MB to match server config
+            opts.set_max_packet_size(1048576, 1048576);
 
-            let (client, mut conn) = Client::new(opts, 10);
+            let (client, mut eventloop) = AsyncClient::new(opts, 100);
+            let mut current_world_id = String::from("default");
+
+            // Send initial connection status
+            let _ = connection_status_tx.send(false);
+
+            // Subscribe to required topics
+            let topics = vec![
+                "home/sensor/temperature",
+                "devices/announce",
+                "iotcraft/worlds/+/info",
+                "iotcraft/worlds/+/data",
+                "iotcraft/worlds/+/players/+/pose",
+            ];
+
+            for topic in &topics {
+                if let Err(e) = client.subscribe(*topic, QoS::AtMostOnce).await {
+                    error!("❌ Failed to subscribe to {}: {}", topic, e);
+                } else {
+                    info!("📡 Subscribed to topic: {}", topic);
+                }
+            }
+
             let mut connected = false;
-            let mut subscribed_topics = Vec::new();
 
-            // Wait for connection
-            for event in conn.iter() {
-                match event {
-                    Ok(Event::Incoming(Incoming::ConnAck(_))) => {
-                        info!("✅ Core MQTT Service connected successfully");
-                        connected = true;
-
-                        // Subscribe to all required topics
-                        let topics_to_subscribe = vec![
-                            "home/sensor/temperature",
-                            "devices/announce",
-                            "iotcraft/worlds/+/info",
-                            "iotcraft/worlds/+/data",
-                            "iotcraft/worlds/+/players/+/pose", // Note: using wildcard for all worlds
-                        ];
-
-                        for topic in &topics_to_subscribe {
-                            match client.subscribe(*topic, QoS::AtMostOnce) {
-                                Ok(_) => {
-                                    info!("📡 Subscribed to topic: {}", topic);
-                                    subscribed_topics.push(topic.to_string());
-                                }
-                                Err(e) => {
-                                    error!("❌ Failed to subscribe to {}: {}", topic, e);
-                                }
-                            }
-                        }
-                        break;
-                    }
-                    Err(e) => {
-                        error!("❌ Core MQTT Service connection error: {:?}", e);
-                        break;
-                    }
-                    Ok(_) => {}
-                }
-            }
-
-            if !connected {
-                error!("❌ Failed to establish Core MQTT Service connection");
-                thread::sleep(Duration::from_secs(5));
-                continue;
-            }
-
-            // Main event loop - handle both incoming messages and outgoing publishes
+            // Main async event loop
             loop {
-                // Handle connection events (non-blocking)
-                match conn.try_recv() {
-                    Ok(Ok(Event::Incoming(Incoming::Publish(p)))) => {
-                        route_incoming_message(
-                            &p.topic,
-                            &p.payload,
-                            &temp_tx,
-                            &device_tx,
-                            &pose_tx,
-                            &world_discovery_tx,
-                            &world_data_tx,
-                        );
-                    }
-                    Ok(Ok(Event::Incoming(Incoming::SubAck(_)))) => {
-                        info!("📨 Subscription acknowledged by broker");
-                    }
-                    Ok(Ok(Event::Outgoing(_))) => {
-                        // Outgoing events (publishes, etc.) - keep quiet unless error
-                    }
-                    Ok(Ok(_)) => {
-                        // Other events we don't need to log
-                    }
-                    Ok(Err(e)) => {
-                        error!("❌ Core MQTT Service connection error: {:?}", e);
-                        break;
-                    }
-                    Err(rumqttc::TryRecvError::Empty) => {
-                        // No connection events right now, that's fine
-                    }
-                    Err(rumqttc::TryRecvError::Disconnected) => {
-                        error!("❌ Core MQTT Service connection lost");
-                        break;
-                    }
-                }
-
-                // Handle outgoing pose messages
-                while let Ok(pose_msg) = outgoing_pose_rx.try_recv() {
-                    if connected {
-                        let topic = format!("iotcraft/worlds/default/players/{}/pose", player_id);
-                        if let Ok(payload) = serde_json::to_string(&pose_msg) {
-                            if let Err(e) =
-                                client.publish(&topic, QoS::AtMostOnce, false, payload.as_bytes())
-                            {
-                                error!("❌ Failed to publish pose: {}", e);
+                tokio::select! {
+                    // Handle MQTT events
+                    event = eventloop.poll() => {
+                        match event {
+                            Ok(Event::Incoming(Incoming::ConnAck(_))) => {
+                                if !connected {
+                                    info!("✅ Core MQTT Service connected successfully");
+                                    connected = true;
+                                    reconnect_attempts = 0;
+                                    let _ = connection_status_tx.send(true);
+                                }
                             }
-                        }
-                    }
-                }
-
-                // Handle world publish events
-                while let Ok(publish_event) = world_publish_event_rx.try_recv() {
-                    if connected {
-                        info!(
-                            "🌍 Processing world publish event: {}",
-                            publish_event.world_name
-                        );
-
-                        // Generate world ID (similar to desktop client)
-                        let world_id = format!(
-                            "{}_{}",
-                            publish_event.world_name,
-                            std::time::SystemTime::now()
-                                .duration_since(std::time::UNIX_EPOCH)
-                                .unwrap_or_default()
-                                .as_millis()
-                        );
-                        let topic = format!("iotcraft/worlds/{}/info", world_id);
-
-                        // Create SharedWorldInfo
-                        let world_info = SharedWorldInfo {
-                            world_id: world_id.clone(),
-                            world_name: publish_event.world_name.clone(),
-                            description: format!(
-                                "World shared from desktop client: {}",
-                                publish_event.world_name
-                            ),
-                            host_player: player_id.clone(),
-                            host_name: "DesktopHost".to_string(),
-                            created_at: chrono::Utc::now().to_rfc3339(),
-                            last_updated: chrono::Utc::now().to_rfc3339(),
-                            player_count: 1,
-                            max_players: publish_event.max_players,
-                            is_public: publish_event.is_public,
-                            version: "1.0.0".to_string(),
-                        };
-
-                        if let Ok(payload) = serde_json::to_string(&world_info) {
-                            // Use retained publish for world info
-                            info!(
-                                "🌍 Publishing world info to topic '{}' with retain=true",
-                                topic
-                            );
-                            if let Err(e) =
-                                client.publish(&topic, QoS::AtMostOnce, true, payload.as_bytes())
-                            {
-                                error!("❌ Failed to publish world info: {:?}", e);
-                            } else {
-                                info!(
-                                    "✅ Successfully published world '{}'",
-                                    world_info.world_name
+                            Ok(Event::Incoming(Incoming::Publish(p))) => {
+                                route_incoming_message(
+                                    &p.topic,
+                                    &p.payload,
+                                    &temp_tx,
+                                    &device_tx,
+                                    &pose_tx,
+                                    &world_discovery_tx,
+                                    &world_data_tx,
                                 );
                             }
-                        }
-                    }
-                }
-
-                // Handle generic outgoing messages
-                while let Ok(outgoing_msg) = mqtt_outgoing_rx.try_recv() {
-                    if connected {
-                        match outgoing_msg {
-                            OutgoingMqttMessage::PublishPose { topic, payload } => {
-                                if let Err(e) = client.publish(
-                                    &topic,
-                                    QoS::AtMostOnce,
-                                    false,
-                                    payload.as_bytes(),
-                                ) {
-                                    error!("❌ Failed to publish pose to {}: {}", topic, e);
-                                }
+                            Ok(Event::Incoming(Incoming::SubAck(_))) => {
+                                info!("📨 Subscription acknowledged");
                             }
-                            OutgoingMqttMessage::PublishWorldInfo {
-                                topic,
-                                payload,
-                                retain,
-                            } => {
-                                if let Err(e) = client.publish(
-                                    &topic,
-                                    QoS::AtMostOnce,
-                                    retain,
-                                    payload.as_bytes(),
-                                ) {
-                                    error!("❌ Failed to publish world info to {}: {}", topic, e);
-                                }
-                            }
-                            OutgoingMqttMessage::PublishWorldChunk { topic, payload } => {
-                                if let Err(e) =
-                                    client.publish(&topic, QoS::AtMostOnce, false, payload)
-                                {
-                                    error!("❌ Failed to publish world chunk to {}: {}", topic, e);
-                                }
-                            }
-                            OutgoingMqttMessage::GenericPublish {
-                                topic,
-                                payload,
-                                qos,
-                                retain,
-                            } => {
-                                if let Err(e) =
-                                    client.publish(&topic, qos, retain, payload.as_bytes())
-                                {
-                                    error!("❌ Failed to publish to {}: {}", topic, e);
-                                }
+                            Ok(_) => {} // Other events
+                            Err(e) => {
+                                error!("❌ MQTT connection error: {:?}", e);
+                                let _ = connection_status_tx.send(false);
+                                connected = false;
+                                break;
                             }
                         }
                     }
-                }
 
-                // Small sleep to avoid busy waiting
-                thread::sleep(Duration::from_millis(10));
+                    // Handle outgoing messages (non-blocking)
+                    msg = mqtt_outgoing_rx.recv() => {
+                        if let Some(outgoing_msg) = msg {
+                            if connected {
+                                info!("📤 Processing outgoing message: {:?}", outgoing_msg);
+                                match outgoing_msg {
+                                    OutgoingMqttMessage::PublishWorldInfo { topic, payload, retain } => {
+                                        info!("🌍 Publishing world info to topic: {} (retain={})", topic, retain);
+                                        if let Err(e) = client.publish(&topic, QoS::AtMostOnce, retain, payload.as_bytes()).await {
+                                            error!("❌ Failed to publish world info: {}", e);
+                                        } else {
+                                            info!("✅ Successfully published world info to {}", topic);
+                                        }
+                                    }
+                                    OutgoingMqttMessage::PublishWorldChunk { topic, payload } => {
+                                        info!("📡 Publishing world chunk to topic: {} ({} bytes)", topic, payload.len());
+                                        if let Err(e) = client.publish(&topic, QoS::AtMostOnce, false, payload).await {
+                                            error!("❌ Failed to publish world chunk: {}", e);
+                                        } else {
+                                            info!("✅ Successfully published world chunk to {}", topic);
+                                        }
+                                    }
+                                    OutgoingMqttMessage::PublishPose { topic, payload } => {
+                                        if let Err(e) = client.publish(&topic, QoS::AtMostOnce, false, payload.as_bytes()).await {
+                                            error!("❌ Failed to publish pose: {}", e);
+                                        }
+                                    }
+                                    OutgoingMqttMessage::GenericPublish { topic, payload, qos, retain } => {
+                                        if let Err(e) = client.publish(&topic, qos, retain, payload.as_bytes()).await {
+                                            error!("❌ Failed to publish to {}: {}", topic, e);
+                                        } else {
+                                            info!("✅ Successfully published to {}", topic);
+                                        }
+                                    }
+                                }
+                            } else {
+                                warn!("⚠️ Dropping outgoing message - not connected: {:?}", outgoing_msg);
+                            }
+                        }
+                    }
+
+                    // Handle pose messages (from sync channels)
+                    _ = tokio::time::sleep(Duration::from_millis(100)) => {
+                        // Process sync channel messages periodically
+                        while let Ok(pose_msg) = outgoing_pose_rx.try_recv() {
+                            if connected {
+                                let topic = format!("iotcraft/worlds/{}/players/{}/pose", current_world_id, player_id);
+                                if let Ok(payload) = serde_json::to_string(&pose_msg) {
+                                    if let Err(e) = client.publish(&topic, QoS::AtMostOnce, false, payload.as_bytes()).await {
+                                        error!("❌ Failed to publish pose: {}", e);
+                                    }
+                                }
+                            }
+                        }
+
+                        // Handle world publish events
+                        while let Ok(publish_event) = world_publish_event_rx.try_recv() {
+                            if connected {
+                                info!("🌍 Processing world publish event: {}", publish_event.world_name);
+                                let world_id = format!("{}_{}", publish_event.world_name, std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis());
+                                current_world_id = world_id.clone();
+
+                                let world_info = SharedWorldInfo {
+                                    world_id: world_id.clone(),
+                                    world_name: publish_event.world_name.clone(),
+                                    description: format!("World shared from desktop: {}", publish_event.world_name),
+                                    host_player: player_id.clone(),
+                                    host_name: "DesktopHost".to_string(),
+                                    created_at: chrono::Utc::now().to_rfc3339(),
+                                    last_updated: chrono::Utc::now().to_rfc3339(),
+                                    player_count: 1,
+                                    max_players: publish_event.max_players,
+                                    is_public: publish_event.is_public,
+                                    version: "1.0.0".to_string(),
+                                };
+
+                                let topic = format!("iotcraft/worlds/{}/info", world_id);
+                                if let Ok(payload) = serde_json::to_string(&world_info) {
+                                    info!("🌍 Publishing world '{}' to topic '{}' (retain=true)", world_info.world_name, topic);
+                                    if let Err(e) = client.publish(&topic, QoS::AtMostOnce, true, payload.as_bytes()).await {
+                                        error!("❌ Failed to publish world info: {}", e);
+                                    } else {
+                                        info!("✅ Successfully published world '{}' to MQTT topic '{}'", world_info.world_name, topic);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
 
-            error!("🔄 Core MQTT Service disconnected, reconnecting in 5 seconds...");
-            thread::sleep(Duration::from_secs(5));
+            // Reconnection backoff
+            reconnect_attempts += 1;
+            let backoff = std::cmp::min(reconnect_attempts * 2, 30);
+            warn!("❌ Disconnected, reconnecting in {} seconds...", backoff);
+            tokio::time::sleep(Duration::from_secs(backoff)).await;
         }
-    });
+        }); // End rt.block_on
+    }); // End thread::spawn
 
     info!("✅ Core MQTT Service initialized");
 }
@@ -348,11 +326,11 @@ pub fn initialize_core_mqtt_service(
 fn route_incoming_message(
     topic: &str,
     payload: &[u8],
-    temp_tx: &mpsc::Sender<f32>,
-    device_tx: &mpsc::Sender<String>,
-    pose_tx: &mpsc::Sender<PoseMessage>,
-    world_discovery_tx: &mpsc::Sender<SharedWorldInfo>,
-    world_data_tx: &mpsc::Sender<(String, WorldSaveData)>,
+    temp_tx: &std::sync::mpsc::Sender<f32>,
+    device_tx: &std::sync::mpsc::Sender<String>,
+    pose_tx: &std::sync::mpsc::Sender<PoseMessage>,
+    world_discovery_tx: &std::sync::mpsc::Sender<SharedWorldInfo>,
+    world_data_tx: &std::sync::mpsc::Sender<(String, WorldSaveData)>,
 ) {
     match topic {
         "home/sensor/temperature" => {
@@ -445,6 +423,19 @@ pub fn update_temperature(
     if let Ok(rx) = receiver.0.lock() {
         if let Ok(val) = rx.try_recv() {
             temp_res.value = Some(val);
+        }
+    }
+}
+
+/// Update MQTT connection status from Core MQTT Service thread
+pub fn update_mqtt_connection_status(
+    mut status: ResMut<CoreMqttConnectionStatus>,
+    receiver: Res<MqttConnectionStatusReceiver>,
+) {
+    if let Ok(rx) = receiver.0.lock() {
+        // Process all available status updates (keep the latest)
+        while let Ok(is_connected) = rx.try_recv() {
+            status.is_connected = is_connected;
         }
     }
 }

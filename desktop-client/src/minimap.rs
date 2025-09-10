@@ -138,7 +138,7 @@ fn generate_minimap_texture_sync(
     // Fill background with dark blue (water/void color)
     for i in (0..pixels.len()).step_by(4) {
         pixels[i] = 25; // R
-        pixels[i + 1] = 25; // G  
+        pixels[i + 1] = 25; // G
         pixels[i + 2] = 112; // B (dark blue)
         pixels[i + 3] = 255; // A
     }

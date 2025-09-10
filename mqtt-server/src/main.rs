@@ -32,14 +32,14 @@ fn main() {
         let config_str = format!(
             r#"
             id = 0
-            
+
             [router]
             id = 0
             max_connections = 1000
             max_outgoing_packet_count = 200
             max_segment_size = 104857600
             max_segment_count = 10
-            
+
             [v4.1]
             name = "v4-1"
             listen = "0.0.0.0:{}"
@@ -49,7 +49,7 @@ fn main() {
             max_payload_size = 1048576
             max_inflight_count = 100
             dynamic_filters = true
-            
+
             [console]
             listen = "0.0.0.0:3030"
             "#,

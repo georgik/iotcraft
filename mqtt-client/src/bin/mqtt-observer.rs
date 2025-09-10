@@ -124,8 +124,8 @@ async fn main() {
             }
             Err(e) => {
                 eprintln!("mqtt-observer: Connection error: {}", e);
-                // With async, we can just continue the loop - no sleep needed
-                // The event loop will handle reconnection automatically
+                eprintln!("mqtt-observer: Waiting 2 seconds before retry...");
+                tokio::time::sleep(Duration::from_secs(2)).await;
                 continue;
             }
         }

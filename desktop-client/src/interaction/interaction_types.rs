@@ -70,7 +70,7 @@ pub struct LampMaterials {
     pub lamp_on: Handle<StandardMaterial>,
 }
 
-/// Material handles for door states  
+/// Material handles for door states
 #[derive(Resource)]
 pub struct DoorMaterials {
     // Currently unused - doors use transform-based animations instead of material changes

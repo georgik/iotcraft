@@ -204,8 +204,8 @@ fn execute_pending_commands(mut params: ExecuteCommandsParams) {
     static DEBUG_COUNTER: AtomicU64 = AtomicU64::new(0);
 
     let counter = DEBUG_COUNTER.fetch_add(1, Ordering::Relaxed);
-    if counter % 300 == 0 {
-        // Log every 5 seconds at 60fps
+    if counter % 3600 == 0 {
+        // Log every minute at 60fps
         info!(
             "[DEBUG] execute_pending_commands system running, tick {}, queue size: {}",
             counter,
@@ -213,15 +213,16 @@ fn execute_pending_commands(mut params: ExecuteCommandsParams) {
         );
     }
 
-    if !params.pending_commands.commands.is_empty() {
+    let command_count = params.pending_commands.commands.len();
+    if command_count > 0 {
         info!(
-            "[DEBUG] Processing {} commands from pending queue",
-            params.pending_commands.commands.len()
+            "[COMMAND] Processing {} commands from pending queue",
+            command_count
         );
     }
 
     for command in params.pending_commands.commands.drain(..) {
-        info!("Executing queued command: {}", command);
+        info!("[COMMAND] Executing: {}", command);
 
         // Check if command has a request ID (format: "command #request_id")
         let (actual_command, request_id) = if let Some(hash_pos) = command.rfind(" #") {
@@ -742,8 +743,12 @@ fn execute_pending_commands(mut params: ExecuteCommandsParams) {
 
                                             // Debug: VoxelWorld before adding blocks
                                             info!(
-                                                "VoxelWorld before wall command: {} blocks",
+                                                "[DEBUG] VoxelWorld before wall command: {} blocks",
                                                 params.voxel_world.blocks.len()
+                                            );
+                                            info!(
+                                                "[DEBUG] Wall command: {} from ({}, {}, {}) to ({}, {}, {})",
+                                                block_type_str, x1, y1, z1, x2, y2, z2
                                             );
 
                                             let material = match block_type_enum {

@@ -111,7 +111,7 @@ pub struct MultiplayerPlayerPositions {
 }
 
 /// Events for multiplayer world management
-#[derive(Event, BufferedEvent)]
+#[derive(Event, BufferedEvent, Debug)]
 pub struct PublishWorldEvent {
     pub world_name: String,
     pub max_players: u32,

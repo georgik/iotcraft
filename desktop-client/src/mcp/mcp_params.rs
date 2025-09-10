@@ -25,6 +25,7 @@ pub struct CoreMcpParams<'w, 's> {
     pub command_executed_events: EventWriter<'w, CommandExecutedEvent>,
     pub temperature: Res<'w, TemperatureResource>,
     pub mqtt_config: Res<'w, MqttConfig>,
+    pub core_mqtt_status: Option<Res<'w, crate::mqtt::core_service::CoreMqttConnectionStatus>>,
     // PhantomData to use the 's lifetime
     _phantom: std::marker::PhantomData<&'s ()>,
 }
