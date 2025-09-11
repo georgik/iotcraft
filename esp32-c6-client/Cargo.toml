@@ -3,6 +3,10 @@ name = "iotcraft-esp32-c6-client"
 version = "0.1.0"
 edition = "2024"
 
+# This project is standalone and not part of the main IoTCraft workspace
+# due to its embedded target requirements
+[workspace]
+
 [dependencies]
 
 esp-hal = { version = "1.0.0-rc.0", features = [
