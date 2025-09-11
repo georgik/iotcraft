@@ -1,6 +1,8 @@
+use bevy::app::AppExit;
 use bevy::prelude::*;
 use rumqttc::{AsyncClient, Event, Incoming, MqttOptions, QoS};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use tokio::sync::mpsc;
 use tokio::time::Duration;
@@ -71,6 +73,9 @@ pub struct CoreMqttConnectionStatus {
     pub is_connected: bool,
 }
 
+/// Global shutdown flag for Core MQTT Service
+static MQTT_SERVICE_SHUTDOWN: AtomicBool = AtomicBool::new(false);
+
 /// Core MQTT service plugin that consolidates all MQTT functionality
 pub struct CoreMqttServicePlugin;
 
@@ -79,7 +84,14 @@ impl Plugin for CoreMqttServicePlugin {
         app.insert_resource(TemperatureResource::default())
             .insert_resource(CoreMqttConnectionStatus::default())
             .add_systems(Startup, initialize_core_mqtt_service)
-            .add_systems(Update, (update_temperature, update_mqtt_connection_status));
+            .add_systems(
+                Update,
+                (
+                    update_temperature,
+                    update_mqtt_connection_status,
+                    handle_app_exit,
+                ),
+            );
     }
 }
 
@@ -145,6 +157,12 @@ pub fn initialize_core_mqtt_service(
 
         let mut reconnect_attempts = 0;
         loop {
+            // Check for shutdown signal in outer loop
+            if MQTT_SERVICE_SHUTDOWN.load(Ordering::Relaxed) {
+                info!("🛑 Core MQTT Service received shutdown signal, exiting reconnection loop");
+                return; // Exit the async function, which will end the thread
+            }
+
             let reconnect_client_id = generate_unique_client_id("iotcraft-core-service");
             info!(
                 "🔄 Connecting Core MQTT Service with ID: {} (attempt {})",
@@ -183,8 +201,14 @@ pub fn initialize_core_mqtt_service(
 
             let mut connected = false;
 
-            // Main async event loop
+            // Main async event loop with shutdown check
             loop {
+                // Check for shutdown signal first
+                if MQTT_SERVICE_SHUTDOWN.load(Ordering::Relaxed) {
+                    info!("🛑 Core MQTT Service received shutdown signal, exiting gracefully");
+                    return; // Exit the async function, which will end the thread
+                }
+
                 tokio::select! {
                     // Handle MQTT events
                     event = eventloop.poll() => {
@@ -469,5 +493,15 @@ pub fn update_mqtt_connection_status(
         while let Ok(is_connected) = rx.try_recv() {
             status.is_connected = is_connected;
         }
+    }
+}
+
+/// Handle application exit events and trigger MQTT service shutdown
+pub fn handle_app_exit(mut exit_events: EventReader<AppExit>) {
+    for _event in exit_events.read() {
+        info!("🛑 Application exit detected, shutting down Core MQTT Service");
+        MQTT_SERVICE_SHUTDOWN.store(true, Ordering::Relaxed);
+        // Give a small moment for the MQTT thread to process the shutdown signal
+        std::thread::sleep(std::time::Duration::from_millis(100));
     }
 }
