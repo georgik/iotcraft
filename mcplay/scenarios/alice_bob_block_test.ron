@@ -1,0 +1,335 @@
+// Simplified Alice-Bob Block Placement Test
+// Tests multiplayer block synchronization without the complex MQTT loading steps
+Scenario(
+    name: "alice_bob_block_test",
+    description: "Simplified Alice-Bob multiplayer test with block placement synchronization",
+    version: "1.0",
+    
+    infrastructure: InfrastructureConfig(
+        mqtt_server: MqttServerConfig(
+            required: true,
+            port: 1883,
+            config_file: None,
+            options: None,
+        ),
+        mqtt_observer: Some(MqttObserverConfig(
+            required: true,
+            topics: Some([
+                "iotcraft/worlds/+/info",
+                "iotcraft/worlds/+/state/blocks/+", 
+                "#"  // Monitor all topics
+            ]),
+            client_id: Some("block_sync_observer"),
+        )),
+        mcp_server: None,
+        services: None,
+    ),
+    
+    clients: [
+        ClientConfig(
+            id: "alice",
+            player_id: "alice", 
+            mcp_port: 8080,
+            client_type: "desktop",
+            name: Some("Alice (Host)"),
+            config: None,
+        ),
+        ClientConfig(
+            id: "bob",
+            player_id: "bob", 
+            mcp_port: 8081,
+            client_type: "desktop",
+            name: Some("Bob (Joiner)"),
+            config: None,
+        ),
+    ],
+    
+    steps: [
+        // Initialize MCP connections
+        Step(
+            name: "alice_mcp_initialize",
+            description: "Initialize Alice's MCP connection",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "initialize",
+                arguments: {
+                    "protocolVersion": "2024-11-05",
+                    "capabilities": { "tools": {} },
+                    "clientInfo": {
+                        "name": "alice-test-client",
+                        "version": "1.0.0"
+                    }
+                },
+            ),
+            wait_before: 500,
+            wait_after: 500,
+            timeout: 10000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: [],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        Step(
+            name: "bob_mcp_initialize",
+            description: "Initialize Bob's MCP connection",
+            client: "bob",
+            action: (
+                type: "mcp_call",
+                tool: "initialize",
+                arguments: {
+                    "protocolVersion": "2024-11-05",
+                    "capabilities": { "tools": {} },
+                    "clientInfo": {
+                        "name": "bob-test-client",
+                        "version": "1.0.0"
+                    }
+                },
+            ),
+            wait_before: 500,
+            wait_after: 500,
+            timeout: 10000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["alice_mcp_initialize"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Alice creates and publishes world
+        Step(
+            name: "alice_create_world",
+            description: "Alice creates a world for block testing",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "create_world",
+                arguments: {
+                    "world_name": "block_sync_test_world",
+                    "description": "World for testing block synchronization", 
+                    "template": "default"  // Use simpler default template
+                },
+            ),
+            wait_before: 1000,
+            wait_after: 3000, // Wait for world creation
+            timeout: 30000, // Longer timeout for world creation
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["bob_mcp_initialize"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        Step(
+            name: "alice_publish_world",
+            description: "Alice publishes the world for multiplayer",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "publish_world",
+                arguments: {
+                    "world_name": "block_sync_test_world",
+                    "max_players": 2,
+                    "is_public": true
+                },
+            ),
+            wait_before: 1000,
+            wait_after: 2000,
+            timeout: 15000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["alice_create_world"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Bob discovers and joins
+        Step(
+            name: "bob_list_worlds",
+            description: "Bob discovers available worlds",
+            client: "bob",
+            action: (
+                type: "mcp_call",
+                tool: "list_online_worlds",
+                arguments: {},
+            ),
+            wait_before: 1000,
+            wait_after: 1000,
+            timeout: 10000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["alice_publish_world"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        Step(
+            name: "bob_join_world",
+            description: "Bob joins Alice's world",
+            client: "bob",
+            action: (
+                type: "mcp_call",
+                tool: "join_world",
+                arguments: {
+                    "world_id": "block_sync_test_world"
+                },
+            ),
+            wait_before: 1000,
+            wait_after: 2000,
+            timeout: 15000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["bob_list_worlds"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Test block placement synchronization
+        Step(
+            name: "alice_place_block_1",
+            description: "Alice places first block",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "place_block",
+                arguments: {
+                    "x": 5,
+                    "y": 2,
+                    "z": 5,
+                    "block_type": "stone"
+                },
+            ),
+            wait_before: 1000,
+            wait_after: 2000, // Wait for MQTT sync
+            timeout: 10000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["bob_join_world"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        Step(
+            name: "bob_place_block_1",
+            description: "Bob places his first block",
+            client: "bob",
+            action: (
+                type: "mcp_call",
+                tool: "place_block",
+                arguments: {
+                    "x": -5,
+                    "y": 2,
+                    "z": -5,
+                    "block_type": "grass"
+                },
+            ),
+            wait_before: 1000,
+            wait_after: 2000, // Wait for MQTT sync
+            timeout: 10000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["alice_place_block_1"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        Step(
+            name: "alice_place_block_2",
+            description: "Alice places second block",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "place_block",
+                arguments: {
+                    "x": 6,
+                    "y": 2,
+                    "z": 5,
+                    "block_type": "dirt"
+                },
+            ),
+            wait_before: 500,
+            wait_after: 2000, // Wait for MQTT sync
+            timeout: 10000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["bob_place_block_1"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        Step(
+            name: "final_status_check",
+            description: "Check final status of both clients",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "get_multiplayer_status",
+                arguments: {},
+            ),
+            wait_before: 1000,
+            wait_after: 1000,
+            timeout: 10000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["alice_place_block_2"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+    ],
+    
+    config: Some(ScenarioConfig(
+        timeout_ms: Some(180000), // 3 minutes total
+        logging: Some(LoggingConfig(
+            level: Some("info"),
+            log_mqtt: Some(true),
+            log_client_actions: Some(true),
+            filters: Some([
+                "mcp/*", 
+                "multiplayer/*",
+                "mqtt/*",
+                "block/*"
+            ]),
+        )),
+        environment: Some({
+            "RUST_LOG": "info,iotcraft_desktop_client=debug",
+            "SCENARIO_NAME": "alice_bob_block_test",
+        }),
+        settings: Some({
+            "auto_cleanup": true,
+            "preserve_logs": true,
+            "fail_fast": false,  // Continue even if one step fails
+        }),
+    )),
+)

@@ -11,7 +11,7 @@ use super::mqtt_types::*;
 use crate::config::MqttConfig;
 use crate::devices::DeviceAnnouncementReceiver;
 use crate::multiplayer::mqtt_utils::generate_unique_client_id;
-use crate::multiplayer::{PoseRx, PoseTx};
+use crate::multiplayer::{BlockChangeEvent, BlockChangeSource, BlockChangeType, PoseRx, PoseTx};
 
 // Re-export key multiplayer types that are now handled by core service
 pub use crate::multiplayer::PoseMessage;
@@ -67,6 +67,10 @@ pub struct WorldPublishEventTx(pub Mutex<std::sync::mpsc::Sender<PublishWorldEve
 #[derive(Resource)]
 pub struct MqttConnectionStatusReceiver(pub Mutex<std::sync::mpsc::Receiver<bool>>);
 
+/// Resource for receiving block change messages from MQTT
+#[derive(Resource)]
+pub struct BlockChangeReceiver(pub Mutex<std::sync::mpsc::Receiver<BlockChangeEvent>>);
+
 /// Resource tracking the Core MQTT Service connection status
 #[derive(Resource, Default)]
 pub struct CoreMqttConnectionStatus {
@@ -90,6 +94,7 @@ impl Plugin for CoreMqttServicePlugin {
                     update_temperature,
                     update_mqtt_connection_status,
                     handle_app_exit,
+                    process_incoming_block_changes,
                 ),
             );
     }
@@ -114,6 +119,7 @@ pub fn initialize_core_mqtt_service(
         std::sync::mpsc::channel::<PublishWorldEvent>();
     let (mqtt_outgoing_tx, mut mqtt_outgoing_rx) = mpsc::unbounded_channel::<OutgoingMqttMessage>();
     let (connection_status_tx, connection_status_rx) = std::sync::mpsc::channel::<bool>();
+    let (block_change_tx, block_change_rx) = std::sync::mpsc::channel::<BlockChangeEvent>();
 
     // Insert resources for other systems to use
     commands.insert_resource(TemperatureReceiver(Mutex::new(temp_rx)));
@@ -127,6 +133,7 @@ pub fn initialize_core_mqtt_service(
     commands.insert_resource(MqttConnectionStatusReceiver(Mutex::new(
         connection_status_rx,
     )));
+    commands.insert_resource(BlockChangeReceiver(Mutex::new(block_change_rx)));
 
     let client_id = generate_unique_client_id("iotcraft-core-service");
     let mqtt_host = mqtt_config.host.clone();
@@ -189,6 +196,8 @@ pub fn initialize_core_mqtt_service(
                 "iotcraft/worlds/+/info",
                 "iotcraft/worlds/+/data",
                 "iotcraft/worlds/+/players/+/pose",
+                "iotcraft/worlds/+/state/blocks/placed",
+                "iotcraft/worlds/+/state/blocks/removed",
             ];
 
             for topic in &topics {
@@ -232,6 +241,8 @@ pub fn initialize_core_mqtt_service(
                                     &pose_tx,
                                     &world_discovery_tx,
                                     &world_data_tx,
+                                    &block_change_tx,
+                                    &player_id,
                                 );
                             }
                             Ok(Event::Incoming(Incoming::SubAck(_))) => {
@@ -302,37 +313,10 @@ pub fn initialize_core_mqtt_service(
                             }
                         }
 
-                        // Handle world publish events
-                        while let Ok(publish_event) = world_publish_event_rx.try_recv() {
-                            if connected {
-                                info!("🌍 Processing world publish event: {}", publish_event.world_name);
-                                let world_id = format!("{}_{}", publish_event.world_name, std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis());
-                                current_world_id = world_id.clone();
-
-                                let world_info = SharedWorldInfo {
-                                    world_id: world_id.clone(),
-                                    world_name: publish_event.world_name.clone(),
-                                    description: format!("World shared from desktop: {}", publish_event.world_name),
-                                    host_player: player_id.clone(),
-                                    host_name: "DesktopHost".to_string(),
-                                    created_at: chrono::Utc::now().to_rfc3339(),
-                                    last_updated: chrono::Utc::now().to_rfc3339(),
-                                    player_count: 1,
-                                    max_players: publish_event.max_players,
-                                    is_public: publish_event.is_public,
-                                    version: "1.0.0".to_string(),
-                                };
-
-                                let topic = format!("iotcraft/worlds/{}/info", world_id);
-                                if let Ok(payload) = serde_json::to_string(&world_info) {
-                                    info!("🌍 Publishing world '{}' to topic '{}' (retain=true)", world_info.world_name, topic);
-                                    if let Err(e) = client.publish(&topic, QoS::AtMostOnce, true, payload.as_bytes()).await {
-                                        error!("❌ Failed to publish world info: {}", e);
-                                    } else {
-                                        info!("✅ Successfully published world '{}' to MQTT topic '{}'", world_info.world_name, topic);
-                                    }
-                                }
-                            }
+                        // Legacy world publish events are now handled by WorldPublisherPlugin
+                        // Remove the old processing to avoid duplicate/conflicting world IDs
+                        while let Ok(_publish_event) = world_publish_event_rx.try_recv() {
+                            // Drain the channel but don't process - WorldPublisherPlugin handles this now
                         }
                     }
                 }
@@ -359,6 +343,8 @@ fn route_incoming_message(
     pose_tx: &std::sync::mpsc::Sender<PoseMessage>,
     world_discovery_tx: &std::sync::mpsc::Sender<SharedWorldInfo>,
     world_data_tx: &std::sync::mpsc::Sender<(String, WorldSaveData)>,
+    block_change_tx: &std::sync::mpsc::Sender<BlockChangeEvent>,
+    local_player_id: &str,
 ) {
     match topic {
         "home/sensor/temperature" => {
@@ -465,6 +451,89 @@ fn route_incoming_message(
                         error!("❌ Failed to parse pose message: {}", pose_str);
                     }
                 }
+            } else if topic.starts_with("iotcraft/worlds/")
+                && topic.contains("/state/blocks/")
+                && (topic.ends_with("/placed") || topic.ends_with("/removed"))
+            {
+                // Block change messages
+                if let Ok(block_change_str) = String::from_utf8(payload.to_vec()) {
+                    info!("🧱 Received block change on topic: {}", topic);
+
+                    // Parse the JSON message containing block change data
+                    if let Ok(message_json) =
+                        serde_json::from_str::<serde_json::Value>(&block_change_str)
+                    {
+                        // Extract world_id from topic (iotcraft/worlds/{world_id}/state/blocks/...)
+                        let topic_parts: Vec<&str> = topic.split('/').collect();
+                        if topic_parts.len() >= 3 {
+                            let world_id = topic_parts[2].to_string();
+
+                            // Extract player information and change data from the message
+                            if let (Some(player_id), Some(player_name), Some(change_data)) = (
+                                message_json.get("player_id").and_then(|v| v.as_str()),
+                                message_json.get("player_name").and_then(|v| v.as_str()),
+                                message_json.get("change"),
+                            ) {
+                                // Skip messages from our own player to prevent infinite feedback loops
+                                if player_id == local_player_id {
+                                    info!(
+                                        "🔄 Ignoring own block change message from {} (player_id: {}) to prevent feedback loop: {:?}",
+                                        player_name, player_id, change_data
+                                    );
+                                    return;
+                                }
+
+                                // Skip messages from our own player to prevent infinite feedback loops
+                                if player_id == local_player_id {
+                                    info!(
+                                        "🔄 Ignoring own block change message from {} (player_id: {}) to prevent feedback loop",
+                                        player_name, player_id
+                                    );
+                                    return;
+                                }
+
+                                // Parse the change type from the embedded JSON
+                                if let Ok(change_type) =
+                                    serde_json::from_value::<BlockChangeType>(change_data.clone())
+                                {
+                                    let block_change_event = BlockChangeEvent {
+                                        world_id,
+                                        player_id: player_id.to_string(),
+                                        player_name: player_name.to_string(),
+                                        change_type,
+                                        source: crate::multiplayer::BlockChangeSource::Remote,
+                                    };
+
+                                    info!(
+                                        "🧱 Parsed remote block change from {}: {:?}",
+                                        player_name, block_change_event.change_type
+                                    );
+
+                                    let _ = block_change_tx.send(block_change_event);
+                                } else {
+                                    error!(
+                                        "❌ Failed to parse block change type from: {:?}",
+                                        change_data
+                                    );
+                                }
+                            } else {
+                                error!(
+                                    "❌ Missing required fields in block change message: {}",
+                                    block_change_str
+                                );
+                            }
+                        } else {
+                            error!("❌ Invalid topic format for block change: {}", topic);
+                        }
+                    } else {
+                        error!("❌ Failed to parse block change JSON: {}", block_change_str);
+                    }
+                } else {
+                    error!(
+                        "❌ Failed to convert block change payload to UTF-8 string for topic: {}",
+                        topic
+                    );
+                }
             } else {
                 info!("📨 Unhandled topic: {}", topic);
             }
@@ -479,6 +548,34 @@ pub fn update_temperature(
     if let Ok(rx) = receiver.0.lock() {
         if let Ok(val) = rx.try_recv() {
             temp_res.value = Some(val);
+        }
+    }
+}
+
+/// Process incoming block changes from MQTT and emit BlockChangeEvents
+/// Filters out messages from the local player to prevent infinite loops
+pub fn process_incoming_block_changes(
+    receiver: Res<BlockChangeReceiver>,
+    mut block_change_writer: EventWriter<BlockChangeEvent>,
+    profile: Res<crate::profile::PlayerProfile>,
+) {
+    if let Ok(rx) = receiver.0.lock() {
+        // Process all available block change messages
+        while let Ok(block_change) = rx.try_recv() {
+            // Skip messages from our own player to prevent infinite feedback loops
+            if block_change.player_id == profile.player_id {
+                info!(
+                    "🔄 Ignoring own block change message from {}: {:?} (preventing feedback loop)",
+                    block_change.player_name, block_change.change_type
+                );
+                continue;
+            }
+
+            info!(
+                "📨 Processing remote block change from {}: {:?}",
+                block_change.player_name, block_change.change_type
+            );
+            block_change_writer.write(block_change);
         }
     }
 }

@@ -158,6 +158,13 @@ pub struct BlockChangeEvent {
     pub player_id: String,
     pub player_name: String,
     pub change_type: BlockChangeType,
+    pub source: BlockChangeSource,
+}
+
+#[derive(Debug, Clone)]
+pub enum BlockChangeSource {
+    Local,  // Event originated from local user input
+    Remote, // Event originated from MQTT (remote player)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -227,7 +234,8 @@ fn handle_publish_world_events(
         } else {
             event.world_name.clone()
         };
-        let world_id = format!("{}_{}", base_world_name, chrono::Utc::now().timestamp());
+        // Use a stable world_id equal to the base world name so all clients share the same topics
+        let world_id = base_world_name.clone();
 
         // IMMEDIATELY transition to multiplayer mode - the act of publishing makes it multiplayer!
         *multiplayer_mode = MultiplayerMode::HostingWorld {
@@ -359,17 +367,28 @@ fn handle_refresh_online_worlds_events(
 
 fn handle_block_change_events(
     mut block_change_events: EventReader<BlockChangeEvent>,
-    world_publisher: Res<crate::multiplayer::world_publisher::WorldPublisher>,
+    mqtt_outgoing_tx: Option<Res<crate::mqtt::core_service::MqttOutgoingTx>>,
     multiplayer_mode: Res<MultiplayerMode>,
 ) {
-    use crate::multiplayer::world_publisher::PublishMessage;
-
     for event in block_change_events.read() {
         info!(
-            "🎯 Received BlockChangeEvent for world {} by {}: {:?}",
-            event.world_id, event.player_name, event.change_type
+            "🎯 Received BlockChangeEvent for world {} by {}: {:?} (source: {:?})",
+            event.world_id, event.player_name, event.change_type, event.source
         );
         info!("🌍 Current multiplayer mode: {:?}", &*multiplayer_mode);
+
+        // Only publish LOCAL events to MQTT to prevent infinite loops
+        match event.source {
+            BlockChangeSource::Remote => {
+                info!(
+                    "🔄 Skipping MQTT publish for remote block change event (preventing feedback loop)"
+                );
+                continue;
+            }
+            BlockChangeSource::Local => {
+                info!("📤 Publishing local block change event to MQTT");
+            }
+        }
 
         match &*multiplayer_mode {
             MultiplayerMode::HostingWorld { world_id, .. }
@@ -381,31 +400,54 @@ fn handle_block_change_events(
                         world_id, event.change_type, event.player_name
                     );
 
-                    let publish_tx_available = world_publisher.publish_tx.lock().unwrap().is_some();
-                    info!("📡 World publisher TX available: {}", publish_tx_available);
+                    if let Some(mqtt_tx) = &mqtt_outgoing_tx {
+                        // Determine the topic based on block change type
+                        let topic = match &event.change_type {
+                            BlockChangeType::Placed { .. } => {
+                                format!("iotcraft/worlds/{}/state/blocks/placed", world_id)
+                            }
+                            BlockChangeType::Removed { .. } => {
+                                format!("iotcraft/worlds/{}/state/blocks/removed", world_id)
+                            }
+                        };
 
-                    if let Some(tx) = world_publisher.publish_tx.lock().unwrap().as_ref() {
-                        info!("📤 Sending block change to MQTT publisher thread...");
-
-                        let send_result = tx.send(PublishMessage::PublishBlockChange {
-                            world_id: event.world_id.clone(),
-                            player_id: event.player_id.clone(),
-                            player_name: event.player_name.clone(),
-                            change_type: event.change_type.clone(),
+                        // Create the MQTT message payload
+                        let change_message = serde_json::json!({
+                            "player_id": event.player_id,
+                            "player_name": event.player_name,
+                            "timestamp": chrono::Utc::now().timestamp_millis(),
+                            "change": event.change_type
                         });
 
-                        match send_result {
-                            Ok(()) => {
-                                info!("✅ Successfully sent block change to MQTT publisher!");
+                        if let Ok(payload) = serde_json::to_string(&change_message) {
+                            let mqtt_msg =
+                                crate::mqtt::core_service::OutgoingMqttMessage::GenericPublish {
+                                    topic: topic.clone(),
+                                    payload,
+                                    qos: rumqttc::QoS::AtLeastOnce,
+                                    retain: false,
+                                };
+
+                            if let Ok(tx) = mqtt_tx.0.lock() {
+                                if let Err(e) = tx.send(mqtt_msg) {
+                                    error!(
+                                        "❌ Failed to send block change via Core MQTT Service: {}",
+                                        e
+                                    );
+                                } else {
+                                    info!(
+                                        "✅ Successfully sent block change to MQTT topic {} via Core MQTT Service",
+                                        topic
+                                    );
+                                }
+                            } else {
+                                error!("❌ Failed to acquire MQTT outgoing channel lock");
                             }
-                            Err(e) => {
-                                error!("❌ Failed to send block change publish message: {}", e);
-                            }
+                        } else {
+                            error!("❌ Failed to serialize block change message");
                         }
                     } else {
-                        error!(
-                            "❌ World publisher TX channel is None - MQTT publisher not initialized!"
-                        );
+                        error!("❌ Core MQTT Service not available for block change publishing");
                     }
                 } else {
                     warn!(
@@ -678,8 +720,8 @@ fn auto_enable_multiplayer_when_mqtt_available(
         if multiplayer_status.connection_available && current_world.is_some() {
             let current_world = current_world.unwrap();
 
-            // Generate a world ID based on the current world name and player ID
-            let world_id = format!("{}_{}", current_world.name, player_profile.player_id);
+            // Use a stable world ID equal to the current world name (no player-specific suffix)
+            let world_id = current_world.name.clone();
 
             info!(
                 "🚀 Auto-enabling multiplayer mode! MQTT available and world '{}' loaded. World ID: {}",

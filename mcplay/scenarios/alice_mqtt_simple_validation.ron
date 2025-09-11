@@ -1,0 +1,203 @@
+// Simple Alice + MQTT Observer Test
+// Minimal scenario to validate if ANY MQTT messages from Alice reach the broker
+Scenario(
+    name: "alice_mqtt_simple_validation",
+    description: "Minimal test - Alice only + MQTT Observer to detect any MQTT traffic",
+    version: "1.0",
+    
+    // Infrastructure with MQTT observer monitoring ALL topics
+    infrastructure: InfrastructureConfig(
+        mqtt_server: MqttServerConfig(
+            required: true,
+            port: 1883,
+            config_file: None,
+            options: None,
+        ),
+        mqtt_observer: Some(MqttObserverConfig(
+            required: true,
+            topics: Some(["#"]),  // Monitor ALL topics - anything published should be visible
+            client_id: Some("simple_validation_observer"),
+        )),
+        mcp_server: None,
+        services: None,
+    ),
+    
+    // Single client: Alice only
+    clients: [
+        ClientConfig(
+            id: "alice",
+            player_id: "alice_simple", 
+            mcp_port: 8080,
+            client_type: "desktop",
+            name: Some("Alice - MQTT Test"),
+            config: None,
+        ),
+    ],
+    
+    // Minimal steps to trigger any MQTT activity
+    steps: [
+        // Step 1: Initialize Alice
+        Step(
+            name: "alice_init",
+            description: "Initialize Alice's MCP connection",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "initialize",
+                arguments: {
+                    "protocolVersion": "2024-11-05",
+                    "capabilities": { "tools": {} },
+                    "clientInfo": {
+                        "name": "alice-mqtt-test",
+                        "version": "1.0.0"
+                    }
+                },
+            ),
+            wait_before: 2000,  // Allow MQTT connection to establish
+            wait_after: 1000,
+            timeout: 15000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: [],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 2: Check MQTT status
+        Step(
+            name: "alice_mqtt_status",
+            description: "Check if Alice's MQTT connection is working",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "get_mqtt_status",
+                arguments: {},
+            ),
+            wait_before: 1000,
+            wait_after: 1000,
+            timeout: 10000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["alice_init"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 3: Create a world (should trigger MQTT activity if working)
+        Step(
+            name: "alice_create_world",
+            description: "Alice creates a world - should trigger MQTT messages",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "create_world",
+                arguments: {
+                    "world_name": "mqtt_test_world",
+                    "description": "Simple world for MQTT validation"
+                },
+            ),
+            wait_before: 1000,
+            wait_after: 2000,  // Allow time for any MQTT messages
+            timeout: 20000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["alice_mqtt_status"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 4: Publish world (main test - should definitely trigger MQTT)
+        Step(
+            name: "alice_publish_world",
+            description: "Alice publishes world - CRITICAL MQTT test",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "publish_world",
+                arguments: {
+                    "world_name": "mqtt_test_world",
+                    "max_players": 4,
+                    "is_public": true
+                },
+            ),
+            wait_before: 1000,
+            wait_after: 5000,  // Extended wait to capture any MQTT messages
+            timeout: 15000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["alice_create_world"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 5: Final MQTT status check
+        Step(
+            name: "final_mqtt_status",
+            description: "Final check of MQTT connection status",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "get_mqtt_status",
+                arguments: {},
+            ),
+            wait_before: 1000,
+            wait_after: 2000,  // Allow observer to capture any final messages
+            timeout: 10000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["alice_publish_world"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+    ],
+    
+    // Configuration with enhanced logging
+    config: Some(ScenarioConfig(
+        timeout_ms: Some(120000), // 2 minutes
+        logging: Some(LoggingConfig(
+            level: Some("info"),
+            log_mqtt: Some(true),
+            log_client_actions: Some(true),
+            filters: Some([
+                "mqtt/*",
+                "multiplayer/*", 
+                "core_service/*",
+                "publish_world",
+                "create_world",
+                "OutgoingMqttMessage",
+                "WorldPublishEvent",
+                "CoreMqttService",
+                "iotcraft/worlds",
+            ]),
+        )),
+        environment: Some({
+            "RUST_LOG": "info,iotcraft_desktop_client::mqtt::core_service=debug",
+            "SCENARIO_NAME": "alice_mqtt_simple_validation",
+            "ENABLE_MCP": "true",
+            "MQTT_HOST": "localhost",
+            "MQTT_PORT": "1883",
+        }),
+        settings: Some({
+            "auto_cleanup": true,
+            "preserve_logs": true,
+            "fail_fast": false,
+            "verbose_mqtt": true,
+            "capture_full_mqtt_log": true,
+        }),
+    )),
+)

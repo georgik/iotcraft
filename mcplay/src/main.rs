@@ -1394,10 +1394,31 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .help("Keep scenario running indefinitely after completion for playtesting (prevents auto-exit)")
                 .action(clap::ArgAction::SetTrue),
         )
+        .arg(
+            Arg::new("search-logs")
+                .long("search-logs")
+                .help("Search and correlate events across all log files from the last scenario run")
+                .value_name("QUERY")
+                .action(clap::ArgAction::Append),
+        )
+        .arg(
+            Arg::new("logs-dir")
+                .long("logs-dir")
+                .help("Directory containing log files (defaults to 'logs/')")
+                .value_name("DIR")
+                .default_value("logs"),
+        )
         .get_matches();
 
     if matches.get_flag("list-scenarios") {
         list_scenarios().await?;
+        return Ok(());
+    }
+
+    if let Some(queries) = matches.get_many::<String>("search-logs") {
+        let logs_dir = matches.get_one::<String>("logs-dir").unwrap();
+        let verbose = matches.get_flag("verbose");
+        search_correlated_logs(queries.collect(), logs_dir, verbose).await?;
         return Ok(());
     }
 
@@ -7204,5 +7225,297 @@ fn show_log_summary(app: &LoggingApp) {
                 log_file_path.display()
             );
         }
+    }
+}
+
+/// Search and correlate events across multiple log files
+async fn search_correlated_logs(
+    queries: Vec<&String>,
+    logs_dir: &str,
+    verbose: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    use std::fs;
+    use std::path::Path;
+
+    println!(
+        "🔍 Searching for correlation patterns across logs in: {}",
+        logs_dir
+    );
+    println!("📝 Search queries: {:?}", queries);
+    println!();
+
+    let logs_path = Path::new(logs_dir);
+    if !logs_path.exists() {
+        return Err(format!("Logs directory '{}' does not exist", logs_dir).into());
+    }
+
+    // Collect all log files
+    let mut log_files = Vec::new();
+    for entry in fs::read_dir(logs_path)? {
+        let entry = entry?;
+        let path = entry.path();
+        if path.extension().map(|e| e.to_str()) == Some(Some("log")) {
+            log_files.push(path);
+        }
+    }
+
+    if log_files.is_empty() {
+        println!("❌ No log files found in {}", logs_dir);
+        return Ok(());
+    }
+
+    println!("📄 Found {} log files:", log_files.len());
+    for file in &log_files {
+        if let Some(name) = file.file_name().and_then(|n| n.to_str()) {
+            println!("  - {}", name);
+        }
+    }
+    println!();
+
+    // Parse and correlate events
+    let mut all_events = Vec::new();
+
+    for log_file in &log_files {
+        if let Some(source_name) = log_file.file_stem().and_then(|s| s.to_str()) {
+            if verbose {
+                println!("📖 Reading {}", source_name);
+            }
+
+            let content = fs::read_to_string(log_file)?;
+            for (line_num, line) in content.lines().enumerate() {
+                // Check if this line matches any of our queries
+                for query in &queries {
+                    if line.to_lowercase().contains(&query.to_lowercase()) {
+                        all_events.push(CorrelatedEvent {
+                            timestamp: parse_timestamp_from_line(line).unwrap_or_else(|| {
+                                // Fallback: use line number as relative time
+                                chrono::DateTime::parse_from_rfc3339("2025-01-01T00:00:00Z")
+                                    .unwrap()
+                                    .with_timezone(&chrono::Utc)
+                                    + chrono::Duration::seconds(line_num as i64)
+                            }),
+                            source: source_name.to_string(),
+                            line_number: line_num + 1,
+                            content: line.to_string(),
+                            query: query.to_string(),
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    if all_events.is_empty() {
+        println!("❌ No matching events found for queries: {:?}", queries);
+        return Ok(());
+    }
+
+    // Sort events by timestamp for chronological correlation
+    all_events.sort_by(|a, b| a.timestamp.cmp(&b.timestamp));
+
+    println!("🎯 Found {} correlated events:", all_events.len());
+    println!("{}", "=".repeat(80));
+
+    // Group events by time windows for better correlation
+    let mut current_time_window = None;
+    let window_duration = chrono::Duration::seconds(5); // 5-second correlation window
+
+    for event in &all_events {
+        let should_show_time_separator = match current_time_window {
+            None => true,
+            Some(last_time) => {
+                let duration = event.timestamp.signed_duration_since(last_time);
+                duration > window_duration
+            }
+        };
+
+        if should_show_time_separator {
+            if current_time_window.is_some() {
+                println!(); // Add spacing between time windows
+            }
+            println!("⏰ Time window: {}", event.timestamp.format("%H:%M:%S%.3f"));
+            println!("{}", "-".repeat(40));
+            current_time_window = Some(event.timestamp);
+        }
+
+        // Color-code by source
+        let source_indicator = get_source_indicator(&event.source);
+        println!(
+            "{}[{}:{}] {}: {}",
+            source_indicator,
+            event.source,
+            event.line_number,
+            event.query,
+            event.content.trim()
+        );
+
+        if verbose {
+            // Show additional correlation information
+            if let Some(correlation_info) = extract_correlation_info(&event.content) {
+                println!("    🔗 Correlation: {}", correlation_info);
+            }
+        }
+    }
+
+    println!("{}", "=".repeat(80));
+
+    // Show correlation summary
+    println!("📊 Correlation Summary:");
+    let mut source_counts = std::collections::HashMap::new();
+    let mut query_counts = std::collections::HashMap::new();
+
+    for event in &all_events {
+        *source_counts.entry(event.source.clone()).or_insert(0) += 1;
+        *query_counts.entry(event.query.clone()).or_insert(0) += 1;
+    }
+
+    println!("  📁 Events by source:");
+    for (source, count) in source_counts {
+        println!("    {}: {} events", source, count);
+    }
+
+    println!("  🔍 Events by query:");
+    for (query, count) in query_counts {
+        println!("    '{}': {} events", query, count);
+    }
+
+    // Show timing analysis
+    if all_events.len() > 1 {
+        let first_event = &all_events[0];
+        let last_event = &all_events[all_events.len() - 1];
+        let total_duration = last_event
+            .timestamp
+            .signed_duration_since(first_event.timestamp);
+
+        println!("  ⏱️  Timeline:");
+        println!(
+            "    First event: {}",
+            first_event.timestamp.format("%H:%M:%S%.3f")
+        );
+        println!(
+            "    Last event:  {}",
+            last_event.timestamp.format("%H:%M:%S%.3f")
+        );
+        println!(
+            "    Total span:  {:.3}s",
+            total_duration.num_milliseconds() as f64 / 1000.0
+        );
+    }
+
+    Ok(())
+}
+
+#[derive(Debug, Clone)]
+struct CorrelatedEvent {
+    timestamp: chrono::DateTime<chrono::Utc>,
+    source: String,
+    line_number: usize,
+    content: String,
+    query: String,
+}
+
+/// Parse timestamp from log line in various formats
+fn parse_timestamp_from_line(line: &str) -> Option<chrono::DateTime<chrono::Utc>> {
+    // Try mcplay's log format: [HH:MM:SS.mmm]
+    if let Some(timestamp_match) = regex::Regex::new(r"^\[(\d{2}:\d{2}:\d{2}\.\d{3})\]")
+        .ok()
+        .and_then(|re| re.captures(line))
+    {
+        if let Some(time_str) = timestamp_match.get(1) {
+            // Assume today's date for HH:MM:SS.mmm format
+            let today = chrono::Utc::now().date_naive();
+            if let Ok(time) = chrono::NaiveTime::parse_from_str(time_str.as_str(), "%H:%M:%S%.3f") {
+                return Some(chrono::DateTime::from_naive_utc_and_offset(
+                    today.and_time(time),
+                    chrono::Utc,
+                ));
+            }
+        }
+    }
+
+    // Try ISO format: 2025-09-11T11:25:55.273311Z
+    if let Some(iso_match) = regex::Regex::new(r"(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d+Z)")
+        .ok()
+        .and_then(|re| re.captures(line))
+    {
+        if let Some(iso_str) = iso_match.get(1) {
+            if let Ok(datetime) = chrono::DateTime::parse_from_rfc3339(iso_str.as_str()) {
+                return Some(datetime.with_timezone(&chrono::Utc));
+            }
+        }
+    }
+
+    None
+}
+
+/// Get a visual indicator for different log sources
+fn get_source_indicator(source: &str) -> &'static str {
+    if source.contains("orchestrator") {
+        "🎭 "
+    } else if source.contains("client_alice") {
+        "🟢 "
+    } else if source.contains("client_bob") {
+        "🔵 "
+    } else if source.contains("mqtt_server") {
+        "📡 "
+    } else if source.contains("mqtt_observer") {
+        "👁️  "
+    } else if source.starts_with("client_") {
+        "👤 "
+    } else {
+        "📝 "
+    }
+}
+
+/// Extract correlation information from log content
+fn extract_correlation_info(content: &str) -> Option<String> {
+    let mut info_parts = Vec::new();
+
+    // Simple pattern matching for common correlation keys
+    let lower_content = content.to_lowercase();
+
+    // Look for world IDs
+    if lower_content.contains("world")
+        && (lower_content.contains("id") || lower_content.contains("shared"))
+    {
+        info_parts.push("world_context".to_string());
+    }
+
+    // Look for request IDs (UUIDs)
+    if lower_content.contains("request")
+        && (lower_content.contains("-") || lower_content.contains("mcp"))
+    {
+        info_parts.push("request_context".to_string());
+    }
+
+    // Look for multiplayer mode indicators
+    if lower_content.contains("singleplayer") {
+        info_parts.push("mode=SinglePlayer".to_string());
+    } else if lower_content.contains("hostingworld") {
+        info_parts.push("mode=HostingWorld".to_string());
+    } else if lower_content.contains("joinedworld") {
+        info_parts.push("mode=JoinedWorld".to_string());
+    }
+
+    // Look for block-related operations
+    if lower_content.contains("block")
+        && (lower_content.contains("place")
+            || lower_content.contains("break")
+            || lower_content.contains("change"))
+    {
+        info_parts.push("block_operation".to_string());
+    }
+
+    // Look for MQTT operations
+    if lower_content.contains("mqtt")
+        && (lower_content.contains("publish") || lower_content.contains("subscribe"))
+    {
+        info_parts.push("mqtt_operation".to_string());
+    }
+
+    if info_parts.is_empty() {
+        None
+    } else {
+        Some(info_parts.join(", "))
     }
 }

@@ -41,6 +41,9 @@ pub struct WorldMcpParams<'w, 's> {
     pub current_world: Option<Res<'w, CurrentWorld>>,
     pub discovered_worlds: ResMut<'w, DiscoveredWorlds>,
     pub next_game_state: Option<ResMut<'w, NextState<GameState>>>,
+    pub inventory: ResMut<'w, crate::inventory::PlayerInventory>,
+    pub place_events: EventWriter<'w, crate::inventory::PlaceBlockEvent>,
+    pub break_events: EventWriter<'w, crate::inventory::BreakBlockEvent>,
     // PhantomData to use the 's lifetime
     _phantom: std::marker::PhantomData<&'s ()>,
 }
@@ -127,6 +130,9 @@ mod tests {
         world.init_resource::<Events<LoadWorldEvent>>();
         world.init_resource::<Events<crate::world::StartWorldCreationEvent>>();
         world.insert_resource(DiscoveredWorlds::default());
+        world.insert_resource(crate::inventory::PlayerInventory::new());
+        world.init_resource::<Events<crate::inventory::PlaceBlockEvent>>();
+        world.init_resource::<Events<crate::inventory::BreakBlockEvent>>();
 
         // Test system that uses WorldMcpParams
         let test_system = |_params: WorldMcpParams| {

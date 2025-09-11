@@ -298,6 +298,7 @@ fn handle_multiplayer_block_sync(params: &mut MultiplayerBlockSyncParams) {
                             z: event.position.z,
                             block_type,
                         },
+                        source: crate::multiplayer::BlockChangeSource::Local,
                     });
 
                 #[cfg(target_arch = "wasm32")]
@@ -409,6 +410,7 @@ fn handle_multiplayer_block_breaking_sync(params: &mut MultiplayerBlockBreakingS
                         y: event.position.y,
                         z: event.position.z,
                     },
+                    source: crate::multiplayer::BlockChangeSource::Local,
                 });
 
             #[cfg(target_arch = "wasm32")]

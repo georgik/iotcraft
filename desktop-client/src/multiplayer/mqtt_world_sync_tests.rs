@@ -53,6 +53,7 @@ mod tests {
         let mut place_events = world.resource_mut::<Events<PlaceBlockEvent>>();
         place_events.send(PlaceBlockEvent {
             position: IVec3::new(5, 10, 15),
+            block_type: None, // Use selected inventory item
         });
         drop(place_events);
 
@@ -93,6 +94,7 @@ mod tests {
         let mut place_events = world.resource_mut::<Events<PlaceBlockEvent>>();
         place_events.send(PlaceBlockEvent {
             position: IVec3::new(1, 2, 3),
+            block_type: None, // Use selected inventory item
         });
         drop(place_events);
 
@@ -365,6 +367,7 @@ mod tests {
         let mut place_events = world.resource_mut::<Events<PlaceBlockEvent>>();
         place_events.send(PlaceBlockEvent {
             position: IVec3::new(100, 200, 300),
+            block_type: None, // Use selected inventory item
         });
         drop(place_events);
 

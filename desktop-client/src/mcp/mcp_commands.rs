@@ -657,9 +657,20 @@ fn execute_place_block_command(arguments: &Value, world_params: &mut WorldMcpPar
     ) {
         if let Some(block_type_enum) = parse_block_type(block_type) {
             let position = bevy::math::IVec3::new(x as i32, y as i32, z as i32);
+
+            // Add block type to inventory if not present (for MCP commands)
             world_params
-                .voxel_world
-                .set_block(position, block_type_enum);
+                .inventory
+                .add_items(crate::inventory::ItemType::Block(block_type_enum), 1);
+
+            // Use the event system to properly trigger multiplayer sync
+            world_params
+                .place_events
+                .write(crate::inventory::PlaceBlockEvent {
+                    position,
+                    block_type: Some(block_type_enum),
+                });
+
             format!("Placed {} block at ({}, {}, {})", block_type, x, y, z)
         } else {
             format!(
@@ -680,7 +691,14 @@ fn execute_remove_block_command(arguments: &Value, world_params: &mut WorldMcpPa
         arguments.get("z").and_then(|v| v.as_i64()),
     ) {
         let position = bevy::math::IVec3::new(x as i32, y as i32, z as i32);
-        if world_params.voxel_world.remove_block(&position).is_some() {
+
+        // Check if block exists before trying to remove it
+        if world_params.voxel_world.is_block_at(position) {
+            // Use the event system to properly trigger multiplayer sync
+            world_params
+                .break_events
+                .write(crate::inventory::BreakBlockEvent { position });
+
             format!("Removed block at ({}, {}, {})", x, y, z)
         } else {
             format!("No block found at ({}, {}, {}) to remove", x, y, z)
@@ -710,13 +728,26 @@ fn execute_create_wall_command(arguments: &Value, world_params: &mut WorldMcpPar
             let max_z = z1.max(z2) as i32;
 
             let mut blocks_created = 0;
+
+            // Calculate total blocks needed and add to inventory
+            let total_blocks =
+                ((max_x - min_x + 1) * (max_y - min_y + 1) * (max_z - min_z + 1)) as u32;
+            world_params.inventory.add_items(
+                crate::inventory::ItemType::Block(block_type_enum),
+                total_blocks,
+            );
+
+            // Use the event system to properly trigger multiplayer sync for each block
             for x in min_x..=max_x {
                 for y in min_y..=max_y {
                     for z in min_z..=max_z {
                         let position = bevy::math::IVec3::new(x, y, z);
                         world_params
-                            .voxel_world
-                            .set_block(position, block_type_enum);
+                            .place_events
+                            .write(crate::inventory::PlaceBlockEvent {
+                                position,
+                                block_type: Some(block_type_enum),
+                            });
                         blocks_created += 1;
                     }
                 }

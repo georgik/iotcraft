@@ -520,6 +520,7 @@ fn handle_interaction_input(
                 if ghost_state.can_place {
                     place_block_events.write(PlaceBlockEvent {
                         position: placement_position,
+                        block_type: None, // Use selected inventory item
                     });
 
                     info!(

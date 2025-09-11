@@ -63,8 +63,8 @@ place glass_pane -11 2 14
 # Garden/landscaping area
 wall grass 8 1 -14 14 1 -8
 # Add some decorative elements
-place stone 10 2 -12  # Garden centerpiece
-place glass_pane 10 3 -12  # Garden ornament
+place stone 10 2 -12
+place glass_pane 10 3 -12
 place cyan_terracotta 9 1 -10
 place cyan_terracotta 11 1 -10
 place cyan_terracotta 10 1 -9

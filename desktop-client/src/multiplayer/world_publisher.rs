@@ -398,10 +398,10 @@ fn handle_world_publishing(
         );
 
         if let Some(mqtt_tx) = &mqtt_outgoing_tx {
-            // Generate world_id from world_name and timestamp since PublishWorldEvent doesn't include it
+            // Generate world_id from world_name - use clean name without timestamp suffixes
             let world_id = match &*multiplayer_mode {
                 MultiplayerMode::HostingWorld { world_id, .. } => world_id.clone(),
-                _ => format!("{}_{}", event.world_name, chrono::Utc::now().timestamp()),
+                _ => event.world_name.clone(), // Use clean world name instead of adding timestamp
             };
 
             // Create world info for discovery

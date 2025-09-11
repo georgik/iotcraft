@@ -1,0 +1,370 @@
+// Quick Block Removal Test Scenario
+// Fast test of enhanced block removal functionality with visual entity sync
+Scenario(
+    name: "quick_block_removal_test",
+    description: "Quick test of block placement and removal with visual entity synchronization",
+    version: "1.0",
+    
+    // Minimal infrastructure setup for speed
+    infrastructure: InfrastructureConfig(
+        mqtt_server: MqttServerConfig(
+            required: true,
+            port: 1883,
+            config_file: None,
+            options: None,
+        ),
+        mqtt_observer: None,
+        mcp_server: None,
+        services: None,
+    ),
+    
+    // Single desktop client for fast testing
+    clients: [
+        ClientConfig(
+            id: "player1",
+            player_id: "player1", 
+            mcp_port: 8080,
+            client_type: "desktop",
+            name: Some("Player 1 - Block Removal Test"),
+            config: None,
+        ),
+    ],
+    
+    // Focused test steps
+    steps: [
+        // Step 1: Initialize MCP connection
+        Step(
+            name: "mcp_initialize",
+            description: "Initialize MCP connection",
+            client: "player1",
+            action: (
+                type: "mcp_call",
+                tool: "initialize",
+                arguments: {
+                    "protocolVersion": "2024-11-05",
+                    "capabilities": {
+                        "tools": {}
+                    },
+                    "clientInfo": {
+                        "name": "quick-block-removal-test",
+                        "version": "1.0.0"
+                    }
+                },
+            ),
+            wait_before: 200,
+            wait_after: 100,
+            timeout: 8000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: [],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 2: Create world
+        Step(
+            name: "create_world",
+            description: "Create world for block removal testing",
+            client: "player1",
+            action: (
+                type: "mcp_call",
+                tool: "create_world",
+                arguments: {
+                    "world_name": "block_removal_test_world",
+                    "description": "World for testing block removal"
+                },
+            ),
+            wait_before: 500,
+            wait_after: 1000,
+            timeout: 12000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["mcp_initialize"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 3: Place test blocks
+        Step(
+            name: "place_stone_block",
+            description: "Place a stone block to test removal",
+            client: "player1",
+            action: (
+                type: "mcp_call",
+                tool: "place_block",
+                arguments: {
+                    "block_type": "stone",
+                    "x": 5,
+                    "y": 1,
+                    "z": 0,
+                },
+            ),
+            wait_before: 200,
+            wait_after: 500,
+            timeout: 8000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["create_world"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 4: Place another block
+        Step(
+            name: "place_grass_block",
+            description: "Place a grass block to test multiple block removal",
+            client: "player1",
+            action: (
+                type: "mcp_call",
+                tool: "place_block",
+                arguments: {
+                    "block_type": "grass",
+                    "x": 6,
+                    "y": 1,
+                    "z": 0,
+                },
+            ),
+            wait_before: 200,
+            wait_after: 500,
+            timeout: 8000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["place_stone_block"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+
+        // Step 5: Create a small wall for testing
+        Step(
+            name: "create_test_wall",
+            description: "Create a small wall structure to test multiple block removal",
+            client: "player1",
+            action: (
+                type: "mcp_call",
+                tool: "create_wall",
+                arguments: {
+                    "block_type": "dirt",
+                    "x1": 0,
+                    "y1": 1,
+                    "z1": 0,
+                    "x2": 2,
+                    "y2": 2,
+                    "z2": 0,
+                },
+            ),
+            wait_before: 200,
+            wait_after: 800,
+            timeout: 10000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["place_grass_block"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 6: Test block removal (visual entity removal)
+        Step(
+            name: "remove_stone_block",
+            description: "Remove the stone block (tests visual entity removal)",
+            client: "player1",
+            action: (
+                type: "mcp_call",
+                tool: "remove_block",
+                arguments: {
+                    "x": 5,
+                    "y": 1,
+                    "z": 0,
+                },
+            ),
+            wait_before: 300,
+            wait_after: 500,
+            timeout: 8000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["create_test_wall"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 7: Remove another block
+        Step(
+            name: "remove_grass_block",
+            description: "Remove the grass block",
+            client: "player1",
+            action: (
+                type: "mcp_call",
+                tool: "remove_block",
+                arguments: {
+                    "x": 6,
+                    "y": 1,
+                    "z": 0,
+                },
+            ),
+            wait_before: 300,
+            wait_after: 500,
+            timeout: 8000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["remove_stone_block"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 8: Remove blocks from wall
+        Step(
+            name: "remove_wall_block_1",
+            description: "Remove one block from the wall (position 0,1,0)",
+            client: "player1",
+            action: (
+                type: "mcp_call",
+                tool: "remove_block",
+                arguments: {
+                    "x": 0,
+                    "y": 1,
+                    "z": 0,
+                },
+            ),
+            wait_before: 300,
+            wait_after: 500,
+            timeout: 8000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["remove_grass_block"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 9: Remove another wall block
+        Step(
+            name: "remove_wall_block_2",
+            description: "Remove second block from wall (position 1,2,0)",
+            client: "player1",
+            action: (
+                type: "mcp_call",
+                tool: "remove_block",
+                arguments: {
+                    "x": 1,
+                    "y": 2,
+                    "z": 0,
+                },
+            ),
+            wait_before: 300,
+            wait_after: 500,
+            timeout: 8000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["remove_wall_block_1"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 10: Test removing non-existent block (error handling)
+        Step(
+            name: "remove_nonexistent_block",
+            description: "Try to remove a block that doesn't exist (error handling test)",
+            client: "player1",
+            action: (
+                type: "mcp_call",
+                tool: "remove_block",
+                arguments: {
+                    "x": 50,
+                    "y": 50,
+                    "z": 50,
+                },
+            ),
+            wait_before: 300,
+            wait_after: 500,
+            timeout: 8000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success", // Should succeed but report no block found
+            )),
+            depends_on: ["remove_wall_block_2"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 11: Final world status check
+        Step(
+            name: "final_world_status",
+            description: "Check final world status after all block operations",
+            client: "player1",
+            action: (
+                type: "mcp_call",
+                tool: "get_world_status",
+                arguments: {},
+            ),
+            wait_before: 200,
+            wait_after: 200,
+            timeout: 8000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["remove_nonexistent_block"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+    ],
+    
+    // Fast test configuration
+    config: Some(ScenarioConfig(
+        timeout_ms: Some(120000), // 2 minutes total timeout for quick testing
+        logging: Some(LoggingConfig(
+            level: Some("info"),
+            log_mqtt: Some(false),
+            log_client_actions: Some(true),
+            filters: Some([
+                "mcp/*", 
+                "world/*", 
+                "place_block",
+                "remove_block",
+                "create_wall",
+                "BlockPlaced",
+                "BlockRemoved", 
+                "BreakBlockEvent",
+                "visual_entity",
+                "GameState"
+            ]),
+        )),
+        environment: Some({
+            "RUST_LOG": "info,iotcraft_desktop_client=info",
+            "SCENARIO_NAME": "quick_block_removal_test",
+            "ENABLE_MCP": "true",
+        }),
+        settings: Some({
+            "auto_cleanup": true,
+            "preserve_logs": false,
+            "fail_fast": true,
+        }),
+    )),
+)

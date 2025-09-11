@@ -1,0 +1,331 @@
+// Enhanced Alice World Publishing Test
+// Tests single MQTT connection approach with extended validation and timing
+Scenario(
+    name: "alice_world_publish_enhanced",
+    description: "Enhanced test of Alice creating and publishing a world with comprehensive MQTT validation and timing",
+    version: "1.0",
+    
+    // Infrastructure with MQTT observer for comprehensive monitoring
+    infrastructure: InfrastructureConfig(
+        mqtt_server: MqttServerConfig(
+            required: true,
+            port: 1883,
+            config_file: None,
+            options: None,
+        ),
+        mqtt_observer: Some(MqttObserverConfig(
+            required: true,
+            topics: Some([
+                "#",  // Monitor all MQTT topics
+                "iotcraft/worlds/+/info",  // World discovery messages
+                "iotcraft/worlds/+/data",  // Complete world data messages
+                "iotcraft/worlds/+/players/+/pose",  // Player poses
+            ]),
+            client_id: Some("alice_enhanced_observer"),
+        )),
+        mcp_server: None,
+        services: None,
+    ),
+    
+    // Two clients: Alice (publisher) and Bob (discoverer)
+    clients: [
+        ClientConfig(
+            id: "alice",
+            player_id: "alice_publisher", 
+            mcp_port: 8080,
+            client_type: "desktop",
+            name: Some("Alice - World Publisher"),
+            config: None,
+        ),
+        ClientConfig(
+            id: "bob",
+            player_id: "bob_discoverer", 
+            mcp_port: 8081,
+            client_type: "desktop",
+            name: Some("Bob - World Discoverer"),
+            config: None,
+        ),
+    ],
+    
+    // Enhanced test steps with proper timing and validation
+    steps: [
+        // Step 1: Initialize Alice's MCP connection
+        Step(
+            name: "alice_mcp_initialize",
+            description: "Initialize Alice's MCP connection",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "initialize",
+                arguments: {
+                    "protocolVersion": "2024-11-05",
+                    "capabilities": { "tools": {} },
+                    "clientInfo": {
+                        "name": "alice-world-publisher",
+                        "version": "1.0.0"
+                    }
+                },
+            ),
+            wait_before: 2000,
+            wait_after: 500,
+            timeout: 15000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: [],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 2: Initialize Bob's MCP connection
+        Step(
+            name: "bob_mcp_initialize",
+            description: "Initialize Bob's MCP connection",
+            client: "bob",
+            action: (
+                type: "mcp_call",
+                tool: "initialize",
+                arguments: {
+                    "protocolVersion": "2024-11-05",
+                    "capabilities": { "tools": {} },
+                    "clientInfo": {
+                        "name": "bob-world-discoverer",
+                        "version": "1.0.0"
+                    }
+                },
+            ),
+            wait_before: 500,
+            wait_after: 500,
+            timeout: 15000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["alice_mcp_initialize"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 3: Get initial MQTT status from both clients
+        Step(
+            name: "alice_initial_mqtt_status",
+            description: "Get Alice's initial MQTT connection status",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "get_mqtt_status",
+                arguments: {},
+            ),
+            wait_before: 1000,
+            wait_after: 500,
+            timeout: 10000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["bob_mcp_initialize"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 4: Alice creates a world
+        Step(
+            name: "alice_create_world",
+            description: "Alice creates a world for enhanced testing",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "create_world",
+                arguments: {
+                    "world_name": "enhanced_test_world",
+                    "description": "World for enhanced MQTT single connection testing"
+                },
+            ),
+            wait_before: 500,
+            wait_after: 2000,  // Wait for world creation to complete
+            timeout: 20000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["alice_initial_mqtt_status"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 5: Verify Alice is in InGame state
+        Step(
+            name: "verify_alice_ingame",
+            description: "Verify Alice transitioned to InGame state",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "get_game_state",
+                arguments: {},
+            ),
+            wait_before: 500,
+            wait_after: 300,
+            timeout: 8000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["alice_create_world"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 6: Alice publishes the world
+        Step(
+            name: "alice_publish_world",
+            description: "Alice publishes world via single MQTT connection",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "publish_world",
+                arguments: {
+                    "world_name": "enhanced_test_world",
+                    "max_players": 6,
+                    "is_public": true
+                },
+            ),
+            wait_before: 1000,
+            wait_after: 3000,  // Extended wait for MQTT propagation
+            timeout: 15000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["verify_alice_ingame"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 7: Check Alice's publication status
+        Step(
+            name: "verify_alice_publication",
+            description: "Verify Alice's world is published correctly",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "get_multiplayer_status",
+                arguments: {},
+            ),
+            wait_before: 500,
+            wait_after: 1000,
+            timeout: 10000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["alice_publish_world"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 8: Wait for MQTT propagation
+        Step(
+            name: "wait_mqtt_propagation",
+            description: "Wait for MQTT world discovery messages to propagate",
+            client: "orchestrator",
+            action: (
+                type: "wait_condition",
+                condition: "time_elapsed",
+                expected_value: Some("5000"),  // Wait 5 seconds for MQTT propagation
+            ),
+            wait_before: 0,
+            wait_after: 0,
+            timeout: 10000,
+            success_condition: None,
+            depends_on: ["verify_alice_publication"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 9: Bob tries to discover worlds
+        Step(
+            name: "bob_discover_worlds",
+            description: "Bob attempts to discover Alice's published world",
+            client: "bob",
+            action: (
+                type: "mcp_call",
+                tool: "list_online_worlds",
+                arguments: {},
+            ),
+            wait_before: 500,
+            wait_after: 1000,
+            timeout: 10000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["wait_mqtt_propagation"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 10: Final MQTT status check
+        Step(
+            name: "final_status_check",
+            description: "Final MQTT and multiplayer status validation",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "get_mqtt_status",
+                arguments: {},
+            ),
+            wait_before: 500,
+            wait_after: 1000,
+            timeout: 10000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["bob_discover_worlds"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+    ],
+    
+    // Configuration with enhanced logging
+    config: Some(ScenarioConfig(
+        timeout_ms: Some(240000), // 4 minutes total timeout
+        logging: Some(LoggingConfig(
+            level: Some("info"),
+            log_mqtt: Some(true),
+            log_client_actions: Some(true),
+            filters: Some([
+                "mqtt/*",
+                "multiplayer/*", 
+                "world/*", 
+                "mcp/*",
+                "publish_world",
+                "create_world",
+                "list_online_worlds",
+                "GameState",
+                "iotcraft/worlds",
+            ]),
+        )),
+        environment: Some({
+            "RUST_LOG": "info,iotcraft_desktop_client::mqtt::core_service=debug,iotcraft_desktop_client::multiplayer=debug",
+            "SCENARIO_NAME": "alice_world_publish_enhanced",
+            "ENABLE_MCP": "true",
+        }),
+        settings: Some({
+            "auto_cleanup": true,
+            "preserve_logs": true,
+            "fail_fast": false,
+        }),
+    )),
+)
