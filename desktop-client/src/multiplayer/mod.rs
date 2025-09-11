@@ -1,4 +1,5 @@
 pub mod mqtt_utils;
+pub mod remote_block_sync;
 pub mod shared_world;
 pub mod world_discovery;
 pub mod world_publisher;

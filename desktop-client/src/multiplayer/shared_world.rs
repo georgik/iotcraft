@@ -209,6 +209,7 @@ impl Plugin for SharedWorldPlugin {
                     handle_world_change_events,
                     handle_refresh_online_worlds_events,
                     handle_block_change_events,
+                    crate::multiplayer::remote_block_sync::handle_remote_block_changes,
                     handle_world_state_received_events,
                     auto_enable_multiplayer_when_mqtt_available,
                     auto_transition_to_game_on_multiplayer_changes,
