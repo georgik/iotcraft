@@ -1,0 +1,427 @@
+// Alice Iterative Block Placement Test
+// Test to isolate whether block placement performance issues are in single-player or multiplayer mode
+// Alice places blocks one at a time with world status checks to pinpoint when the freeze occurs
+Scenario(
+    name: "alice_iterative_block_test",
+    description: "Alice places blocks iteratively with status checks to isolate single-player vs multiplayer performance issues",
+    version: "1.0",
+    
+    // Infrastructure setup
+    infrastructure: InfrastructureConfig(
+        mqtt_server: MqttServerConfig(
+            required: true,
+            port: 1883,
+            config_file: None,
+            options: None,
+        ),
+        mqtt_observer: Some(MqttObserverConfig(
+            required: true,
+            topics: Some(["#"]),
+            client_id: Some("alice_block_test_observer"),
+        )),
+        mcp_server: None,
+        services: None,
+    ),
+    
+    // Single Alice client
+    clients: [
+        ClientConfig(
+            id: "alice",
+            player_id: "alice", 
+            mcp_port: 8080,
+            client_type: "desktop",
+            name: Some("Alice - Block Placement Tester"),
+            config: None,
+        ),
+    ],
+    
+    // Iterative block placement steps
+    steps: [
+        // Step 1: Initialize Alice
+        Step(
+            name: "alice_mcp_initialize",
+            description: "Initialize Alice's MCP connection",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "initialize",
+                arguments: {
+                    "protocolVersion": "2024-11-05",
+                    "capabilities": { "tools": {} },
+                    "clientInfo": {
+                        "name": "alice-block-test",
+                        "version": "1.0.0"
+                    }
+                },
+            ),
+            wait_before: 2000,
+            wait_after: 500,
+            timeout: 10000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: [],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 2: Alice creates a default world (small world to start)
+        Step(
+            name: "alice_create_default_world",
+            description: "Alice creates a small default world for block placement testing",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "create_world",
+                arguments: {
+                    "world_name": "alice_block_test_world",
+                    "description": "Small world for iterative block placement testing",
+                    "template": "default"
+                },
+            ),
+            wait_before: 1000,
+            wait_after: 2000,
+            timeout: 20000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["alice_mcp_initialize"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 3: Initial world status check
+        Step(
+            name: "alice_initial_world_status",
+            description: "Alice checks initial world status (should have default template blocks)",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "get_world_status",
+                arguments: {},
+            ),
+            wait_before: 1000,
+            wait_after: 500,
+            timeout: 10000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["alice_create_default_world"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 4: Alice places FIRST block (stone)
+        Step(
+            name: "alice_place_block_1",
+            description: "Alice places FIRST stone block at (1, 1, 0)",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "place_block",
+                arguments: {
+                    "block_type": "stone",
+                    "x": 1,
+                    "y": 1,
+                    "z": 0
+                },
+            ),
+            wait_before: 500,
+            wait_after: 1000,
+            timeout: 15000, // Increased timeout to catch potential issues
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["alice_initial_world_status"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 5: Check status after first block
+        Step(
+            name: "alice_status_after_block_1",
+            description: "Alice checks world status after placing first block",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "get_world_status",
+                arguments: {},
+            ),
+            wait_before: 500,
+            wait_after: 500,
+            timeout: 15000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["alice_place_block_1"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 6: Alice places SECOND block (dirt)
+        Step(
+            name: "alice_place_block_2",
+            description: "Alice places SECOND dirt block at (2, 1, 0)",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "place_block",
+                arguments: {
+                    "block_type": "dirt",
+                    "x": 2,
+                    "y": 1,
+                    "z": 0
+                },
+            ),
+            wait_before: 500,
+            wait_after: 1000,
+            timeout: 15000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["alice_status_after_block_1"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 7: Check status after second block
+        Step(
+            name: "alice_status_after_block_2",
+            description: "Alice checks world status after placing second block",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "get_world_status",
+                arguments: {},
+            ),
+            wait_before: 500,
+            wait_after: 500,
+            timeout: 15000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["alice_place_block_2"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 8: Alice places THIRD block (grass)
+        Step(
+            name: "alice_place_block_3",
+            description: "Alice places THIRD grass block at (3, 1, 0)",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "place_block",
+                arguments: {
+                    "block_type": "grass",
+                    "x": 3,
+                    "y": 1,
+                    "z": 0
+                },
+            ),
+            wait_before: 500,
+            wait_after: 1000,
+            timeout: 15000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["alice_status_after_block_2"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 9: Check status after third block
+        Step(
+            name: "alice_status_after_block_3",
+            description: "Alice checks world status after placing third block",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "get_world_status",
+                arguments: {},
+            ),
+            wait_before: 500,
+            wait_after: 500,
+            timeout: 15000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["alice_place_block_3"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 10: Alice places FOURTH block (cyan_terracotta)
+        Step(
+            name: "alice_place_block_4",
+            description: "Alice places FOURTH cyan_terracotta block at (4, 1, 0)",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "place_block",
+                arguments: {
+                    "block_type": "cyan_terracotta",
+                    "x": 4,
+                    "y": 1,
+                    "z": 0
+                },
+            ),
+            wait_before: 500,
+            wait_after: 1000,
+            timeout: 15000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["alice_status_after_block_3"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 11: Check status after fourth block
+        Step(
+            name: "alice_status_after_block_4",
+            description: "Alice checks world status after placing fourth block",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "get_world_status",
+                arguments: {},
+            ),
+            wait_before: 500,
+            wait_after: 500,
+            timeout: 15000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["alice_place_block_4"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 12: Alice places FIFTH block (glass_pane) - the "dangerous" one
+        Step(
+            name: "alice_place_block_5",
+            description: "Alice places FIFTH glass_pane block at (5, 1, 0) - testing if this triggers the issue",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "place_block",
+                arguments: {
+                    "block_type": "glass_pane",
+                    "x": 5,
+                    "y": 1,
+                    "z": 0
+                },
+            ),
+            wait_before: 500,
+            wait_after: 1000,
+            timeout: 15000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["alice_status_after_block_4"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 13: Final status check after fifth block
+        Step(
+            name: "alice_final_status_check",
+            description: "Alice checks final world status after placing all 5 blocks",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "get_world_status",
+                arguments: {},
+            ),
+            wait_before: 500,
+            wait_after: 500,
+            timeout: 15000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["alice_place_block_5"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 14: Final client info check
+        Step(
+            name: "alice_final_client_info",
+            description: "Alice gets final client information summary",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "get_client_info",
+                arguments: {},
+            ),
+            wait_before: 500,
+            wait_after: 1000,
+            timeout: 10000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["alice_final_status_check"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+    ],
+    
+    // Configuration for iterative testing
+    config: Some(ScenarioConfig(
+        timeout_ms: Some(120000), // 2 minutes total timeout
+        logging: Some(LoggingConfig(
+            level: Some("info"),
+            log_mqtt: Some(true),
+            log_client_actions: Some(true),
+            filters: Some([
+                "mcp/*", 
+                "world/*",
+                "place_block",
+                "get_world_status",
+                "get_client_info",
+                "visual/*",
+                "sync_block_visuals"
+            ]),
+        )),
+        environment: Some({
+            "RUST_LOG": "info,iotcraft_desktop_client=debug",
+            "SCENARIO_NAME": "alice_iterative_block_test",
+            "ENABLE_MCP": "true",
+        }),
+        settings: Some({
+            "auto_cleanup": true,
+            "preserve_logs": true,
+            "fail_fast": true,
+        }),
+    )),
+)

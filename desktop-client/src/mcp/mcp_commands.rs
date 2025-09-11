@@ -104,7 +104,7 @@ pub fn execute_mcp_command_bundled(
             execute_leave_world_command(multiplayer_params)
         }
         "publish_world" => {
-            execute_publish_world_command(arguments, multiplayer_params)
+            execute_publish_world_command(arguments, world_params, multiplayer_params)
         }
         "unpublish_world" => {
             execute_unpublish_world_command(multiplayer_params)
@@ -135,7 +135,8 @@ pub fn execute_mcp_command_bundled(
             execute_list_world_templates_command()
         }
         "create_world" => {
-            execute_create_world_command(arguments, world_params, entity_params, state_params)
+            // This command is handled specially in the MCP server for async execution
+            "Error: create_world should be handled by async execution system".to_string()
         }
         _ => {
             format!("Error: Unknown MCP command: {}", tool_name)
@@ -572,36 +573,46 @@ fn execute_leave_world_command(multiplayer_params: &mut MultiplayerMcpParams) ->
 /// Publish world command implementation
 fn execute_publish_world_command(
     arguments: &Value,
+    world_params: &WorldMcpParams,
     multiplayer_params: &mut MultiplayerMcpParams,
 ) -> String {
-    if let Some(world_name) = arguments.get("world_name").and_then(|v| v.as_str()) {
-        let max_players = arguments
-            .get("max_players")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(10) as u32;
-        let is_public = arguments
-            .get("is_public")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(true);
+    // Use current world name or provided world_name parameter
+    let world_name =
+        if let Some(provided_name) = arguments.get("world_name").and_then(|v| v.as_str()) {
+            provided_name.to_string()
+        } else if let Some(current_world) = &world_params.current_world {
+            current_world.name.clone()
+        } else {
+            return "Error: No current world loaded and no world_name provided".to_string();
+        };
 
-        info!("Publishing world via MCP: {}", world_name);
+    let max_players = arguments
+        .get("max_players")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(10) as u32;
+    let is_public = arguments
+        .get("is_public")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(true);
 
-        // Emit PublishWorldEvent to trigger multiplayer mode transition
-        multiplayer_params.publish_events.write(
-            crate::multiplayer::shared_world::PublishWorldEvent {
-                world_name: world_name.to_string(),
-                max_players,
-                is_public,
-            },
-        );
+    info!(
+        "Publishing world via MCP: {} (max_players: {}, public: {})",
+        world_name, max_players, is_public
+    );
 
-        format!(
-            "World '{}' published for multiplayer (max_players: {}, public: {})",
-            world_name, max_players, is_public
-        )
-    } else {
-        "Error: world_name is required for publish_world".to_string()
-    }
+    // Emit PublishWorldEvent to trigger multiplayer mode transition
+    multiplayer_params
+        .publish_events
+        .write(crate::multiplayer::shared_world::PublishWorldEvent {
+            world_name: world_name.clone(),
+            max_players,
+            is_public,
+        });
+
+    format!(
+        "World '{}' published for multiplayer (max_players: {}, public: {})",
+        world_name, max_players, is_public
+    )
 }
 
 /// Unpublish world command implementation
@@ -856,13 +867,16 @@ fn execute_list_world_templates_command() -> String {
     }
 }
 
-/// Create world command implementation
-fn execute_create_world_command(
+/// Create world command implementation - now uses async world creation
+/// This command starts async world creation and will be completed by the completion handler
+pub fn execute_create_world_command(
     arguments: &Value,
     world_params: &mut WorldMcpParams,
-    entity_params: &mut EntityMcpParams,
+    _entity_params: &mut EntityMcpParams,
     state_params: &mut McpStateMcpParams,
-) -> String {
+    _core_params: &mut crate::mcp::mcp_params::CoreMcpParams,
+    request_id: String,
+) -> Option<String> {
     if let Some(world_name) = arguments.get("world_name").and_then(|v| v.as_str()) {
         let description = arguments
             .get("description")
@@ -874,17 +888,17 @@ fn execute_create_world_command(
             .unwrap_or("default");
 
         info!(
-            "Creating world via MCP: name='{}', description='{}', template='{}'",
-            world_name, description, template
+            "🚀 [DEBUG] Starting async world creation via MCP: name='{}', description='{}', template='{}', request_id='{}'",
+            world_name, description, template, request_id
         );
 
         // Validate template exists
         let template_path = format!("scripts/world_templates/{}.txt", template);
         if !std::path::Path::new(&template_path).exists() {
-            return format!(
+            return Some(format!(
                 "Error: Template '{}' not found. Available templates: default, medieval, modern, creative",
                 template
-            );
+            ));
         }
 
         // Create world directory structure
@@ -892,13 +906,13 @@ fn execute_create_world_command(
         let world_path = worlds_dir.join(&world_name);
 
         if let Err(e) = std::fs::create_dir_all(&world_path) {
-            return format!(
+            return Some(format!(
                 "Error: Failed to create world directory for {}: {}",
                 world_name, e
-            );
+            ));
         }
 
-        // Create metadata
+        // Create and save metadata
         let metadata = crate::world::world_types::WorldMetadata {
             name: world_name.to_string(),
             description: description.to_string(),
@@ -907,159 +921,55 @@ fn execute_create_world_command(
             version: "1.0.0".to_string(),
         };
 
-        // Save metadata
         let metadata_path = world_path.join("metadata.json");
         match serde_json::to_string_pretty(&metadata) {
             Ok(json_str) => {
                 if let Err(e) = std::fs::write(&metadata_path, json_str) {
-                    return format!("Error: Failed to write metadata for {}: {}", world_name, e);
+                    return Some(format!(
+                        "Error: Failed to write metadata for {}: {}",
+                        world_name, e
+                    ));
                 }
             }
             Err(e) => {
-                return format!(
+                return Some(format!(
                     "Error: Failed to serialize metadata for {}: {}",
                     world_name, e
-                );
+                ));
             }
         }
 
-        // Clear existing blocks from voxel world
-        world_params.voxel_world.blocks.clear();
-        info!("MCP: Cleared voxel world blocks for new world");
+        // Set MCP transition flag for UI state management
+        state_params.mcp_state_transition.is_mcp_transition = true;
 
-        // Add to discovered worlds (this would need access to DiscoveredWorlds resource)
-        // This is a simplified version - full implementation would need proper resource access
-
-        // Set game state to InGame to transition UI from main menu
-        if let Some(next_state) = world_params.next_game_state.as_mut() {
-            state_params.mcp_state_transition.is_mcp_transition = true;
-            next_state.set(crate::ui::main_menu::GameState::InGame);
-            info!("MCP: Set game state to InGame for world creation transition");
-        }
-
-        // Execute template commands directly
-        if let Ok(template_content) = std::fs::read_to_string(&template_path) {
-            let mut blocks_created = 0;
-
-            for line in template_content.lines() {
-                let line = line.trim();
-                if line.is_empty() || line.starts_with('#') {
-                    continue;
-                }
-
-                // Parse and execute template commands
-                let parts: Vec<&str> = line.split_whitespace().collect();
-                if parts.is_empty() {
-                    continue;
-                }
-
-                match parts[0] {
-                    "place" => {
-                        if parts.len() == 5 {
-                            if let (Ok(x), Ok(y), Ok(z)) = (
-                                parts[2].parse::<i32>(),
-                                parts[3].parse::<i32>(),
-                                parts[4].parse::<i32>(),
-                            ) {
-                                if let Some(block_type) = parse_block_type(parts[1]) {
-                                    let pos = bevy::math::IVec3::new(x, y, z);
-                                    world_params.voxel_world.blocks.insert(pos, block_type);
-                                    blocks_created += 1;
-                                }
-                            }
-                        }
-                    }
-                    "wall" => {
-                        if parts.len() == 8 {
-                            if let (Ok(x1), Ok(y1), Ok(z1), Ok(x2), Ok(y2), Ok(z2)) = (
-                                parts[2].parse::<i32>(),
-                                parts[3].parse::<i32>(),
-                                parts[4].parse::<i32>(),
-                                parts[5].parse::<i32>(),
-                                parts[6].parse::<i32>(),
-                                parts[7].parse::<i32>(),
-                            ) {
-                                if let Some(block_type) = parse_block_type(parts[1]) {
-                                    let min_x = x1.min(x2);
-                                    let max_x = x1.max(x2);
-                                    let min_y = y1.min(y2);
-                                    let max_y = y1.max(y2);
-                                    let min_z = z1.min(z2);
-                                    let max_z = z1.max(z2);
-
-                                    for x in min_x..=max_x {
-                                        for y in min_y..=max_y {
-                                            for z in min_z..=max_z {
-                                                let pos = bevy::math::IVec3::new(x, y, z);
-                                                world_params
-                                                    .voxel_world
-                                                    .blocks
-                                                    .insert(pos, block_type);
-                                                blocks_created += 1;
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    "tp" => {
-                        if parts.len() == 4 {
-                            if let (Ok(x), Ok(y), Ok(z)) = (
-                                parts[1].parse::<f32>(),
-                                parts[2].parse::<f32>(),
-                                parts[3].parse::<f32>(),
-                            ) {
-                                // Set camera position
-                                for (mut camera_transform, _) in
-                                    entity_params.camera_query.iter_mut()
-                                {
-                                    camera_transform.translation = bevy::math::Vec3::new(x, y, z);
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                    "look" => {
-                        if parts.len() == 3 {
-                            if let (Ok(yaw), Ok(pitch)) =
-                                (parts[1].parse::<f32>(), parts[2].parse::<f32>())
-                            {
-                                // Set camera rotation
-                                for (mut camera_transform, _) in
-                                    entity_params.camera_query.iter_mut()
-                                {
-                                    let yaw_rad = yaw.to_radians();
-                                    let pitch_rad = pitch.to_radians();
-                                    camera_transform.rotation = bevy::math::Quat::from_euler(
-                                        bevy::math::EulerRot::YXZ,
-                                        yaw_rad,
-                                        pitch_rad,
-                                        0.0,
-                                    );
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                    _ => {
-                        info!("MCP: Unknown template command: {}", parts[0]);
-                    }
-                }
-            }
+        // Send async world creation event (non-blocking)
+        if let Some(start_events) = world_params.start_world_creation_events.as_mut() {
+            let event = crate::world::StartWorldCreationEvent {
+                world_name: world_name.to_string(),
+                description: description.to_string(),
+                template: template.to_string(),
+                should_transition_to_ingame: true,
+                mcp_request_id: Some(request_id.clone()),
+            };
 
             info!(
-                "MCP: Template '{}' executed, created {} blocks",
-                template, blocks_created
+                "📤 [DEBUG] About to write StartWorldCreationEvent: {:?}",
+                event.mcp_request_id
             );
-        }
+            start_events.write(event);
 
-        format!(
-            "Created new world: {} ({}) using template '{}' and transitioned to InGame",
-            world_name, description, template
-        )
+            info!(
+                "📤 [DEBUG] Sent async world creation event for '{}' (MCP request {}) - world creation will proceed in background",
+                world_name, request_id
+            );
+
+            // Return None to indicate this command will complete asynchronously
+            None
+        } else {
+            Some("Error: World creation system not available".to_string())
+        }
     } else {
-        "Error: world_name is required for create_world".to_string()
+        Some("Error: world_name is required for create_world".to_string())
     }
 }
 

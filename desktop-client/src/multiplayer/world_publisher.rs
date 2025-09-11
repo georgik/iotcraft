@@ -8,8 +8,8 @@ use crate::config::MqttConfig;
 use crate::profile::PlayerProfile;
 use crate::world::WorldSaveData;
 
-/// Maximum size for MQTT messages (1MB to match server config)
-const MAX_MQTT_MESSAGE_SIZE: usize = 1048576;
+/// Maximum size for MQTT messages (5MB to handle large world data)
+const MAX_MQTT_MESSAGE_SIZE: usize = 5242880;
 
 /// Chunked message for large world data
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -390,158 +390,202 @@ fn handle_world_publishing(
     player_profile: Res<PlayerProfile>,
     multiplayer_mode: Res<MultiplayerMode>,
 ) {
-    // Handle publish events
+    // RE-ENABLED: World data sharing for multiplayer synchronization
     for event in publish_events.read() {
-        if let Some(current_world) = &current_world {
-            if let Some(mqtt_tx) = &mqtt_outgoing_tx {
-                // Get current player position
-                let (player_position, player_rotation) =
-                    if let Ok(transform) = camera_query.single() {
-                        (transform.translation, transform.rotation)
-                    } else {
-                        (Vec3::new(0.0, 2.0, 0.0), Quat::IDENTITY)
-                    };
+        info!(
+            "🌍 Publishing world '{}' with full data sharing enabled",
+            event.world_name
+        );
 
-                // Convert blocks from VoxelWorld
-                let blocks: Vec<crate::world::VoxelBlockData> = voxel_world
-                    .blocks
-                    .iter()
-                    .map(|(pos, block_type)| crate::world::VoxelBlockData {
-                        x: pos.x,
-                        y: pos.y,
-                        z: pos.z,
-                        block_type: *block_type,
-                    })
-                    .collect();
+        if let Some(mqtt_tx) = &mqtt_outgoing_tx {
+            // Generate world_id from world_name and timestamp since PublishWorldEvent doesn't include it
+            let world_id = match &*multiplayer_mode {
+                MultiplayerMode::HostingWorld { world_id, .. } => world_id.clone(),
+                _ => format!("{}_{}", event.world_name, chrono::Utc::now().timestamp()),
+            };
 
-                let world_data = WorldSaveData {
-                    metadata: current_world.metadata.clone(),
-                    blocks,
-                    player_position,
-                    player_rotation,
-                    inventory: (*inventory).clone(),
+            // Create world info for discovery
+            let world_info = SharedWorldInfo {
+                world_id: world_id.clone(),
+                world_name: event.world_name.clone(),
+                description: current_world
+                    .as_ref()
+                    .map(|w| w.metadata.description.clone())
+                    .unwrap_or_else(|| "Shared world".to_string()),
+                host_player: player_profile.player_id.clone(),
+                host_name: player_profile.player_name.clone(),
+                created_at: chrono::Utc::now().to_rfc3339(),
+                last_updated: chrono::Utc::now().to_rfc3339(),
+                player_count: 1,
+                max_players: event.max_players,
+                is_public: event.is_public,
+                version: "1.0.0".to_string(),
+            };
+
+            // Create world data from current voxel world
+            use crate::world::{VoxelBlockData, WorldMetadata, WorldSaveData};
+
+            let blocks: Vec<VoxelBlockData> = voxel_world
+                .blocks
+                .iter()
+                .map(|(pos, block_type)| VoxelBlockData {
+                    x: pos.x,
+                    y: pos.y,
+                    z: pos.z,
+                    block_type: *block_type,
+                })
+                .collect();
+
+            // Get player position from camera
+            let player_position = camera_query
+                .iter()
+                .next()
+                .map(|transform| transform.translation)
+                .unwrap_or(bevy::math::Vec3::ZERO);
+
+            // Create metadata
+            let metadata = current_world
+                .as_ref()
+                .map(|w| w.metadata.clone())
+                .unwrap_or_else(|| WorldMetadata {
+                    name: event.world_name.clone(),
+                    description: "Shared world".to_string(),
+                    created_at: chrono::Utc::now().to_rfc3339(),
+                    last_played: chrono::Utc::now().to_rfc3339(),
+                    version: "1.0.0".to_string(),
+                });
+
+            let world_data = WorldSaveData {
+                metadata,
+                blocks,
+                player_position,
+                player_rotation: bevy::math::Quat::IDENTITY,
+                inventory: inventory.clone(),
+            };
+
+            info!(
+                "📤 Publishing world '{}' with {} blocks via MQTT",
+                event.world_name,
+                world_data.blocks.len()
+            );
+
+            // Publish world info
+            let info_topic = format!("iotcraft/worlds/{}/info", world_id);
+            if let Ok(info_payload) = serde_json::to_string(&world_info) {
+                let info_msg = crate::mqtt::core_service::OutgoingMqttMessage::PublishWorldInfo {
+                    topic: info_topic,
+                    payload: info_payload,
+                    retain: true,
                 };
 
-                if let MultiplayerMode::HostingWorld { world_id, .. } = &*multiplayer_mode {
-                    let world_info = SharedWorldInfo {
-                        world_id: world_id.clone(),
-                        world_name: current_world.name.clone(),
-                        description: current_world.metadata.description.clone(),
-                        host_player: player_profile.player_id.clone(),
-                        host_name: player_profile.player_name.clone(),
-                        created_at: current_world.metadata.created_at.clone(),
-                        last_updated: chrono::Utc::now().to_rfc3339(),
-                        player_count: 1, // For now, just the host
-                        max_players: event.max_players,
-                        is_public: event.is_public,
-                        version: current_world.metadata.version.clone(),
-                    };
-
-                    // Publish world info via Core MQTT Service
-                    let info_topic = format!("iotcraft/worlds/{}/info", world_info.world_id);
-                    if let Ok(info_payload) = serde_json::to_string(&world_info) {
-                        let info_msg =
-                            crate::mqtt::core_service::OutgoingMqttMessage::PublishWorldInfo {
-                                topic: info_topic.clone(),
-                                payload: info_payload,
-                                retain: true,
-                            };
-
-                        if let Ok(tx) = mqtt_tx.0.lock() {
-                            info!(
-                                "📡 Attempting to send world info message via Core MQTT Service..."
-                            );
-                            if let Err(e) = tx.send(info_msg) {
-                                error!("❌ Failed to send world info via Core MQTT Service: {}", e);
-                            } else {
-                                info!(
-                                    "✅ Successfully sent world info to Core MQTT Service queue for topic: {}",
-                                    info_topic
-                                );
-                            }
-                        }
+                if let Ok(tx) = mqtt_tx.0.lock() {
+                    if let Err(e) = tx.send(info_msg) {
+                        error!("Failed to publish world info: {}", e);
+                    } else {
+                        info!("✅ Published world info for '{}'", event.world_name);
                     }
+                }
+            }
 
-                    // Publish world data via Core MQTT Service
-                    let data_topic = format!("iotcraft/worlds/{}/data", world_info.world_id);
-                    if let Ok(data_payload_bytes) = serde_json::to_vec(&world_data) {
-                        let data_size = data_payload_bytes.len();
-                        if data_size <= MAX_MQTT_MESSAGE_SIZE {
-                            // Small enough for single message
-                            let data_msg =
-                                crate::mqtt::core_service::OutgoingMqttMessage::PublishWorldChunk {
-                                    topic: data_topic.clone(),
-                                    payload: data_payload_bytes,
-                                };
+            // Publish world data
+            let data_topic = format!("iotcraft/worlds/{}/data", world_id);
+            if let Ok(data_payload) = serde_json::to_vec(&world_data) {
+                // Check if we need to use chunking for large worlds
+                if data_payload.len() > MAX_MQTT_MESSAGE_SIZE {
+                    info!(
+                        "World data ({} bytes) exceeds MQTT limit, using chunking",
+                        data_payload.len()
+                    );
 
-                            if let Ok(tx) = mqtt_tx.0.lock() {
-                                if let Err(e) = tx.send(data_msg) {
-                                    error!(
-                                        "Failed to send world data via Core MQTT Service: {}",
-                                        e
-                                    );
+                    match chunk_world_data(&world_data, &world_id) {
+                        Ok(chunks) => {
+                            info!("Publishing world data in {} chunks", chunks.len());
+
+                            for chunk in chunks {
+                                if let Ok(chunk_payload) = serde_json::to_vec(&chunk) {
+                                    let chunk_topic =
+                                        format!("iotcraft/worlds/{}/data/chunk", world_id);
+                                    let chunk_msg = crate::mqtt::core_service::OutgoingMqttMessage::PublishWorldChunk {
+                                        topic: chunk_topic,
+                                        payload: chunk_payload,
+                                    };
+
+                                    if let Ok(tx) = mqtt_tx.0.lock() {
+                                        if let Err(e) = tx.send(chunk_msg) {
+                                            error!("Failed to publish world chunk: {}", e);
+                                            break;
+                                        }
+                                    }
                                 } else {
-                                    info!(
-                                        "📡 Published world data to {} via Core MQTT Service ({} bytes)",
-                                        data_topic, data_size
-                                    );
+                                    error!("Failed to serialize world chunk");
+                                    break;
                                 }
                             }
+
+                            info!(
+                                "✅ Published world data for '{}' in chunks",
+                                event.world_name
+                            );
+                        }
+                        Err(e) => {
+                            error!("Failed to chunk world data: {}", e);
+                        }
+                    }
+                } else {
+                    // Small enough for single message
+                    let data_msg = crate::mqtt::core_service::OutgoingMqttMessage::GenericPublish {
+                        topic: data_topic,
+                        payload: String::from_utf8_lossy(&data_payload).to_string(),
+                        qos: rumqttc::QoS::AtLeastOnce,
+                        retain: true,
+                    };
+
+                    if let Ok(tx) = mqtt_tx.0.lock() {
+                        if let Err(e) = tx.send(data_msg) {
+                            error!("Failed to publish world data: {}", e);
                         } else {
-                            // TODO: Implement chunking for large world data
-                            error!(
-                                "World data too large ({} bytes), chunking not yet implemented for Core MQTT Service",
-                                data_size
+                            info!(
+                                "✅ Published world data for '{}' ({} bytes)",
+                                event.world_name,
+                                data_payload.len()
                             );
                         }
                     }
                 }
-            } else {
-                error!("Core MQTT Service not available for world publishing");
             }
+        } else {
+            error!("MQTT service not available for world publishing");
         }
     }
 
     // Handle unpublish events
     for event in unpublish_events.read() {
+        info!("🗑️ Unpublishing world '{}'", event.world_id);
+
         if let Some(mqtt_tx) = &mqtt_outgoing_tx {
-            // Unpublish by sending empty retained messages
+            // Clear world info and data by publishing empty messages with retain
             let info_topic = format!("iotcraft/worlds/{}/info", event.world_id);
             let data_topic = format!("iotcraft/worlds/{}/data", event.world_id);
 
-            let unpublish_info_msg =
-                crate::mqtt::core_service::OutgoingMqttMessage::PublishWorldInfo {
-                    topic: info_topic.clone(),
-                    payload: String::new(), // Empty payload clears retained message
-                    retain: true,
-                };
+            let info_msg = crate::mqtt::core_service::OutgoingMqttMessage::GenericPublish {
+                topic: info_topic,
+                payload: "".to_string(),
+                qos: rumqttc::QoS::AtLeastOnce,
+                retain: true,
+            };
 
-            let unpublish_data_msg =
-                crate::mqtt::core_service::OutgoingMqttMessage::PublishWorldChunk {
-                    topic: data_topic.clone(),
-                    payload: Vec::new(), // Empty payload clears retained message
-                };
+            let data_msg = crate::mqtt::core_service::OutgoingMqttMessage::GenericPublish {
+                topic: data_topic,
+                payload: "".to_string(),
+                qos: rumqttc::QoS::AtLeastOnce,
+                retain: true,
+            };
 
             if let Ok(tx) = mqtt_tx.0.lock() {
-                if let Err(e) = tx.send(unpublish_info_msg) {
-                    error!(
-                        "Failed to unpublish world info via Core MQTT Service: {}",
-                        e
-                    );
-                }
-                if let Err(e) = tx.send(unpublish_data_msg) {
-                    error!(
-                        "Failed to unpublish world data via Core MQTT Service: {}",
-                        e
-                    );
-                }
-                info!(
-                    "📡 Unpublished world {} via Core MQTT Service",
-                    event.world_id
-                );
+                let _ = tx.send(info_msg);
+                let _ = tx.send(data_msg);
+                info!("✅ Unpublished world '{}'", event.world_id);
             }
-        } else {
-            error!("Core MQTT Service not available for world unpublishing");
         }
     }
 }

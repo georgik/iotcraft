@@ -1,0 +1,325 @@
+// Two Player World Sharing Scenario (Fixed)
+// This scenario demonstrates multiplayer world synchronization where:
+// 1. Alice creates and publishes a world
+// 2. Bob discovers and joins Alice's world
+// 3. Bob explicitly loads the world data from MQTT
+// 4. Both players interact and verify synchronization
+Scenario(
+    name: "two_player_world_sharing_fixed",
+    description: "Fixed test scenario where Alice creates and publishes a world, Bob joins it and loads world data from MQTT, and one player places a block",
+    version: "1.1",
+    
+    // Infrastructure with MQTT observer for world synchronization
+    infrastructure: InfrastructureConfig(
+        mqtt_server: MqttServerConfig(
+            required: true,
+            port: 1883,
+            config_file: None,
+            options: None,
+        ),
+        mqtt_observer: Some(MqttObserverConfig(
+            required: true,  // Essential for world discovery and synchronization
+            topics: Some(["world/#", "players/#", "iotcraft/#"]),
+            client_id: Some("world_sync_observer"),
+        )),
+        mcp_server: None,
+        services: None,
+    ),
+    
+    // Two clients: Alice (world creator) and Bob (joiner)
+    clients: [
+        ClientConfig(
+            id: "alice",
+            player_id: "alice",
+            mcp_port: 3001,
+            client_type: "desktop",
+            name: Some("Alice - World Creator"),
+            config: None,
+        ),
+        ClientConfig(
+            id: "bob",
+            player_id: "bob",
+            mcp_port: 3002,
+            client_type: "desktop", 
+            name: Some("Bob - World Joiner"),
+            config: None,
+        ),
+    ],
+    
+    // Test steps for world sharing and synchronization
+    steps: [
+        // Step 1: Alice creates a new world
+        Step(
+            name: "alice_creates_world",
+            description: "Alice creates a new world called 'shared_test_world'",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "create_world",
+                arguments: {
+                    "world_name": "shared_test_world",
+                    "description": "A shared test world for multiplayer testing",
+                },
+            ),
+            wait_before: 2000,
+            wait_after: 3000,  // Give more time for world creation and state transition
+            timeout: 120000,  // 2 minutes for manual testing
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: [],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 2: Alice publishes the world for multiplayer
+        Step(
+            name: "alice_publishes_world",
+            description: "Alice publishes her world for multiplayer access",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "publish_world",
+                arguments: {
+                    "world_name": "shared_test_world",
+                    "max_players": 4,
+                    "is_public": true,
+                },
+            ),
+            wait_before: 1000,
+            wait_after: 5000,  // Give more time for MQTT world data publishing
+            timeout: 120000,  // 2 minutes for manual testing
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["alice_creates_world"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 3: Bob discovers available worlds
+        Step(
+            name: "bob_discovers_worlds",
+            description: "Bob lists available online worlds to discover Alice's world",
+            client: "bob",
+            action: (
+                type: "mcp_call",
+                tool: "list_online_worlds",
+                arguments: {},
+            ),
+            wait_before: 1000,
+            wait_after: 1000,
+            timeout: 120000,  // 2 minutes for manual testing
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["alice_publishes_world"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 4: Bob joins Alice's world
+        Step(
+            name: "bob_joins_world",
+            description: "Bob joins Alice's published world (dynamic world_id extraction)",
+            client: "bob",
+            action: (
+                type: "mcp_call",
+                tool: "join_world",
+                arguments: {
+                    "world_id": "shared_test_world_alice_",  // Will be updated dynamically
+                },
+            ),
+            wait_before: 500,
+            wait_after: 2000,
+            timeout: 120000,  // 2 minutes for manual testing
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["bob_discovers_worlds"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 5: Bob loads world data from MQTT (THE CRITICAL MISSING STEP!)
+        Step(
+            name: "bob_loads_world_from_mqtt",
+            description: "Bob loads the world data from MQTT retained messages",
+            client: "bob",
+            action: (
+                type: "mcp_call",
+                tool: "load_world_from_mqtt",
+                arguments: {
+                    "world_name": "shared_test_world",
+                },
+            ),
+            wait_before: 1000,
+            wait_after: 3000,  // Give time for world reconstruction
+            timeout: 120000,  // 2 minutes for manual testing
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["bob_joins_world"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 6: Synchronization checkpoint - verify both clients in same world
+        Step(
+            name: "sync_world_loaded",
+            description: "Synchronization point - ensure both clients have the world loaded",
+            client: "orchestrator",
+            action: (
+                type: "wait_condition",
+                condition: "client_count",
+                expected_value: Some("2"),
+                timeout: 10000,
+            ),
+            wait_before: 1000,
+            wait_after: 1000,
+            timeout: 120000,  // 2 minutes for manual testing
+            success_condition: Some((
+                type: "client_count",
+                world_id: "shared_test_world",
+                expected: 2,
+            )),
+            depends_on: ["bob_loads_world_from_mqtt"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 7: Bob verifies world status (should now show the correct block count)
+        Step(
+            name: "bob_verifies_world_loaded",
+            description: "Bob checks world status to verify world was loaded from MQTT with correct block count",
+            client: "bob",
+            action: (
+                type: "mcp_call",
+                tool: "get_world_status",
+                arguments: {},
+            ),
+            wait_before: 1000,
+            wait_after: 500,
+            timeout: 120000,  // 2 minutes for manual testing
+            success_condition: Some((
+                type: "world_state",
+                check: "world_loaded",
+                expected: "shared_test_world",
+            )),
+            depends_on: ["sync_world_loaded"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 8: Alice places a block to test world modification sync
+        Step(
+            name: "alice_places_block",
+            description: "Alice places a dirt block to test world modification synchronization",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "place_block",
+                arguments: {
+                    "block_type": "dirt",
+                    "x": 5,
+                    "y": 1,
+                    "z": 5,
+                },
+            ),
+            wait_before: 500,
+            wait_after: 1000,
+            timeout: 120000,  // 2 minutes for manual testing
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["bob_verifies_world_loaded"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 9: Bob verifies the synchronized block
+        Step(
+            name: "bob_verifies_block_sync",
+            description: "Bob checks world status to verify Alice's block was synchronized",
+            client: "bob",
+            action: (
+                type: "mcp_call",
+                tool: "get_world_status",
+                arguments: {},
+            ),
+            wait_before: 1000,
+            wait_after: 500,
+            timeout: 120000,  // 2 minutes for manual testing
+            success_condition: Some((
+                type: "world_state",
+                check: "block_exists", 
+                expected: "dirt",
+            )),
+            depends_on: ["alice_places_block"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 10: Final scenario validation
+        Step(
+            name: "scenario_completion",
+            description: "Final verification that scenario completed successfully with MQTT world loading",
+            client: "orchestrator",
+            action: (
+                type: "validate_scenario",
+                checks: [
+                    "world_published",
+                    "world_loaded_from_mqtt",
+                    "clients_synchronized", 
+                    "block_synchronized",
+                ],
+            ),
+            wait_before: 1000,
+            wait_after: 0,
+            timeout: 120000,  // 2 minutes for manual testing
+            success_condition: Some((
+                type: "all_checks_passed",
+            )),
+            depends_on: ["bob_verifies_block_sync"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+    ],
+    
+    // Global scenario configuration
+    config: Some(ScenarioConfig(
+        timeout_ms: Some(1800000),  // 30 minutes total timeout for manual testing
+        logging: Some(LoggingConfig(
+            level: Some("info"),
+            log_mqtt: Some(true),    // Essential for debugging world sync
+            log_client_actions: Some(true),
+            filters: Some(["world/*", "multiplayer/*", "mqtt/*", "mcp/*"]),
+        )),
+        environment: Some({
+            "RUST_LOG": "info",
+            "SCENARIO_NAME": "two_player_world_sharing_fixed",
+            "ENABLE_WORLD_SYNC": "true",
+        }),
+        settings: Some({
+            "auto_cleanup": true,
+            "preserve_logs": true,
+            "validate_sync": true,
+        }),
+    )),
+)

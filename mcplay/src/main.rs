@@ -20,6 +20,9 @@ use tokio::time::sleep;
 // Add chrono for timestamps
 use chrono;
 
+// Import log collection module
+mod log_collector;
+use log_collector::{collect_process_logs, collect_process_logs_to_file};
 /// Strip ANSI escape codes from text for clean log files while preserving emojis
 fn strip_ansi_colors(text: &str) -> String {
     // Regex to match ANSI escape sequences for colors and formatting
@@ -1199,6 +1202,7 @@ struct OrchestratorState {
     step_results: HashMap<String, StepResult>,
     start_time: Instant,
     log_files: HashMap<String, PathBuf>, // Track log files in non-TUI mode too
+    variable_context: HashMap<String, serde_json::Value>, // Store variables extracted from responses
 }
 
 impl OrchestratorState {
@@ -1253,6 +1257,7 @@ impl OrchestratorState {
             step_results: HashMap::new(),
             start_time: Instant::now(),
             log_files,
+            variable_context: HashMap::new(),
         }
     }
 
@@ -1279,6 +1284,71 @@ impl OrchestratorState {
                 });
         }
     }
+}
+
+/// Interpolate variables in JSON value using ${variable_name} syntax
+fn interpolate_variables(
+    value: &serde_json::Value,
+    context: &HashMap<String, serde_json::Value>,
+) -> Result<serde_json::Value, Box<dyn std::error::Error + Send + Sync>> {
+    use regex::Regex;
+
+    match value {
+        serde_json::Value::String(s) => {
+            let re = Regex::new(r"\$\{([^}]+)\}").unwrap();
+            let mut result = s.clone();
+
+            for cap in re.captures_iter(s) {
+                let var_name = &cap[1];
+                let placeholder = &cap[0];
+
+                if let Some(var_value) = context.get(var_name) {
+                    let replacement = match var_value {
+                        serde_json::Value::String(s) => s.clone(),
+                        other => other.to_string().trim_matches('"').to_string(),
+                    };
+                    result = result.replace(placeholder, &replacement);
+                }
+            }
+            Ok(serde_json::Value::String(result))
+        }
+        serde_json::Value::Object(map) => {
+            let mut new_map = serde_json::Map::new();
+            for (k, v) in map {
+                new_map.insert(k.clone(), interpolate_variables(v, context)?);
+            }
+            Ok(serde_json::Value::Object(new_map))
+        }
+        serde_json::Value::Array(arr) => {
+            let mut new_arr = Vec::new();
+            for v in arr {
+                new_arr.push(interpolate_variables(v, context)?);
+            }
+            Ok(serde_json::Value::Array(new_arr))
+        }
+        other => Ok(other.clone()),
+    }
+}
+
+/// Extract value from JSON using simple dot notation path (e.g., "worlds.0.world_id")
+fn extract_json_path<'a>(
+    value: &'a serde_json::Value,
+    path: &str,
+) -> Option<&'a serde_json::Value> {
+    let parts: Vec<&str> = path.split('.').collect();
+    let mut current = value;
+
+    for part in parts {
+        if let Ok(index) = part.parse::<usize>() {
+            // Array index
+            current = current.get(index)?;
+        } else {
+            // Object key
+            current = current.get(part)?;
+        }
+    }
+
+    Some(current)
 }
 
 #[tokio::main]
@@ -1728,7 +1798,7 @@ async fn start_infrastructure(
                 return Err("../mqtt-server directory does not exist".into());
             }
 
-            let mqtt_process = TokioCommand::new("cargo")
+            let mut mqtt_process = TokioCommand::new("cargo")
                 .current_dir("../mqtt-server")
                 .args(&["run", "--release", "--", "--port", &port.to_string()])
                 .stdout(std::process::Stdio::piped())
@@ -1744,6 +1814,38 @@ async fn start_infrastructure(
                 "[DEBUG] MQTT server process spawned successfully with PID: {:?}",
                 mqtt_process.id()
             );
+
+            // Extract stdout and stderr for async log collection
+            let stdout = mqtt_process.stdout.take();
+            let stderr = mqtt_process.stderr.take();
+
+            // Start async log collection for MQTT server using infrastructure log file
+            if let (Some(stdout), Some(stderr)) = (stdout, stderr) {
+                if verbose {
+                    println!("    Starting log collection for MQTT Server");
+                }
+                // Use the expected log file path from OrchestratorState
+                let expected_log_path = state
+                    .log_files
+                    .get("MQTT Server")
+                    .map(|p| p.to_string_lossy().to_string())
+                    .unwrap_or_else(|| "logs/mqtt_server_fallback.log".to_string());
+                tokio::spawn(async move {
+                    collect_process_logs_to_file(
+                        "MQTT Server".to_string(),
+                        stdout,
+                        stderr,
+                        expected_log_path,
+                    )
+                    .await;
+                });
+            } else {
+                if verbose {
+                    println!(
+                        "    Warning: No stdout/stderr available for MQTT server log collection"
+                    );
+                }
+            }
 
             state
                 .infrastructure_processes
@@ -1802,7 +1904,7 @@ async fn start_infrastructure(
                 return Err("../mqtt-client directory does not exist".into());
             }
 
-            let observer_process = TokioCommand::new("cargo")
+            let mut observer_process = TokioCommand::new("cargo")
                 .current_dir("../mqtt-client")
                 .args(&[
                     "run",
@@ -1831,6 +1933,38 @@ async fn start_infrastructure(
                 "[DEBUG] MQTT observer process spawned successfully with PID: {:?}",
                 observer_process.id()
             );
+
+            // Extract stdout and stderr for async log collection
+            let stdout = observer_process.stdout.take();
+            let stderr = observer_process.stderr.take();
+
+            // Start async log collection for MQTT observer using infrastructure log file
+            if let (Some(stdout), Some(stderr)) = (stdout, stderr) {
+                if verbose {
+                    println!("    Starting log collection for MQTT Observer");
+                }
+                // Use the expected log file path from OrchestratorState
+                let expected_log_path = state
+                    .log_files
+                    .get("MQTT Observer")
+                    .map(|p| p.to_string_lossy().to_string())
+                    .unwrap_or_else(|| "logs/mqtt_observer_fallback.log".to_string());
+                tokio::spawn(async move {
+                    collect_process_logs_to_file(
+                        "MQTT Observer".to_string(),
+                        stdout,
+                        stderr,
+                        expected_log_path,
+                    )
+                    .await;
+                });
+            } else {
+                if verbose {
+                    println!(
+                        "    Warning: No stdout/stderr available for MQTT observer log collection"
+                    );
+                }
+            }
 
             state
                 .infrastructure_processes
@@ -1919,23 +2053,36 @@ async fn start_clients(
             .spawn()
             .map_err(|e| format!("Failed to start client {}: {}", client.id, e))?;
 
+        // Extract stdout and stderr for async logging
+        let stdout = client_process.stdout.take();
+        let stderr = client_process.stderr.take();
+
+        // Start async log collection for this client
+        let client_id_clone = client.id.clone();
+        if let (Some(stdout), Some(stderr)) = (stdout, stderr) {
+            if verbose {
+                println!(
+                    "    Starting log collection for client: {}",
+                    client_id_clone
+                );
+            }
+            tokio::spawn(async move {
+                collect_process_logs(client_id_clone, stdout, stderr).await;
+            });
+        } else {
+            if verbose {
+                println!("    Warning: No stdout/stderr available for log collection");
+            }
+        }
+
         // Check if the process is still running after a brief moment
         tokio::time::sleep(Duration::from_millis(1000)).await;
         match client_process.try_wait() {
             Ok(Some(exit_status)) => {
                 // Process has already exited - this indicates an error
-                let stderr_output = if let Some(stderr) = client_process.stderr.take() {
-                    let mut output = String::new();
-                    let mut reader = BufReader::new(stderr);
-                    let _ = reader.read_to_string(&mut output).await;
-                    output
-                } else {
-                    "No stderr available".to_string()
-                };
-
                 return Err(format!(
-                    "Client {} exited immediately with status: {}. Error: {}",
-                    client.id, exit_status, stderr_output
+                    "Client {} exited immediately with status: {}",
+                    client.id, exit_status
                 )
                 .into());
             }
@@ -1988,8 +2135,113 @@ async fn start_clients(
 
         state.client_connections.insert(client.id.clone(), stream);
 
+        // Enhanced readiness probe: verify MQTT connection via MCP get_mqtt_status
+        // Some scenarios require MQTT to be fully connected; just having MCP up is not enough.
+        // Extract client info to avoid borrow checker issues
+        let client_id = client.id.clone();
+        let client_port = client.mcp_port;
+
+        let mut mqtt_ready = false;
+        for attempt in 1..=10 {
+            // Small delay before first/next probe to allow core service to finish connecting
+            tokio::time::sleep(Duration::from_millis(300)).await;
+
+            // Create fresh connection for readiness probe to avoid state borrowing issues
+            match TcpStream::connect(format!("localhost:{}", client_port)).await {
+                Ok(mut stream) => {
+                    // Generate unique request ID
+                    let request_id = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_millis() as u64;
+
+                    // Create MCP request for get_mqtt_status
+                    let request = McpRequest {
+                        jsonrpc: "2.0".to_string(),
+                        id: request_id,
+                        method: "tools/call".to_string(),
+                        params: serde_json::json!({
+                            "name": "get_mqtt_status",
+                            "arguments": {}
+                        }),
+                    };
+
+                    // Send request
+                    let request_json = serde_json::to_string(&request).unwrap_or_default();
+                    if stream
+                        .write_all(format!("{}\n", request_json).as_bytes())
+                        .await
+                        .is_ok()
+                    {
+                        // Read response with short timeout
+                        let mut reader = BufReader::new(&mut stream);
+                        let mut response_line = String::new();
+
+                        if let Ok(Ok(_)) = tokio::time::timeout(
+                            Duration::from_secs(5),
+                            reader.read_line(&mut response_line),
+                        )
+                        .await
+                        {
+                            if let Ok(response) =
+                                serde_json::from_str::<McpResponse>(&response_line)
+                            {
+                                if let Some(result) = response.result {
+                                    // Parse MQTT status from response
+                                    let maybe_text = result
+                                        .get("content")
+                                        .and_then(|c| c.as_array())
+                                        .and_then(|arr| arr.first())
+                                        .and_then(|o| o.get("text"))
+                                        .and_then(|t| t.as_str());
+
+                                    if let Some(text_json) = maybe_text {
+                                        if let Ok(inner) =
+                                            serde_json::from_str::<serde_json::Value>(text_json)
+                                        {
+                                            let connected = inner
+                                                .get("mqtt_connected")
+                                                .and_then(|b| b.as_bool())
+                                                .unwrap_or(false);
+                                            let status_ok = inner
+                                                .get("status")
+                                                .and_then(|s| s.as_str())
+                                                .map(|s| s.eq_ignore_ascii_case("healthy"))
+                                                .unwrap_or(false);
+                                            if connected && status_ok {
+                                                mqtt_ready = true;
+                                                break;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                Err(_) => {
+                    // Connection failed, continue trying
+                }
+            }
+
+            if verbose {
+                println!(
+                    "  ⏳ Waiting for client {} MQTT readiness (attempt {}/10)...",
+                    client_id, attempt
+                );
+            }
+        }
+
+        if !mqtt_ready {
+            return Err(format!(
+                "Client {} failed MQTT readiness probe: get_mqtt_status did not report mqtt_connected=true & status=healthy",
+                client_id
+            )
+            .into());
+        }
+
         if verbose {
-            println!("  ✅ Client {} ready", client.id);
+            println!("  ✅ Client {} ready (MCP + MQTT)", client_id);
         }
     }
 
@@ -2042,6 +2294,16 @@ async fn execute_steps(
 
         match result {
             Ok(response) => {
+                // After successful execution: extract response variables if configured
+                if let Some(vars) = &step.response_variables {
+                    if let Some(result_obj) = response.get("result") {
+                        for (name, path) in vars {
+                            if let Some(value) = extract_json_path(result_obj, path) {
+                                state.variable_context.insert(name.clone(), value.clone());
+                            }
+                        }
+                    }
+                }
                 println!("  ✅ Completed in {:.2}s", step_duration.as_secs_f64());
                 state.step_results.insert(
                     step.name.clone(),
@@ -2092,6 +2354,11 @@ async fn execute_step(
     state: &mut OrchestratorState,
     verbose: bool,
 ) -> Result<serde_json::Value, Box<dyn std::error::Error + Send + Sync>> {
+    // Before execution: perform variable interpolation in action arguments if applicable
+    let mut step = step.clone();
+    if let Action::McpCall { tool: _, arguments } = &mut step.action {
+        *arguments = interpolate_variables(arguments, &state.variable_context)?;
+    }
     match &step.action {
         // mcplay-style actions
         Action::McpCall { tool, arguments } => {

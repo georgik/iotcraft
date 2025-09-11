@@ -1,0 +1,116 @@
+// Minimal MQTT Publishing Test - Avoid Heavy Commands
+// Focus on validating async MQTT publishing without complex operations
+(
+  name: "Minimal MQTT Publishing Test",
+  description: "Test async MQTT publishing with minimal operations to avoid freezing",
+  version: "1.0",
+  
+  infrastructure: (
+    mqtt_server: (
+      required: true,
+      port: 1883,
+      config_file: None,
+      options: None,
+    ),
+    mqtt_observer: Some((
+      required: true,
+      topics: Some([
+        "iotcraft/worlds/+/info",
+        "iotcraft/worlds/+/data",
+        "home/+/light",
+        "#"  // Catch all for debugging
+      ]),
+      client_id: Some("minimal_mqtt_observer"),
+    )),
+    mcp_server: None,
+    services: None,
+  ),
+  
+  clients: [
+    (
+      id: "alice",
+      player_id: "alice",
+      mcp_port: 3001,
+      client_type: "desktop",
+      name: Some("Alice - Minimal MQTT Test"),
+      config: Some({
+        "enable_mcp": true,
+        "readiness_probe": {
+          "type": "tcp_port",
+          "port": 3001,
+          "initial_delay_seconds": 5,
+          "timeout_seconds": 20
+        },
+        "liveness_probe": {
+          "type": "mcp_ping",
+          "interval_seconds": 120,
+          "timeout_seconds": 15,
+          "failure_threshold": 5
+        }
+      }),
+    )
+  ],
+  
+  steps: [
+    // Step 1: Basic connectivity test
+    (
+      name: "alice_ping",
+      description: "Alice tests MCP connectivity",
+      client: "alice",
+      action: (
+        type: "mcp_call",
+        tool: "ping",
+        arguments: {},
+      ),
+      depends_on: [],
+      wait_before: 2000,
+      wait_after: 2000,
+      timeout: 15000,
+      success_condition: None,
+    ),
+    
+    // Step 2: Get client info (should be safe)
+    (
+      name: "alice_client_info",
+      description: "Alice gets client information",
+      client: "alice",
+      action: (
+        type: "mcp_call",
+        tool: "get_client_info",
+        arguments: {},
+      ),
+      depends_on: ["alice_ping"],
+      wait_before: 1000,
+      wait_after: 2000,
+      timeout: 15000,
+      success_condition: None,
+    ),
+    
+    // Step 3: Get game state (should be safe)
+    (
+      name: "alice_game_state",
+      description: "Alice checks current game state",
+      client: "alice",
+      action: (
+        type: "mcp_call",
+        tool: "get_game_state",
+        arguments: {},
+      ),
+      depends_on: ["alice_client_info"],
+      wait_before: 1000,
+      wait_after: 5000,  // Longer wait to observe MQTT traffic
+      timeout: 15000,
+      success_condition: None,
+    ),
+  ],
+  
+  config: Some((
+    timeout_ms: Some(90000),  // 1.5 minutes
+    logging: None,
+    environment: None,
+    settings: Some({
+      "auto_cleanup": true,
+      "preserve_logs": true,
+    }),
+  )),
+)

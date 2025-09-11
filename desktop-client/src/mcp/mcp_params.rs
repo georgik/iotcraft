@@ -37,6 +37,7 @@ pub struct WorldMcpParams<'w, 's> {
     pub voxel_world: ResMut<'w, VoxelWorld>,
     pub create_world_events: EventWriter<'w, CreateWorldEvent>,
     pub load_world_events: EventWriter<'w, LoadWorldEvent>,
+    pub start_world_creation_events: Option<EventWriter<'w, crate::world::StartWorldCreationEvent>>,
     pub current_world: Option<Res<'w, CurrentWorld>>,
     pub discovered_worlds: ResMut<'w, DiscoveredWorlds>,
     pub next_game_state: Option<ResMut<'w, NextState<GameState>>>,
@@ -124,6 +125,7 @@ mod tests {
         world.insert_resource(VoxelWorld::default());
         world.init_resource::<Events<CreateWorldEvent>>();
         world.init_resource::<Events<LoadWorldEvent>>();
+        world.init_resource::<Events<crate::world::StartWorldCreationEvent>>();
         world.insert_resource(DiscoveredWorlds::default());
 
         // Test system that uses WorldMcpParams

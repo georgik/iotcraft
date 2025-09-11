@@ -154,7 +154,9 @@ pub fn initialize_core_mqtt_service(
             let mut opts = MqttOptions::new(&reconnect_client_id, &mqtt_host, mqtt_port);
             opts.set_keep_alive(std::time::Duration::from_secs(30));
             opts.set_clean_session(true);
-            opts.set_max_packet_size(1048576, 1048576);
+            // Increase max packet size to 5MB to handle large world data messages
+            opts.set_max_packet_size(5242880, 5242880);
+            info!("🔧 Core MQTT Service configured with max packet size: 5MB");
 
             let (client, mut eventloop) = AsyncClient::new(opts, 100);
             let mut current_world_id = String::from("default");
@@ -196,6 +198,8 @@ pub fn initialize_core_mqtt_service(
                                 }
                             }
                             Ok(Event::Incoming(Incoming::Publish(p))) => {
+                                info!("📥 MQTT message received on topic '{}' - Size: {} bytes ({}MB)", 
+                                     p.topic, p.payload.len(), p.payload.len() as f64 / 1048576.0);
                                 route_incoming_message(
                                     &p.topic,
                                     &p.payload,
@@ -373,27 +377,55 @@ fn route_incoming_message(
                 // World data messages (complete world save data)
                 if let Ok(world_data_str) = String::from_utf8(payload.to_vec()) {
                     if !world_data_str.is_empty() {
-                        info!("🌍 Received world data on topic: {}", topic);
+                        info!(
+                            "🌍 Received world data on topic: {} - Raw payload size: {} bytes ({:.2}MB)",
+                            topic,
+                            payload.len(),
+                            payload.len() as f64 / 1048576.0
+                        );
+                        info!(
+                            "🌍 World data UTF-8 string length: {} chars",
+                            world_data_str.len()
+                        );
+
                         // Extract world ID from topic (iotcraft/worlds/{world_id}/data)
                         let topic_parts: Vec<&str> = topic.split('/').collect();
                         if topic_parts.len() >= 3 {
                             let world_id = topic_parts[2].to_string();
-                            if let Ok(world_data) =
-                                serde_json::from_str::<WorldSaveData>(&world_data_str)
-                            {
-                                info!(
-                                    "🌍 Parsed world data for: {} ({} blocks)",
-                                    world_id,
-                                    world_data.blocks.len()
-                                );
-                                let _ = world_data_tx.send((world_id, world_data));
-                            } else {
-                                error!("❌ Failed to parse world data JSON for: {}", world_id);
+                            info!(
+                                "🔍 Attempting to parse world data JSON for world_id: {}",
+                                world_id
+                            );
+
+                            match serde_json::from_str::<WorldSaveData>(&world_data_str) {
+                                Ok(world_data) => {
+                                    info!(
+                                        "✅ Successfully parsed world data for: {} ({} blocks)",
+                                        world_id,
+                                        world_data.blocks.len()
+                                    );
+                                    let _ = world_data_tx.send((world_id, world_data));
+                                }
+                                Err(e) => {
+                                    error!(
+                                        "❌ Failed to parse world data JSON for: {} - Error: {}",
+                                        world_id, e
+                                    );
+                                    error!(
+                                        "❌ JSON payload preview (first 500 chars): {}",
+                                        &world_data_str[..std::cmp::min(500, world_data_str.len())]
+                                    );
+                                }
                             }
                         }
                     } else {
                         info!("🌍 Empty world data (world removed): {}", topic);
                     }
+                } else {
+                    error!(
+                        "❌ Failed to convert world data payload to UTF-8 string for topic: {}",
+                        topic
+                    );
                 }
             } else if topic.starts_with("iotcraft/worlds/")
                 && topic.contains("/players/")

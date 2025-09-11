@@ -32,7 +32,8 @@ place quartz_block 0 4 0
 # Tower 2 - Decorative materials
 place glass_pane 3 1 0
 place cyan_terracotta 3 2 0
-place water 3 3 0  # This might not work as expected, but shows variety
+# Note: Water blocks show material variety but may not be visible as expected
+place water 3 3 0
 
 # Create building inspiration structures
 

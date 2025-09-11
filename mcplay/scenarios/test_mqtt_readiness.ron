@@ -1,0 +1,189 @@
+// MQTT Readiness Check for mcplay scenarios
+// This scenario tests the full infrastructure stack and client readiness before proceeding with multiplayer tests
+Scenario(
+    name: "test_mqtt_readiness",
+    description: "Enhanced readiness check - verify MQTT infrastructure and client connectivity before proceeding with multiplayer scenarios",
+    version: "1.0",
+    
+    // Full infrastructure required for comprehensive testing
+    infrastructure: InfrastructureConfig(
+        mqtt_server: MqttServerConfig(
+            required: true,
+            port: 1883,
+            config_file: None,
+            options: None,
+        ),
+        mqtt_observer: Some(MqttObserverConfig(
+            required: true,
+            topics: Some([
+                "iotcraft/worlds/+/info",
+                "iotcraft/worlds/+/data",
+                "home/sensor/temperature",
+                "devices/announce",
+                "#"  // Monitor all topics for debugging
+            ]),
+            client_id: Some("readiness_observer"),
+        )),
+        mcp_server: None,
+        services: None,
+    ),
+    
+    // Single client for readiness testing
+    clients: [
+        ClientConfig(
+            id: "readiness_client",
+            player_id: "readiness_client", 
+            mcp_port: 8080,
+            client_type: "desktop",
+            name: Some("Readiness Check Client"),
+            config: None,
+        ),
+    ],
+    
+    steps: [
+        // Step 1: Initialize MCP
+        Step(
+            name: "mcp_initialize",
+            description: "Initialize MCP connection",
+            client: "readiness_client",
+            action: (
+                type: "mcp_call",
+                tool: "initialize",
+                arguments: {
+                    "protocolVersion": "2024-11-05",
+                    "capabilities": { "tools": {} },
+                    "clientInfo": {
+                        "name": "readiness-check-client",
+                        "version": "1.0.0"
+                    }
+                },
+            ),
+            wait_before: 2000,
+            wait_after: 1000,
+            timeout: 10000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: [],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 2: Test basic MCP connectivity
+        Step(
+            name: "mcp_ping",
+            description: "Test MCP connectivity with ping",
+            client: "readiness_client",
+            action: (
+                type: "mcp_call",
+                tool: "ping",
+                arguments: {},
+            ),
+            wait_before: 500,
+            wait_after: 500,
+            timeout: 10000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["mcp_initialize"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 3: Check MQTT connectivity status
+        Step(
+            name: "check_mqtt_status",
+            description: "Check MQTT connection status and health",
+            client: "readiness_client",
+            action: (
+                type: "mcp_call",
+                tool: "get_mqtt_status",
+                arguments: {},
+            ),
+            wait_before: 2000,  // Give MQTT time to fully connect
+            wait_after: 1000,
+            timeout: 15000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["mcp_ping"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 4: Get client info for comprehensive readiness
+        Step(
+            name: "get_client_info",
+            description: "Get comprehensive client information",
+            client: "readiness_client",
+            action: (
+                type: "mcp_call",
+                tool: "get_client_info",
+                arguments: {},
+            ),
+            wait_before: 500,
+            wait_after: 500,
+            timeout: 10000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["check_mqtt_status"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 5: Check system health
+        Step(
+            name: "health_check",
+            description: "Perform comprehensive health check",
+            client: "readiness_client",
+            action: (
+                type: "mcp_call",
+                tool: "health_check",
+                arguments: {},
+            ),
+            wait_before: 500,
+            wait_after: 1000,
+            timeout: 10000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["get_client_info"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 6: Test a simple world operation to ensure full functionality
+        Step(
+            name: "test_world_operation",
+            description: "Test world operation to ensure full readiness",
+            client: "readiness_client",
+            action: (
+                type: "mcp_call",
+                tool: "get_world_status",
+                arguments: {},
+            ),
+            wait_before: 500,
+            wait_after: 1000,
+            timeout: 15000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["health_check"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+    ],
+)

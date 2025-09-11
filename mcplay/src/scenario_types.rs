@@ -224,9 +224,14 @@ pub struct Step {
     #[serde(default)]
     pub conditions: Option<Vec<Condition>>,
 
-    /// Expected outcomes/assertions (xtask extension)
+    /// Expected outcomes for this step (xtask extension)
     #[serde(default)]
     pub expectations: Option<Vec<Expectation>>,
+
+    /// Variables to extract from the step response (mcplay extension)
+    /// Format: { "variable_name": "json.path.to.value" }
+    #[serde(default)]
+    pub response_variables: Option<HashMap<String, String>>,
 }
 
 /// Action to perform in a step (unified enum supporting both formats)
