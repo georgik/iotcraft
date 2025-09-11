@@ -2614,7 +2614,7 @@ async fn execute_mcp_call(
 
     // For queued commands, we need to wait longer as they go through the command execution system
     let timeout_duration = if is_queued_command(tool) {
-        std::time::Duration::from_secs(30) // Longer timeout for queued commands
+        std::time::Duration::from_secs(60) // Longer timeout for queued commands (world creation, etc.)
     } else {
         std::time::Duration::from_secs(10) // Shorter timeout for direct responses
     };

@@ -501,7 +501,7 @@ pub fn handle_app_exit(mut exit_events: EventReader<AppExit>) {
     for _event in exit_events.read() {
         info!("🛑 Application exit detected, shutting down Core MQTT Service");
         MQTT_SERVICE_SHUTDOWN.store(true, Ordering::Relaxed);
-        // Give a small moment for the MQTT thread to process the shutdown signal
-        std::thread::sleep(std::time::Duration::from_millis(100));
+        // Note: Removed blocking sleep to prevent application freeze during quit.
+        // The MQTT thread will detect the shutdown flag on its next iteration.
     }
 }

@@ -11,7 +11,7 @@ use crate::{
 };
 use bevy::prelude::*;
 use chrono;
-use log::{debug, error, info};
+use log::{debug, error, info, warn};
 use serde_json::{Value, json};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{TcpListener, TcpStream};
@@ -201,6 +201,25 @@ async fn handle_mcp_connection(
     Ok(())
 }
 
+/// Get appropriate timeout duration for different MCP methods
+fn get_method_timeout(method: &str) -> std::time::Duration {
+    match method {
+        "tools/call" => {
+            // For tool calls, we need longer timeouts as they may involve world creation
+            // Medieval template can take up to 12-15 seconds to execute
+            std::time::Duration::from_secs(60) // 1 minute for world creation and complex operations
+        }
+        "initialize" | "tools/list" | "resources/list" | "ping" => {
+            // Quick operations that should respond immediately
+            std::time::Duration::from_secs(10)
+        }
+        _ => {
+            // Default timeout for unknown methods
+            std::time::Duration::from_secs(30)
+        }
+    }
+}
+
 /// Handle JSON-RPC request from TCP connection
 async fn handle_json_rpc_request(
     request: serde_json::Value,
@@ -254,9 +273,9 @@ async fn handle_json_rpc_request(
         });
     }
 
-    // Wait for the response from Bevy with timeout (reduced to 10 seconds for faster error handling)
-    let response_result =
-        tokio::time::timeout(std::time::Duration::from_secs(10), response_rx).await;
+    // Wait for the response from Bevy with appropriate timeout based on method
+    let timeout_duration = get_method_timeout(&method);
+    let response_result = tokio::time::timeout(timeout_duration, response_rx).await;
 
     match response_result {
         Ok(Ok(result)) => {
@@ -277,12 +296,16 @@ async fn handle_json_rpc_request(
             })
         }
         Err(_) => {
+            error!(
+                "MCP request timeout for method '{}' after {:?}",
+                method, timeout_duration
+            );
             json!({
                 "jsonrpc": "2.0",
                 "id": id,
                 "error": {
                     "code": -32603, // Internal error
-                    "message": "Request timeout"
+                    "message": format!("Request timeout after {:?} for method '{}'", timeout_duration, method)
                 }
             })
         }
