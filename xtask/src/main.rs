@@ -801,7 +801,7 @@ fn format_workspace_members(check_only: bool, include_html: bool, html_path: &st
 
     let mut failed_members = Vec::new();
     let mut processed_members = 0;
-    let mut failed_c_projects: Vec<String> = Vec::new();  // Explicitly typed (unused when C formatting disabled)
+    let mut failed_c_projects: Vec<String> = Vec::new(); // Explicitly typed (unused when C formatting disabled)
     let mut processed_c_projects = 0;
     let mut failed_html_files = 0;
     let mut processed_html_files = 0;
