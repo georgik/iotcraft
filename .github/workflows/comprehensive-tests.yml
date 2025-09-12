@@ -2,7 +2,7 @@ name: Comprehensive Tests (Unit, Integration, Scenarios)
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, 'feature/**' ]
     paths:
       - 'desktop-client/**'
       - 'mcplay/**'

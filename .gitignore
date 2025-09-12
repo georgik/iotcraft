@@ -11,6 +11,21 @@ Cargo.lock
 
 logs/
 
+# ESP-IDF build artifacts
+sdkconfig
+build.*/
+managed_components/
+dependencies.lock
+
+# IDE files
+.idea/
+.vscode/
+
+# Swift build artifacts
+.build/
+
+# WARP local context (not for publishing)
+.warp/
 
 # Backup files
 *.bak

@@ -28,6 +28,49 @@ enum TestMode {
     Check,
 }
 
+#[derive(Subcommand)]
+enum GithubAction {
+    /// List recent workflow runs
+    Runs {
+        /// Number of runs to show (default: 10)
+        #[arg(short, long, default_value = "10")]
+        limit: u32,
+        /// Filter by workflow name
+        #[arg(short, long)]
+        workflow: Option<String>,
+        /// Filter by branch
+        #[arg(short, long)]
+        branch: Option<String>,
+    },
+    /// Watch the latest workflow run in real-time
+    Watch {
+        /// Workflow run ID to watch (defaults to latest)
+        #[arg(short, long)]
+        run_id: Option<String>,
+    },
+    /// Show detailed status of a workflow run
+    Status {
+        /// Workflow run ID (defaults to latest)
+        #[arg(short, long)]
+        run_id: Option<String>,
+        /// Show logs for failed jobs
+        #[arg(short, long)]
+        logs: bool,
+    },
+    /// Trigger a workflow manually
+    Trigger {
+        /// Workflow name or file name
+        #[arg(short, long)]
+        workflow: Option<String>,
+        /// Branch to run on (default: current branch)
+        #[arg(short, long)]
+        branch: Option<String>,
+        /// List available workflows instead of triggering
+        #[arg(short, long)]
+        list: bool,
+    },
+}
+
 #[derive(Parser)]
 #[command(name = "xtask")]
 #[command(about = "Workspace-level build automation for IoTCraft")]
@@ -107,6 +150,11 @@ enum Commands {
         #[arg(short, long)]
         check: bool,
     },
+    /// GitHub CLI integration for CI/CD workflow monitoring
+    Github {
+        #[command(subcommand)]
+        action: GithubAction,
+    },
 }
 
 #[derive(Deserialize)]
@@ -163,6 +211,9 @@ fn main() -> Result<()> {
         }
         Commands::Cleanup { check } => {
             cleanup_source_files(*check)?;
+        }
+        Commands::Github { action } => {
+            handle_github_action(action)?;
         }
     }
 
@@ -1723,6 +1774,202 @@ fn serialize_node(handle: &Handle, output: &mut Vec<u8>, indent_level: usize) ->
         _ => {
             // Handle other node types if needed
         }
+    }
+
+    Ok(())
+}
+
+/// Handle GitHub CLI actions for workflow monitoring
+fn handle_github_action(action: &GithubAction) -> Result<()> {
+    match action {
+        GithubAction::Runs {
+            limit,
+            workflow,
+            branch,
+        } => github_list_runs(*limit, workflow.as_deref(), branch.as_deref()),
+        GithubAction::Watch { run_id } => github_watch_run(run_id.as_deref()),
+        GithubAction::Status { run_id, logs } => github_show_status(run_id.as_deref(), *logs),
+        GithubAction::Trigger {
+            workflow,
+            branch,
+            list,
+        } => {
+            if *list {
+                github_list_workflows()
+            } else {
+                github_trigger_workflow(workflow.as_deref(), branch.as_deref())
+            }
+        }
+    }
+}
+
+/// List recent workflow runs using GitHub CLI
+fn github_list_runs(limit: u32, workflow: Option<&str>, branch: Option<&str>) -> Result<()> {
+    println!("📋 Listing recent GitHub Actions workflow runs...");
+
+    let mut cmd = Command::new("gh");
+    cmd.args(["run", "list", "--limit", &limit.to_string()]);
+
+    if let Some(wf) = workflow {
+        cmd.args(["--workflow", wf]);
+    }
+
+    if let Some(br) = branch {
+        cmd.args(["--branch", br]);
+    }
+
+    let output = cmd.output().with_context(|| {
+        "Failed to execute 'gh run list'. Make sure GitHub CLI is installed and authenticated."
+    })?;
+
+    if output.status.success() {
+        println!("{}", String::from_utf8_lossy(&output.stdout));
+    } else {
+        eprintln!(
+            "❌ GitHub CLI error: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        return Err(anyhow::anyhow!("GitHub CLI command failed"));
+    }
+
+    Ok(())
+}
+
+/// Watch a workflow run in real-time
+fn github_watch_run(run_id: Option<&str>) -> Result<()> {
+    println!("👀 Watching GitHub Actions workflow run...");
+
+    let mut cmd = Command::new("gh");
+    if let Some(id) = run_id {
+        cmd.args(["run", "watch", id]);
+    } else {
+        cmd.args(["run", "watch"]);
+    }
+
+    let status = cmd.status().with_context(|| {
+        "Failed to execute 'gh run watch'. Make sure GitHub CLI is installed and authenticated."
+    })?;
+
+    if !status.success() {
+        return Err(anyhow::anyhow!("GitHub CLI watch command failed"));
+    }
+
+    Ok(())
+}
+
+/// Show detailed status of a workflow run
+fn github_show_status(run_id: Option<&str>, show_logs: bool) -> Result<()> {
+    println!("🔍 Showing GitHub Actions workflow status...");
+
+    let mut cmd = Command::new("gh");
+    if let Some(id) = run_id {
+        cmd.args(["run", "view", id]);
+    } else {
+        cmd.args(["run", "view"]);
+    }
+
+    let output = cmd.output().with_context(|| {
+        "Failed to execute 'gh run view'. Make sure GitHub CLI is installed and authenticated."
+    })?;
+
+    if output.status.success() {
+        println!("{}", String::from_utf8_lossy(&output.stdout));
+
+        if show_logs {
+            println!("\n📄 Fetching logs for failed jobs...");
+            github_show_logs(run_id)?;
+        }
+    } else {
+        eprintln!(
+            "❌ GitHub CLI error: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        return Err(anyhow::anyhow!("GitHub CLI view command failed"));
+    }
+
+    Ok(())
+}
+
+/// Show logs for a workflow run (typically for failed jobs)
+fn github_show_logs(run_id: Option<&str>) -> Result<()> {
+    let mut cmd = Command::new("gh");
+    if let Some(id) = run_id {
+        cmd.args(["run", "view", id, "--log-failed"]);
+    } else {
+        cmd.args(["run", "view", "--log-failed"]);
+    }
+
+    let output = cmd.output().with_context(|| {
+        "Failed to execute 'gh run view --log-failed'. Make sure GitHub CLI is installed."
+    })?;
+
+    if output.status.success() {
+        println!("{}", String::from_utf8_lossy(&output.stdout));
+    } else {
+        eprintln!(
+            "❌ GitHub CLI logs error: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        println!("💡 Logs may not be available or the run may still be in progress");
+    }
+
+    Ok(())
+}
+
+/// List available workflows
+fn github_list_workflows() -> Result<()> {
+    println!("📝 Listing available GitHub Actions workflows...");
+
+    let cmd = Command::new("gh")
+        .args(["workflow", "list"])
+        .output()
+        .with_context(|| "Failed to execute 'gh workflow list'. Make sure GitHub CLI is installed and authenticated.")?;
+
+    if cmd.status.success() {
+        println!("{}", String::from_utf8_lossy(&cmd.stdout));
+    } else {
+        eprintln!(
+            "❌ GitHub CLI error: {}",
+            String::from_utf8_lossy(&cmd.stderr)
+        );
+        return Err(anyhow::anyhow!("GitHub CLI workflow list failed"));
+    }
+
+    Ok(())
+}
+
+/// Trigger a workflow manually
+fn github_trigger_workflow(workflow: Option<&str>, branch: Option<&str>) -> Result<()> {
+    println!("🚀 Triggering GitHub Actions workflow...");
+
+    let mut cmd = Command::new("gh");
+    cmd.args(["workflow", "run"]);
+
+    if let Some(wf) = workflow {
+        cmd.arg(wf);
+    } else {
+        return Err(anyhow::anyhow!("Workflow name or file is required for triggering. Use --list to see available workflows."));
+    }
+
+    if let Some(br) = branch {
+        cmd.args(["--ref", br]);
+    }
+
+    let output = cmd.output().with_context(|| {
+        "Failed to execute 'gh workflow run'. Make sure GitHub CLI is installed and authenticated."
+    })?;
+
+    if output.status.success() {
+        println!("✅ Workflow triggered successfully!");
+        if !output.stdout.is_empty() {
+            println!("{}", String::from_utf8_lossy(&output.stdout));
+        }
+    } else {
+        eprintln!(
+            "❌ GitHub CLI error: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        return Err(anyhow::anyhow!("GitHub CLI workflow run command failed"));
     }
 
     Ok(())
