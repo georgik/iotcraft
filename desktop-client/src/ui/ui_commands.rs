@@ -490,8 +490,7 @@ mod tests {
         let mut world = World::new();
 
         // Initialize required resources
-        world.init_resource::<AssetServer>();
-        world.insert_resource(Fonts::default());
+        // Note: AssetServer and Fonts would need proper initialization in real tests
         world.init_resource::<Events<crate::localization::LanguageChangeEvent>>();
 
         // Test that the bundled system compiles

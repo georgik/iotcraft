@@ -5,6 +5,11 @@ edition = "2021"
 description = "IoTCraft Multi-client Scenario Player"
 authors = ["IoTCraft Team"]
 
+# Enable both library and binary
+[lib]
+name = "mcplay"
+path = "src/lib.rs"
+
 [features]
 default = ["tui"]
 tui = ["dep:ratatui", "dep:crossterm"]

@@ -98,6 +98,7 @@ fn handle_inventory_input_core(params: &mut InventoryInputParams) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::inventory::PlayerInventory;
     use bevy::{MinimalPlugins, app::App};
 
     #[test]

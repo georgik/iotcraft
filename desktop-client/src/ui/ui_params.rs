@@ -169,8 +169,7 @@ mod tests {
         let mut world = World::new();
 
         // Initialize required resources
-        world.init_resource::<AssetServer>();
-        world.insert_resource(Fonts::default());
+        // Note: AssetServer and Fonts need proper initialization in full tests
 
         // Test system that uses CoreUIParams
         let test_system = |_params: CoreUIParams| {

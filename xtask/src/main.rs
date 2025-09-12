@@ -12,6 +12,22 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use which;
 
+#[derive(clap::ValueEnum, Clone, Debug)]
+enum TestMode {
+    /// Run all test types (unit, integration, scenario)
+    All,
+    /// Run only unit tests
+    Unit,
+    /// Run only integration tests
+    Integration,
+    /// Run scenario-based tests with mcplay
+    Scenario,
+    /// Run WASM-specific tests
+    Wasm,
+    /// Check test compilation without running
+    Check,
+}
+
 #[derive(Parser)]
 #[command(name = "xtask")]
 #[command(about = "Workspace-level build automation for IoTCraft")]
@@ -22,6 +38,33 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
+    /// Run comprehensive tests across workspace members
+    Test {
+        /// Test mode to run
+        #[arg(short, long, default_value = "all")]
+        mode: TestMode,
+        /// Generate test reports (JSON/HTML format)
+        #[arg(long)]
+        report: bool,
+        /// Use nextest instead of cargo test
+        #[arg(long)]
+        nextest: bool,
+        /// Generate code coverage report
+        #[arg(long)]
+        coverage: bool,
+        /// Output directory for test results
+        #[arg(short, long, default_value = "test-results")]
+        output: String,
+        /// Specific component to test (desktop-client, mcplay, etc.)
+        #[arg(long)]
+        component: Option<String>,
+        /// Run tests with virtual display for GUI testing
+        #[arg(long)]
+        virtual_display: bool,
+        /// Enable verbose test output
+        #[arg(short, long)]
+        verbose: bool,
+    },
     /// Format all workspace members (Rust code and HTML)
     Format {
         /// Check formatting without modifying files
@@ -80,6 +123,27 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match &cli.command {
+        Commands::Test {
+            mode,
+            report,
+            nextest,
+            coverage,
+            output,
+            component,
+            virtual_display,
+            verbose,
+        } => {
+            run_tests(
+                mode,
+                *report,
+                *nextest,
+                *coverage,
+                output,
+                component.as_deref(),
+                *virtual_display,
+                *verbose,
+            )?;
+        }
         Commands::Format {
             check,
             html,
@@ -103,6 +167,527 @@ fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+/// Run comprehensive tests across workspace components
+fn run_tests(
+    mode: &TestMode,
+    generate_reports: bool,
+    use_nextest: bool,
+    generate_coverage: bool,
+    output_dir: &str,
+    component: Option<&str>,
+    virtual_display: bool,
+    verbose: bool,
+) -> Result<()> {
+    println!("🧪 Running comprehensive tests...");
+    println!("Mode: {:?}", mode);
+
+    if generate_reports {
+        println!("Test reports will be saved to: {}", output_dir);
+        std::fs::create_dir_all(output_dir)
+            .with_context(|| format!("Failed to create output directory: {}", output_dir))?;
+    }
+
+    if use_nextest {
+        check_nextest_installed()?;
+        println!("⚡ Using nextest for faster test execution");
+    }
+
+    if generate_coverage {
+        check_coverage_tools()?;
+        println!("📊 Code coverage analysis enabled");
+    }
+
+    if virtual_display {
+        println!("🖥️ Virtual display mode enabled for GUI testing");
+        setup_virtual_display()?;
+    }
+
+    let components = if let Some(comp) = component {
+        vec![comp.to_string()]
+    } else {
+        vec!["desktop-client".to_string(), "mcplay".to_string()]
+    };
+
+    let mut failed_components = Vec::new();
+    let mut total_tests_run = 0;
+
+    for comp in &components {
+        println!();
+        println!("📦 Testing component: {}", comp);
+        println!("{}=", "=".repeat(50 + comp.len()));
+
+        let component_result = match comp.as_str() {
+            "desktop-client" => run_desktop_client_tests(
+                mode,
+                generate_reports,
+                use_nextest,
+                generate_coverage,
+                output_dir,
+                virtual_display,
+                verbose,
+            ),
+            "mcplay" => run_mcplay_tests(
+                mode,
+                generate_reports,
+                use_nextest,
+                generate_coverage,
+                output_dir,
+                verbose,
+            ),
+            _ => {
+                println!("⚠️ Unknown component: {}, skipping...", comp);
+                continue;
+            }
+        };
+
+        match component_result {
+            Ok(tests_run) => {
+                println!("✅ {} tests completed successfully", comp);
+                total_tests_run += tests_run;
+            }
+            Err(e) => {
+                println!("❌ {} tests failed: {}", comp, e);
+                failed_components.push(comp.clone());
+            }
+        }
+    }
+
+    println!();
+    println!("📊 Test Summary:");
+    println!("=================");
+    println!("Total test suites run: {}", total_tests_run);
+    println!("Components tested: {}", components.len());
+    println!("Successful: {}", components.len() - failed_components.len());
+    println!("Failed: {}", failed_components.len());
+
+    if generate_reports {
+        println!("📊 Reports saved to: {}/", output_dir);
+    }
+
+    if failed_components.is_empty() {
+        println!();
+        println!("🎉 All tests passed! Your code is ready for commit.");
+        Ok(())
+    } else {
+        println!();
+        println!("❌ Failed components:");
+        for comp in &failed_components {
+            println!("  • {}", comp);
+        }
+        Err(anyhow::anyhow!(
+            "Tests failed in {} components",
+            failed_components.len()
+        ))
+    }
+}
+
+/// Check if nextest is installed
+fn check_nextest_installed() -> Result<()> {
+    if which::which("cargo-nextest").is_err() {
+        println!("⚠️ nextest not found. Installing...");
+        let status = Command::new("cargo")
+            .args(&["install", "cargo-nextest", "--locked"])
+            .status()
+            .context("Failed to install cargo-nextest")?;
+
+        if !status.success() {
+            return Err(anyhow::anyhow!("Failed to install cargo-nextest"));
+        }
+        println!("✅ nextest installed successfully");
+    }
+    Ok(())
+}
+
+/// Check if coverage tools are available
+fn check_coverage_tools() -> Result<()> {
+    // Check for cargo-llvm-cov first (preferred)
+    if which::which("cargo-llvm-cov").is_err() {
+        println!("⚠️ cargo-llvm-cov not found. Installing...");
+        let status = Command::new("cargo")
+            .args(&["install", "cargo-llvm-cov"])
+            .status()
+            .context("Failed to install cargo-llvm-cov")?;
+
+        if !status.success() {
+            return Err(anyhow::anyhow!("Failed to install cargo-llvm-cov"));
+        }
+        println!("✅ cargo-llvm-cov installed successfully");
+    }
+    Ok(())
+}
+
+/// Setup virtual display for GUI testing
+fn setup_virtual_display() -> Result<()> {
+    #[cfg(target_os = "linux")]
+    {
+        // Check if Xvfb is available
+        if which::which("Xvfb").is_err() {
+            return Err(anyhow::anyhow!(
+                "Xvfb not found. Install it with: sudo apt-get install xvfb"
+            ));
+        }
+
+        // Set up virtual display environment
+        std::env::set_var("DISPLAY", ":99");
+
+        // Start Xvfb in background
+        let _xvfb = Command::new("Xvfb")
+            .args(&[":99", "-screen", "0", "1024x768x24"])
+            .spawn()
+            .context("Failed to start Xvfb")?;
+
+        // Wait a moment for Xvfb to start
+        std::thread::sleep(std::time::Duration::from_secs(2));
+
+        println!("✅ Virtual display set up on :99");
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        println!("⚠️ Virtual display on macOS - using headless mode");
+        // On macOS, we'll rely on Bevy's headless rendering
+        std::env::set_var("RUN_WGPU_BACKEND", "vulkan");
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        println!("⚠️ Virtual display on Windows - using headless mode");
+        // On Windows, we'll rely on Bevy's headless rendering
+    }
+
+    Ok(())
+}
+
+/// Run desktop-client tests
+fn run_desktop_client_tests(
+    mode: &TestMode,
+    generate_reports: bool,
+    use_nextest: bool,
+    generate_coverage: bool,
+    output_dir: &str,
+    virtual_display: bool,
+    verbose: bool,
+) -> Result<usize> {
+    let desktop_client_path = Path::new("desktop-client");
+
+    if !desktop_client_path.exists() {
+        return Err(anyhow::anyhow!("desktop-client directory not found"));
+    }
+
+    let mut tests_run = 0;
+
+    match mode {
+        TestMode::All => {
+            tests_run += run_rust_tests(
+                desktop_client_path,
+                "unit",
+                generate_reports,
+                use_nextest,
+                generate_coverage,
+                output_dir,
+                virtual_display,
+                verbose,
+            )?;
+            tests_run += run_rust_tests(
+                desktop_client_path,
+                "integration",
+                generate_reports,
+                use_nextest,
+                generate_coverage,
+                output_dir,
+                virtual_display,
+                verbose,
+            )?;
+            tests_run +=
+                run_wasm_tests(desktop_client_path, generate_reports, output_dir, verbose)?;
+        }
+        TestMode::Unit => {
+            tests_run += run_rust_tests(
+                desktop_client_path,
+                "unit",
+                generate_reports,
+                use_nextest,
+                generate_coverage,
+                output_dir,
+                virtual_display,
+                verbose,
+            )?;
+        }
+        TestMode::Integration => {
+            tests_run += run_rust_tests(
+                desktop_client_path,
+                "integration",
+                generate_reports,
+                use_nextest,
+                generate_coverage,
+                output_dir,
+                virtual_display,
+                verbose,
+            )?;
+        }
+        TestMode::Wasm => {
+            tests_run +=
+                run_wasm_tests(desktop_client_path, generate_reports, output_dir, verbose)?;
+        }
+        TestMode::Check => {
+            tests_run += check_compilation(desktop_client_path, verbose)?;
+        }
+        TestMode::Scenario => {
+            println!("⚠️ Scenario tests for desktop-client are handled by mcplay component");
+        }
+    }
+
+    Ok(tests_run)
+}
+
+/// Run mcplay tests
+fn run_mcplay_tests(
+    mode: &TestMode,
+    generate_reports: bool,
+    use_nextest: bool,
+    generate_coverage: bool,
+    output_dir: &str,
+    verbose: bool,
+) -> Result<usize> {
+    let mcplay_path = Path::new("mcplay");
+
+    if !mcplay_path.exists() {
+        return Err(anyhow::anyhow!("mcplay directory not found"));
+    }
+
+    let mut tests_run = 0;
+
+    match mode {
+        TestMode::All => {
+            tests_run += run_rust_tests(
+                mcplay_path,
+                "unit",
+                generate_reports,
+                use_nextest,
+                generate_coverage,
+                output_dir,
+                false,
+                verbose,
+            )?;
+            tests_run += run_scenario_tests(mcplay_path, verbose)?;
+        }
+        TestMode::Unit => {
+            tests_run += run_rust_tests(
+                mcplay_path,
+                "unit",
+                generate_reports,
+                use_nextest,
+                generate_coverage,
+                output_dir,
+                false,
+                verbose,
+            )?;
+        }
+        TestMode::Scenario => {
+            tests_run += run_scenario_tests(mcplay_path, verbose)?;
+        }
+        TestMode::Check => {
+            tests_run += check_compilation(mcplay_path, verbose)?;
+        }
+        TestMode::Integration | TestMode::Wasm => {
+            println!("⚠️ {:?} tests not applicable for mcplay, skipping...", mode);
+        }
+    }
+
+    Ok(tests_run)
+}
+
+/// Run Rust tests (unit or integration)
+fn run_rust_tests(
+    component_path: &Path,
+    test_type: &str,
+    generate_reports: bool,
+    use_nextest: bool,
+    generate_coverage: bool,
+    output_dir: &str,
+    virtual_display: bool,
+    verbose: bool,
+) -> Result<usize> {
+    println!("🧪 Running {} tests...", test_type);
+
+    let mut cmd = if generate_coverage {
+        let mut coverage_cmd = Command::new("cargo");
+        coverage_cmd.current_dir(component_path).args(&["llvm-cov"]);
+
+        if use_nextest {
+            coverage_cmd.args(&["nextest"]);
+        } else {
+            coverage_cmd.args(&["test"]);
+        }
+
+        coverage_cmd
+    } else if use_nextest {
+        let mut nextest_cmd = Command::new("cargo");
+        nextest_cmd
+            .current_dir(component_path)
+            .args(&["nextest", "run"]);
+        nextest_cmd
+    } else {
+        let mut test_cmd = Command::new("cargo");
+        test_cmd.current_dir(component_path).args(&["test"]);
+        test_cmd
+    };
+
+    // Add test-specific arguments
+    match test_type {
+        "unit" => {
+            cmd.args(&["--lib", "--bins"]);
+        }
+        "integration" => {
+            cmd.args(&["--tests"]);
+        }
+        _ => {}
+    }
+
+    if verbose {
+        cmd.args(&["--verbose"]);
+    }
+
+    // Add environment variables for GUI testing
+    if virtual_display {
+        cmd.env("RUST_LOG", "debug")
+            .env("BEVY_DISABLE_AUDIO", "1")
+            .env("WGPU_BACKEND", "vulkan");
+    }
+
+    // Add report generation
+    if generate_reports {
+        if use_nextest {
+            let report_path = format!("{}/{}-nextest-report.xml", output_dir, test_type);
+            cmd.args(&["--junit-output", &report_path]);
+        } else {
+            let json_path = format!("{}/{}-results.json", output_dir, test_type);
+            cmd.args(&["--", "--format", "json", "--show-output"])
+                .stdout(
+                    std::fs::File::create(&json_path)
+                        .context("Failed to create JSON output file")?,
+                );
+        }
+    }
+
+    let status = cmd
+        .status()
+        .with_context(|| format!("Failed to run {} tests", test_type))?;
+
+    if status.success() {
+        println!("✅ {} tests passed", test_type);
+        Ok(1)
+    } else {
+        Err(anyhow::anyhow!("{} tests failed", test_type))
+    }
+}
+
+/// Run WASM-specific tests
+fn run_wasm_tests(
+    component_path: &Path,
+    _generate_reports: bool,
+    _output_dir: &str,
+    verbose: bool,
+) -> Result<usize> {
+    println!("🕸️ Running WASM tests...");
+
+    // Check WASM target is installed
+    let target_status = Command::new("rustup")
+        .args(&["target", "list", "--installed"])
+        .output()
+        .context("Failed to list installed targets")?;
+
+    let targets = String::from_utf8_lossy(&target_status.stdout);
+    if !targets.contains("wasm32-unknown-unknown") {
+        println!("Installing WASM target...");
+        let install_status = Command::new("rustup")
+            .args(&["target", "add", "wasm32-unknown-unknown"])
+            .status()
+            .context("Failed to install WASM target")?;
+
+        if !install_status.success() {
+            return Err(anyhow::anyhow!("Failed to install WASM target"));
+        }
+    }
+
+    // Run WASM compilation check
+    let mut cmd = Command::new("cargo");
+    cmd.current_dir(component_path)
+        .args(&["test", "--target", "wasm32-unknown-unknown"]);
+
+    if verbose {
+        cmd.args(&["--verbose"]);
+    }
+
+    let status = cmd.status().context("Failed to run WASM tests")?;
+
+    if status.success() {
+        println!("✅ WASM tests passed");
+        Ok(1)
+    } else {
+        Err(anyhow::anyhow!("WASM tests failed"))
+    }
+}
+
+/// Run scenario-based tests with mcplay
+fn run_scenario_tests(mcplay_path: &Path, verbose: bool) -> Result<usize> {
+    println!("🎭 Running scenario tests...");
+
+    // First validate all scenarios
+    let mut cmd = Command::new("cargo");
+    cmd.current_dir(mcplay_path)
+        .args(&["run", "--", "--validate-all"]);
+
+    if verbose {
+        cmd.args(&["--verbose"]);
+    }
+
+    let status = cmd.status().context("Failed to validate scenarios")?;
+
+    if !status.success() {
+        return Err(anyhow::anyhow!("Scenario validation failed"));
+    }
+
+    println!("✅ All scenarios are valid");
+
+    // Run a quick scenario test
+    println!("Running quick scenario test...");
+    let test_cmd = Command::new("cargo")
+        .current_dir(mcplay_path)
+        .args(&["run", "scenarios/comprehensive_fast_test.ron"])
+        .status()
+        .context("Failed to run test scenario")?;
+
+    if test_cmd.success() {
+        println!("✅ Scenario tests passed");
+        Ok(1)
+    } else {
+        Err(anyhow::anyhow!("Scenario tests failed"))
+    }
+}
+
+/// Check compilation without running tests
+fn check_compilation(component_path: &Path, verbose: bool) -> Result<usize> {
+    println!("🔧 Checking compilation...");
+
+    let mut cmd = Command::new("cargo");
+    cmd.current_dir(component_path)
+        .args(&["check", "--all-targets"]);
+
+    if verbose {
+        cmd.args(&["--verbose"]);
+    }
+
+    let status = cmd.status().context("Failed to check compilation")?;
+
+    if status.success() {
+        println!("✅ Compilation check passed");
+        Ok(1)
+    } else {
+        Err(anyhow::anyhow!("Compilation check failed"))
+    }
 }
 
 /// Read workspace members from Cargo.toml

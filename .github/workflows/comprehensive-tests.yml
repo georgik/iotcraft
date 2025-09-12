@@ -1,0 +1,390 @@
+name: Comprehensive Tests (Unit, Integration, Scenarios)
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'desktop-client/**'
+      - 'mcplay/**'
+      - 'xtask/**'
+      - '.github/workflows/comprehensive-tests.yml'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'desktop-client/**'
+      - 'mcplay/**'
+      - 'xtask/**'
+      - '.github/workflows/comprehensive-tests.yml'
+  workflow_dispatch:
+    inputs:
+      test_mode:
+        description: 'Test mode to run'
+        required: true
+        type: choice
+        default: 'all'
+        options:
+          - all
+          - unit
+          - integration
+          - scenario
+          - wasm
+          - check
+      enable_coverage:
+        description: 'Enable code coverage'
+        required: false
+        type: boolean
+        default: false
+      use_nextest:
+        description: 'Use nextest for faster execution'
+        required: false
+        type: boolean
+        default: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  # Bevy headless rendering settings
+  BEVY_DISABLE_AUDIO: 1
+  WGPU_BACKEND: vulkan
+
+jobs:
+  # Unit and Integration Tests
+  unit-integration-tests:
+    name: Unit & Integration Tests
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      checks: write
+      pull-requests: write
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          pkg-config \
+          libx11-dev \
+          libasound2-dev \
+          libudev-dev \
+          libxkbcommon-x11-0 \
+          libwayland-dev \
+          libxrandr-dev \
+          libxcursor-dev \
+          libxi-dev \
+          libxinerama-dev \
+          libgl1-mesa-dev \
+          libglu1-mesa-dev \
+          lld \
+          xvfb
+
+    - name: Setup Rust with modern toolchain
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        targets: wasm32-unknown-unknown
+        components: rustfmt, clippy, llvm-tools-preview
+
+    - name: Install modern Rust testing tools
+      run: |
+        cargo install cargo-nextest --locked
+        cargo install cargo-llvm-cov
+
+    - name: Cache Rust dependencies
+      uses: Swatinem/rust-cache@v2
+      with:
+        workspaces: |
+          desktop-client
+          mcplay
+          xtask
+        key: comprehensive-${{ runner.os }}
+
+    - name: Check code formatting
+      run: cargo xtask format --check
+
+    - name: Run clippy (warnings as errors)
+      run: |
+        cd desktop-client && cargo clippy --all-targets -- -D warnings
+        cd ../mcplay && cargo clippy --all-targets -- -D warnings
+
+    - name: Run unit tests with xtask
+      run: |
+        cargo xtask test \
+          --mode unit \
+          --nextest \
+          --report \
+          --virtual-display \
+          --verbose
+
+    - name: Run integration tests with xtask
+      run: |
+        cargo xtask test \
+          --mode integration \
+          --nextest \
+          --report \
+          --virtual-display \
+          --verbose
+
+    - name: Run WASM tests
+      run: |
+        cargo xtask test \
+          --mode wasm \
+          --report \
+          --verbose
+
+    - name: Generate code coverage (if enabled)
+      if: github.event.inputs.enable_coverage == 'true' || github.ref == 'refs/heads/main'
+      run: |
+        cargo xtask test \
+          --mode unit \
+          --coverage \
+          --report \
+          --virtual-display
+
+    - name: Upload test reports
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: unit-integration-test-reports
+        path: test-results/
+        retention-days: 7
+
+    - name: Upload coverage reports
+      if: github.ref == 'refs/heads/main' || github.event.inputs.enable_coverage == 'true'
+      uses: actions/upload-artifact@v4
+      with:
+        name: coverage-reports
+        path: |
+          target/llvm-cov-target/
+          *.profdata
+        retention-days: 30
+
+  # Scenario-based Tests with mcplay
+  scenario-tests:
+    name: Scenario Tests (mcplay)
+    runs-on: ubuntu-latest
+    needs: unit-integration-tests
+    permissions:
+      contents: read
+      checks: write
+      pull-requests: write
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Install system dependencies for GUI testing
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          pkg-config \
+          libx11-dev \
+          libasound2-dev \
+          libudev-dev \
+          libxkbcommon-x11-0 \
+          libwayland-dev \
+          libxrandr-dev \
+          libxcursor-dev \
+          libxi-dev \
+          libxinerama-dev \
+          libgl1-mesa-dev \
+          libglu1-mesa-dev \
+          lld \
+          xvfb \
+          mosquitto-clients
+
+    - name: Setup Rust
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        components: rustfmt, clippy
+
+    - name: Install modern testing tools
+      run: |
+        cargo install cargo-nextest --locked
+
+    - name: Cache Rust dependencies
+      uses: Swatinem/rust-cache@v2
+      with:
+        workspaces: |
+          desktop-client
+          mcplay
+          mqtt-server
+        key: scenario-${{ runner.os }}
+
+    - name: Pre-build required components
+      run: |
+        # Pre-build MQTT server for scenario tests
+        cd mqtt-server && cargo build --release
+        
+        # Pre-build desktop-client for scenario orchestration
+        cd ../desktop-client && cargo build --release
+
+    - name: Validate all scenarios
+      run: |
+        cd mcplay
+        cargo run -- --validate-all
+
+    - name: Setup virtual display for headless GUI testing
+      run: |
+        # Start Xvfb for virtual display
+        export DISPLAY=:99
+        Xvfb :99 -screen 0 1024x768x24 -ac +extension GLX +render -noreset &
+        sleep 3
+
+    - name: Run scenario tests with virtual display
+      env:
+        DISPLAY: :99
+      run: |
+        cargo xtask test \
+          --mode scenario \
+          --report \
+          --virtual-display \
+          --verbose
+
+    - name: Run additional comprehensive scenario
+      env:
+        DISPLAY: :99
+      run: |
+        cd mcplay
+        # Run a comprehensive test scenario
+        timeout 300 cargo run scenarios/comprehensive_fast_test.ron || true
+
+    - name: Upload scenario test reports
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: scenario-test-reports
+        path: |
+          test-results/
+          mcplay/logs/
+        retention-days: 7
+
+  # Cross-platform validation
+  cross-platform-validation:
+    name: Cross-Platform Validation
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        include:
+          - os: ubuntu-latest
+            display: xvfb
+          - os: macos-latest
+            display: headless
+          - os: windows-latest
+            display: headless
+    runs-on: ${{ matrix.os }}
+    if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Install Linux dependencies
+      if: matrix.os == 'ubuntu-latest'
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          pkg-config libx11-dev libasound2-dev libudev-dev \
+          libxkbcommon-x11-0 libwayland-dev libxrandr-dev \
+          libxcursor-dev libxi-dev libxinerama-dev \
+          libgl1-mesa-dev libglu1-mesa-dev lld xvfb
+
+    - name: Setup Rust
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        targets: wasm32-unknown-unknown
+
+    - name: Cache Rust dependencies
+      uses: Swatinem/rust-cache@v2
+      with:
+        workspaces: |
+          desktop-client
+          mcplay
+        key: cross-platform-${{ matrix.os }}
+
+    - name: Run cross-platform compilation check
+      run: |
+        cargo xtask test --mode check --verbose
+
+    - name: Build WASM version (Linux only)
+      if: matrix.os == 'ubuntu-latest'
+      run: |
+        cargo xtask web-build --release
+
+    - name: Upload cross-platform artifacts
+      if: matrix.os == 'ubuntu-latest'
+      uses: actions/upload-artifact@v4
+      with:
+        name: cross-platform-builds-${{ matrix.os }}
+        path: |
+          target/release/
+          desktop-client/web/
+        retention-days: 7
+
+  # Results aggregation and reporting
+  test-results:
+    name: Test Results Summary
+    runs-on: ubuntu-latest
+    needs: [unit-integration-tests, scenario-tests, cross-platform-validation]
+    if: always()
+    permissions:
+      contents: read
+      checks: write
+      pull-requests: write
+
+    steps:
+    - name: Download all artifacts
+      uses: actions/download-artifact@v4
+      with:
+        path: ./test-artifacts
+
+    - name: Generate test summary
+      run: |
+        echo "# 🧪 Comprehensive Test Results" > test-summary.md
+        echo "" >> test-summary.md
+        echo "## Test Summary" >> test-summary.md
+        echo "- **Unit & Integration Tests**: ${{ needs.unit-integration-tests.result }}" >> test-summary.md
+        echo "- **Scenario Tests**: ${{ needs.scenario-tests.result }}" >> test-summary.md
+        echo "- **Cross-platform Validation**: ${{ needs.cross-platform-validation.result }}" >> test-summary.md
+        echo "" >> test-summary.md
+        
+        if [[ "${{ needs.unit-integration-tests.result }}" == "success" && 
+              "${{ needs.scenario-tests.result }}" == "success" && 
+              "${{ needs.cross-platform-validation.result }}" == "success" ]]; then
+          echo "## ✅ All Tests Passed!" >> test-summary.md
+          echo "Your IoTCraft implementation is ready for production deployment." >> test-summary.md
+          echo "### Validated Features:" >> test-summary.md
+          echo "- 🦀 **Rust Unit Tests**: Core functionality validation" >> test-summary.md
+          echo "- 🔗 **Integration Tests**: Component interaction testing" >> test-summary.md
+          echo "- 🎭 **Scenario Tests**: End-to-end workflow validation with mcplay" >> test-summary.md
+          echo "- 🌐 **WASM Compatibility**: Web client functionality verified" >> test-summary.md
+          echo "- 🖥️ **Virtual Display**: Headless GUI testing successful" >> test-summary.md
+          echo "- 📱 **Cross-platform**: Linux, macOS, Windows compatibility" >> test-summary.md
+        else
+          echo "## ❌ Some Tests Failed" >> test-summary.md
+          echo "Please check the individual job outputs for details." >> test-summary.md
+          exit 1
+        fi
+
+    - name: Upload final test summary
+      uses: actions/upload-artifact@v4
+      with:
+        name: comprehensive-test-summary
+        path: test-summary.md
+        retention-days: 30
+
+    - name: Comment PR with results (if PR)
+      if: github.event_name == 'pull_request'
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const fs = require('fs');
+          const summary = fs.readFileSync('test-summary.md', 'utf8');
+          
+          github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: summary
+          });

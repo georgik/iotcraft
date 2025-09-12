@@ -11,7 +11,7 @@ use super::mqtt_types::*;
 use crate::config::MqttConfig;
 use crate::devices::DeviceAnnouncementReceiver;
 use crate::multiplayer::mqtt_utils::generate_unique_client_id;
-use crate::multiplayer::{BlockChangeEvent, BlockChangeSource, BlockChangeType, PoseRx, PoseTx};
+use crate::multiplayer::{BlockChangeEvent, BlockChangeType, PoseRx, PoseTx};
 
 // Re-export key multiplayer types that are now handled by core service
 pub use crate::multiplayer::PoseMessage;

@@ -1371,7 +1371,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .arg(
             Arg::new("list-scenarios")
                 .long("list-scenarios")
-                .help("List all available scenarios")
+                .help("List all available scenarios with validation status")
+                .action(clap::ArgAction::SetTrue),
+        )
+        .arg(
+            Arg::new("validate-all")
+                .long("validate-all")
+                .help("Validate all scenarios and provide detailed report")
+                .action(clap::ArgAction::SetTrue),
+        )
+        .arg(
+            Arg::new("cleanup-invalid")
+                .long("cleanup-invalid")
+                .help("Remove invalid scenarios after validation")
                 .action(clap::ArgAction::SetTrue),
         )
         .arg(
@@ -1412,6 +1424,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     if matches.get_flag("list-scenarios") {
         list_scenarios().await?;
+        return Ok(());
+    }
+
+    if matches.get_flag("validate-all") {
+        let cleanup = matches.get_flag("cleanup-invalid");
+        validate_all_scenarios(cleanup).await?;
         return Ok(());
     }
 
@@ -1482,12 +1500,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 async fn list_scenarios() -> Result<(), Box<dyn std::error::Error>> {
     let scenarios_dir = PathBuf::from("scenarios");
     if !scenarios_dir.exists() {
-        println!("No scenarios directory found");
+        println!("❌ No scenarios directory found");
         return Ok(());
     }
 
-    println!("Available scenarios:");
+    println!("📋 Available scenarios:");
+    println!("======================");
+
+    let mut valid_count = 0;
+    let mut invalid_count = 0;
     let mut entries = tokio::fs::read_dir(scenarios_dir).await?;
+
     while let Some(entry) = entries.next_entry().await? {
         if let Some(ext) = entry.path().extension() {
             if ext == "json" || ext == "ron" {
@@ -1503,15 +1526,147 @@ async fn list_scenarios() -> Result<(), Box<dyn std::error::Error>> {
                         };
 
                         if let Ok(scenario) = scenario_result {
-                            println!("  {} - {}", name.to_string_lossy(), scenario.description);
+                            println!("✅ {} - {}", name.to_string_lossy(), scenario.description);
+                            valid_count += 1;
                         } else {
-                            println!("  {} - (invalid scenario file)", name.to_string_lossy());
+                            println!("❌ {} - (invalid scenario file)", name.to_string_lossy());
+                            invalid_count += 1;
                         }
                     }
                 }
             }
         }
     }
+
+    println!();
+    println!(
+        "📊 Summary: {} valid, {} invalid scenarios",
+        valid_count, invalid_count
+    );
+    if invalid_count > 0 {
+        println!("💡 Use --validate-all --cleanup-invalid to remove invalid scenarios");
+    }
+    Ok(())
+}
+
+async fn validate_all_scenarios(cleanup_invalid: bool) -> Result<(), Box<dyn std::error::Error>> {
+    let scenarios_dir = PathBuf::from("scenarios");
+    if !scenarios_dir.exists() {
+        println!("❌ No scenarios directory found");
+        return Ok(());
+    }
+
+    println!("🔍 Validating all scenarios...");
+    println!("===============================");
+
+    let mut valid_scenarios = Vec::new();
+    let mut invalid_scenarios = Vec::new();
+    let mut entries = tokio::fs::read_dir(&scenarios_dir).await?;
+
+    while let Some(entry) = entries.next_entry().await? {
+        if let Some(ext) = entry.path().extension() {
+            if ext == "json" || ext == "ron" {
+                if let Some(name) = entry.path().file_stem() {
+                    let name_str = name.to_string_lossy();
+                    print!("📋 Validating {:60} ", format!("{}...", name_str));
+
+                    // Try to load and validate
+                    if let Ok(content) = tokio::fs::read_to_string(entry.path()).await {
+                        let scenario_result = if ext == "ron" {
+                            ron::from_str::<Scenario>(&content)
+                                .map_err(|e| format!("RON error: {}", e))
+                        } else {
+                            serde_json::from_str::<Scenario>(&content)
+                                .map_err(|e| format!("JSON error: {}", e))
+                        };
+
+                        match scenario_result {
+                            Ok(scenario) => {
+                                // Additional validation
+                                match validate_scenario(&scenario) {
+                                    Ok(_) => {
+                                        println!("✅");
+                                        valid_scenarios
+                                            .push((name_str.to_string(), scenario.description));
+                                    }
+                                    Err(e) => {
+                                        println!("❌ (validation error: {})", e);
+                                        invalid_scenarios.push((
+                                            name_str.to_string(),
+                                            entry.path(),
+                                            format!("Validation error: {}", e),
+                                        ));
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                println!("❌ (parse error)");
+                                invalid_scenarios.push((name_str.to_string(), entry.path(), e));
+                            }
+                        }
+                    } else {
+                        println!("❌ (read error)");
+                        invalid_scenarios.push((
+                            name_str.to_string(),
+                            entry.path(),
+                            "Failed to read file".to_string(),
+                        ));
+                    }
+                }
+            }
+        }
+    }
+
+    println!();
+    println!("📊 Validation Summary:");
+    println!("======================");
+    println!("✅ Valid scenarios: {}", valid_scenarios.len());
+    println!("❌ Invalid scenarios: {}", invalid_scenarios.len());
+
+    if !invalid_scenarios.is_empty() {
+        println!();
+        println!("❌ Invalid scenarios details:");
+        println!("============================");
+
+        for (name, path, error) in &invalid_scenarios {
+            println!("  • {}: {}", name, error);
+            println!("    Path: {}", path.display());
+        }
+
+        if cleanup_invalid {
+            println!();
+            println!("🗑️ Cleaning up invalid scenarios...");
+
+            let mut removed_count = 0;
+            for (name, path, _error) in &invalid_scenarios {
+                match tokio::fs::remove_file(path).await {
+                    Ok(_) => {
+                        println!("  ✅ Removed: {}", name);
+                        removed_count += 1;
+                    }
+                    Err(e) => {
+                        println!("  ❌ Failed to remove {}: {}", name, e);
+                    }
+                }
+            }
+
+            println!();
+            println!(
+                "🎉 Cleanup complete: {} invalid scenarios removed",
+                removed_count
+            );
+        } else {
+            println!();
+            println!("💡 To remove invalid scenarios automatically, use: --cleanup-invalid");
+            println!("🚨 This will permanently delete the invalid scenario files!");
+        }
+
+        return Err(format!("Found {} invalid scenarios", invalid_scenarios.len()).into());
+    } else {
+        println!();
+        println!("🎆 All scenarios are valid! Your scenario collection is clean.");
+    }
+
     Ok(())
 }
 

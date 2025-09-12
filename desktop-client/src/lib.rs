@@ -113,7 +113,6 @@ pub use lib_debug::{debug_set_panic_hook, debug_start};
 // Cross-platform tests that work on both desktop and WASM
 #[cfg(test)]
 mod tests {
-    use super::*;
 
     #[test]
     fn test_basic_functionality() {

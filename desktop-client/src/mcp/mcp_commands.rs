@@ -1021,7 +1021,7 @@ fn parse_block_type(block_type_str: &str) -> Option<crate::environment::BlockTyp
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{environment::BlockType, script::script_types::CommandExecutedEvent};
+    use crate::environment::BlockType;
 
     #[test]
     fn test_parse_block_type() {
