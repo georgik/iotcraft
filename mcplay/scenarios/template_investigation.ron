@@ -1,0 +1,159 @@
+// Template Investigation Test
+// Query available templates and investigate world naming
+Scenario(
+    name: "template_investigation",
+    description: "Investigate available templates and world naming behavior",
+    version: "1.0",
+    
+    // Minimal infrastructure - no MQTT needed for template queries
+    infrastructure: InfrastructureConfig(
+        mqtt_server: MqttServerConfig(
+            required: false,
+            port: 1883,
+            config_file: None,
+            options: None,
+        ),
+        mqtt_observer: None,
+        mcp_server: None,
+        services: None,
+    ),
+    
+    // Single client for investigation
+    clients: [
+        ClientConfig(
+            id: "investigator",
+            player_id: "investigator", 
+            mcp_port: 8080,
+            client_type: "desktop",
+            name: Some("Template Investigator"),
+            config: None,
+        ),
+    ],
+    
+    // Investigation steps
+    steps: [
+        // Step 1: Initialize MCP connection
+        Step(
+            name: "init_mcp",
+            description: "Initialize MCP connection",
+            client: "investigator",
+            action: (
+                type: "mcp_call",
+                tool: "initialize",
+                arguments: {
+                    "protocolVersion": "2024-11-05",
+                    "capabilities": { "tools": {} },
+                    "clientInfo": {
+                        "name": "template-investigator",
+                        "version": "1.0.0"
+                    }
+                },
+            ),
+            wait_before: 1000,
+            wait_after: 500,
+            timeout: 15000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: [],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 2: List available tools
+        Step(
+            name: "list_tools",
+            description: "List available MCP tools",
+            client: "investigator",
+            action: (
+                type: "mcp_call",
+                tool: "list_tools",
+                arguments: {},
+            ),
+            wait_before: 500,
+            wait_after: 500,
+            timeout: 10000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["init_mcp"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 3: Get current game state
+        Step(
+            name: "get_game_state",
+            description: "Get current game state",
+            client: "investigator",
+            action: (
+                type: "mcp_call",
+                tool: "get_game_state",
+                arguments: {},
+            ),
+            wait_before: 500,
+            wait_after: 500,
+            timeout: 10000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["list_tools"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 4: List local worlds
+        Step(
+            name: "list_local_worlds",
+            description: "List local worlds to see naming",
+            client: "investigator",
+            action: (
+                type: "mcp_call",
+                tool: "list_local_worlds",
+                arguments: {},
+            ),
+            wait_before: 500,
+            wait_after: 500,
+            timeout: 10000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["get_game_state"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+    ],
+    
+    // Configuration
+    config: Some(ScenarioConfig(
+        timeout_ms: Some(60000), // 1 minute total timeout
+        logging: Some(LoggingConfig(
+            level: Some("info"),
+            log_mqtt: Some(false),
+            log_client_actions: Some(true),
+            filters: Some([
+                "mcp/*",
+                "tools",
+                "world/*",
+            ]),
+        )),
+        environment: Some({
+            "RUST_LOG": "info",
+            "SCENARIO_NAME": "template_investigation",
+            "ENABLE_MCP": "true",
+        }),
+        settings: Some({
+            "auto_cleanup": true,
+            "preserve_logs": true,
+            "fail_fast": false,
+        }),
+    )),
+)

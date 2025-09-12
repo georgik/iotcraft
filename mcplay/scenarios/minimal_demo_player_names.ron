@@ -1,0 +1,66 @@
+// Minimal Demo for Player Names Fix
+// A very simple scenario that shows player names being used correctly
+Scenario(
+    name: "minimal_demo_player_names",
+    description: "Minimal scenario to demonstrate player name fix - check logs for correct --player-name arguments",
+    version: "1.0",
+    
+    // Minimal infrastructure - just MQTT, no observer
+    infrastructure: InfrastructureConfig(
+        mqtt_server: MqttServerConfig(
+            required: true,
+            port: 1883,
+            config_file: None,
+            options: None,
+        ),
+        mqtt_observer: None, // Disable observer to keep it simple
+        mcp_server: None,
+        services: None,
+    ),
+    
+    // Just one client to test the fix
+    clients: [
+        ClientConfig(
+            id: "test_client",
+            player_id: "test_player_id", 
+            mcp_port: 8080,
+            client_type: "desktop",
+            name: Some("Test Player with Custom Name"), // This should be passed as --player-name
+            config: None,
+        ),
+    ],
+    
+    // Single test step - just initialize to verify the client starts with correct name
+    steps: [
+        Step(
+            name: "test_initialize",
+            description: "Initialize client to test player name passing",
+            client: "test_client",
+            action: (
+                type: "mcp_call",
+                tool: "initialize",
+                arguments: {
+                    "protocolVersion": "2024-11-05",
+                    "capabilities": { "tools": {} },
+                    "clientInfo": {
+                        "name": "test-client",
+                        "version": "1.0.0"
+                    }
+                },
+            ),
+            wait_before: 2000,
+            wait_after: 1000,
+            timeout: 20000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: [],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+    ],
+    
+    config: None,
+)

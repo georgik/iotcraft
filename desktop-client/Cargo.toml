@@ -106,8 +106,7 @@ default = ["console"]
 console = []                          # Default to Simple console (no extra deps)
 # World features
 chunk_world = []                      # Enable chunk-based world support (future feature)
-# Test-specific features
-integration-tests = []                # Feature to enable integration tests
+# Note: Integration testing is now handled by mcplay scenarios
 
 
 
@@ -139,11 +138,8 @@ required-features = []
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 tokio-test = "0.4"
 
-# Integration test configuration
-[[test]]
-name = "integration"
-path = "tests/integration/main.rs"
-required-features = ["integration-tests"]
+# Integration testing is now handled by mcplay scenarios
+# No custom integration test configuration needed
 
 # Test-specific features - moved to main features section above
 

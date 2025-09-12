@@ -28,7 +28,8 @@ pub use console_infrastructure::*;
 pub use console_plugin::*;
 pub use console_trait::*;
 
-// Import required Bevy types for derive macros
+// Import required Bevy types for derive macros (only needed for non-WASM targets)
+#[cfg(not(target_arch = "wasm32"))]
 use bevy::prelude::{Component, Resource};
 
 // BlinkState resource for console blink functionality

@@ -1,0 +1,149 @@
+// Simple Alice World Publishing Validation
+// Test: Alice creates and publishes a world, MQTT observer should see the messages
+Scenario(
+    name: "alice_publish_validation",
+    description: "Validate Alice can publish a world and MQTT observer sees the messages",
+    version: "1.0",
+    
+    // Infrastructure with MQTT observer for validation
+    infrastructure: InfrastructureConfig(
+        mqtt_server: MqttServerConfig(
+            required: true,
+            port: 1883,
+            config_file: None,
+            options: None,
+        ),
+        mqtt_observer: Some(MqttObserverConfig(
+            required: true,
+            topics: Some([
+                "iotcraft/worlds/+/info",  // World discovery messages
+                "iotcraft/worlds/+/data",  // World data messages
+            ]),
+            client_id: Some("validation_observer"),
+        )),
+        mcp_server: None,
+        services: None,
+    ),
+    
+    // Single client: Alice
+    clients: [
+        ClientConfig(
+            id: "alice",
+            player_id: "alice_validator", 
+            mcp_port: 8080,
+            client_type: "desktop",
+            name: Some("Alice - Validation Test"),
+            config: None,
+        ),
+    ],
+    
+    // Simple test steps
+    steps: [
+        // Step 1: Initialize Alice's MCP connection
+        Step(
+            name: "alice_initialize",
+            description: "Initialize Alice's MCP connection",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "initialize",
+                arguments: {
+                    "protocolVersion": "2024-11-05",
+                    "capabilities": { "tools": {} },
+                    "clientInfo": {
+                        "name": "alice-validator",
+                        "version": "1.0.0"
+                    }
+                },
+            ),
+            wait_before: 2000,
+            wait_after: 1000,
+            timeout: 15000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: [],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 2: Alice creates a world
+        Step(
+            name: "alice_create_world",
+            description: "Alice creates a test world",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "create_world",
+                arguments: {
+                    "world_name": "validation_world",
+                    "description": "World for MQTT validation testing"
+                },
+            ),
+            wait_before: 1000,
+            wait_after: 3000,  // Wait for world creation
+            timeout: 20000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["alice_initialize"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 3: Alice publishes the world
+        Step(
+            name: "alice_publish_world",
+            description: "Alice publishes world - should appear in MQTT observer logs",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "publish_world",
+                arguments: {
+                    "world_name": "validation_world",
+                    "max_players": 4,
+                    "is_public": true
+                },
+            ),
+            wait_before: 1000,
+            wait_after: 5000,  // Extended wait for MQTT propagation and observer capture
+            timeout: 15000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["alice_create_world"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+    ],
+    
+    // Configuration with enhanced logging
+    config: Some(ScenarioConfig(
+        timeout_ms: Some(120000), // 2 minutes total timeout
+        logging: Some(LoggingConfig(
+            level: Some("info"),
+            log_mqtt: Some(true),
+            log_client_actions: Some(true),
+            filters: Some([
+                "mqtt/*",
+                "multiplayer/*", 
+                "world/*", 
+                "publish_world/*",
+                "core_service/*",
+            ]),
+        )),
+        environment: Some({
+            "RUST_LOG": "info,rumqttc=warn,bevy=warn",
+            "SCENARIO_NAME": "alice_publish_validation",
+        }),
+        settings: Some({
+            "preserve_logs": true,
+        }),
+    )),
+)

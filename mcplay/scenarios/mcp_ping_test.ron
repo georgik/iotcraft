@@ -1,0 +1,141 @@
+// Simple MCP Ping Test - Diagnose Communication Issues
+// Tests basic MCP communication with repeated ping commands
+(
+  name: "MCP Ping Test",
+  description: "Simple test with 5 ping commands to diagnose MCP communication freezing",
+  version: "1.0",
+  
+  infrastructure: (
+    mqtt_server: (
+      required: true,
+      port: 1883,
+      config_file: None,
+      options: None,
+    ),
+    mqtt_observer: None, // Keep it simple - no observer
+    mcp_server: None,
+    services: None,
+  ),
+  
+  clients: [
+    (
+      id: "alice",
+      player_id: "alice",
+      mcp_port: 3001,
+      client_type: "desktop",
+      name: Some("Alice - MCP Ping Test Client"),
+      config: Some({
+        "enable_mcp": true,
+        "readiness_probe": {
+          "type": "tcp_port",
+          "port": 3001,
+          "initial_delay_seconds": 5,
+          "timeout_seconds": 20
+        },
+        "liveness_probe": {
+          "type": "mcp_ping",
+          "interval_seconds": 120,  // Longer interval to avoid interference
+          "timeout_seconds": 15,
+          "failure_threshold": 5
+        }
+      }),
+    )
+  ],
+  
+  steps: [
+    // Step 1: First ping
+    (
+      name: "alice_ping_1",
+      description: "Alice MCP ping test #1",
+      client: "alice",
+      action: (
+        type: "mcp_call",
+        tool: "ping",
+        arguments: {},
+      ),
+      depends_on: [],
+      wait_before: 2000,
+      wait_after: 3000,
+      timeout: 15000,
+      success_condition: None,
+    ),
+    
+    // Step 2: Second ping
+    (
+      name: "alice_ping_2",
+      description: "Alice MCP ping test #2",
+      client: "alice",
+      action: (
+        type: "mcp_call",
+        tool: "ping",
+        arguments: {},
+      ),
+      depends_on: ["alice_ping_1"],
+      wait_before: 1000,
+      wait_after: 3000,
+      timeout: 15000,
+      success_condition: None,
+    ),
+    
+    // Step 3: Third ping
+    (
+      name: "alice_ping_3",
+      description: "Alice MCP ping test #3",
+      client: "alice",
+      action: (
+        type: "mcp_call",
+        tool: "ping",
+        arguments: {},
+      ),
+      depends_on: ["alice_ping_2"],
+      wait_before: 1000,
+      wait_after: 3000,
+      timeout: 15000,
+      success_condition: None,
+    ),
+    
+    // Step 4: Fourth ping
+    (
+      name: "alice_ping_4",
+      description: "Alice MCP ping test #4",
+      client: "alice",
+      action: (
+        type: "mcp_call",
+        tool: "ping",
+        arguments: {},
+      ),
+      depends_on: ["alice_ping_3"],
+      wait_before: 1000,
+      wait_after: 3000,
+      timeout: 15000,
+      success_condition: None,
+    ),
+    
+    // Step 5: Fifth ping
+    (
+      name: "alice_ping_5",
+      description: "Alice MCP ping test #5 - final",
+      client: "alice",
+      action: (
+        type: "mcp_call",
+        tool: "ping",
+        arguments: {},
+      ),
+      depends_on: ["alice_ping_4"],
+      wait_before: 1000,
+      wait_after: 2000,
+      timeout: 15000,
+      success_condition: None,
+    ),
+  ],
+  
+  config: Some((
+    timeout_ms: Some(120000),  // 2 minutes max
+    logging: None,
+    environment: None,
+    settings: Some({
+      "auto_cleanup": true,
+      "preserve_logs": true,
+    }),
+  )),
+)

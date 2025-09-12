@@ -1,0 +1,138 @@
+// Alice World Status Test
+// Simple test to verify get_world_status MCP command works in isolation
+Scenario(
+    name: "alice_world_status_test",
+    description: "Test get_world_status MCP command in isolation",
+    version: "1.0",
+    
+    // Minimal infrastructure
+    infrastructure: InfrastructureConfig(
+        mqtt_server: MqttServerConfig(
+            required: false,
+            port: 1883,
+            config_file: None,
+            options: None,
+        ),
+        mqtt_observer: None,
+        mcp_server: None,
+        services: None,
+    ),
+    
+    // Single client: Alice
+    clients: [
+        ClientConfig(
+            id: "alice",
+            player_id: "alice", 
+            mcp_port: 8080,
+            client_type: "desktop",
+            name: Some("Alice (Status Test)"),
+            config: None,
+        ),
+    ],
+    
+    // Simple workflow to test get_world_status
+    steps: [
+        // Step 1: Initialize Alice
+        Step(
+            name: "alice_mcp_initialize",
+            description: "Initialize Alice's MCP connection",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "initialize",
+                arguments: {
+                    "protocolVersion": "2024-11-05",
+                    "capabilities": { "tools": {} },
+                    "clientInfo": {
+                        "name": "alice-status-test",
+                        "version": "1.0.0"
+                    }
+                },
+            ),
+            wait_before: 1000,
+            wait_after: 500,
+            timeout: 10000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: [],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 2: Alice creates a world
+        Step(
+            name: "alice_create_world",
+            description: "Alice creates a new world",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "create_world",
+                arguments: {
+                    "world_name": "status_test_world",
+                    "description": "World for testing get_world_status",
+                    "template": "default"
+                },
+            ),
+            wait_before: 1000,
+            wait_after: 2000,
+            timeout: 20000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["alice_mcp_initialize"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 3: Test get_world_status (this is what fails in the 4-player scenario)
+        Step(
+            name: "alice_test_world_status",
+            description: "Alice tests get_world_status command",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "get_world_status",
+                arguments: {},
+            ),
+            wait_before: 500,
+            wait_after: 500,
+            timeout: 10000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["alice_create_world"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 4: Test it again to make sure it's repeatable
+        Step(
+            name: "alice_test_world_status_again",
+            description: "Alice tests get_world_status command again",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "get_world_status",
+                arguments: {},
+            ),
+            wait_before: 500,
+            wait_after: 500,
+            timeout: 10000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["alice_test_world_status"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+    ]
+)

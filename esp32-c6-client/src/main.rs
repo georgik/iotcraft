@@ -1,6 +1,9 @@
 #![no_std]
 #![no_main]
 extern crate alloc;
+
+// Add ESP-IDF App Descriptor - required for flashing
+esp_bootloader_esp_idf::esp_app_desc!();
 use crate::alloc::string::ToString;
 use alloc::vec::Vec;
 use core::net::Ipv4Addr;
@@ -313,6 +316,12 @@ async fn main(spawner: Spawner) {
 
     info!("Device ID: {}", device_id.as_str());
 
+    // Log network configuration for debugging
+    info!("Network Configuration:");
+    info!("  SSID: {}", SSID);
+    info!("  SERVER_IP: {}", SERVER_IP);
+    info!("  MQTT Port: 1883");
+
     let (stack_local, runner) = embassy_net::new(
         wifi_device,
         config,
@@ -352,17 +361,52 @@ async fn mqtt_launcher(stack: &'static Stack<'static>, device_id: &'static heapl
     loop {
         if let Some(config) = stack.config_v4() {
             info!("Got IP: {}", config.address);
+            info!("Network config details:");
+            info!("  IP: {}", config.address);
+            info!("  Gateway: {:?}", config.gateway);
+            info!("  DNS servers: {:?}", config.dns_servers);
+
             // static buffers
             let rx_buffer = mk_static!([u8; 4096], [0; 4096]);
             let tx_buffer = mk_static!([u8; 4096], [0; 4096]);
             let mut socket = TcpSocket::new(*stack, rx_buffer, tx_buffer);
             let server_ip: Ipv4Addr = SERVER_IP.parse().expect("Invalid SERVER_IP address");
-            let remote_endpoint = (server_ip, 1884);
-            socket.connect(remote_endpoint).await.unwrap();
-            info!("Connected to MQTT Socket at {}", remote_endpoint.0);
-            // hand off to mqtt_task
-            mqtt_task(socket, device_id).await;
-            break;
+            // Use standard MQTT port 1883 instead of 1884
+            let remote_endpoint = (server_ip, 1883);
+
+            info!(
+                "Attempting to connect to MQTT broker at {}:{}",
+                remote_endpoint.0, remote_endpoint.1
+            );
+
+            match socket.connect(remote_endpoint).await {
+                Ok(()) => {
+                    info!(
+                        "Successfully connected to MQTT broker at {}:{}",
+                        remote_endpoint.0, remote_endpoint.1
+                    );
+                    // hand off to mqtt_task
+                    mqtt_task(socket, device_id).await;
+                    break;
+                }
+                Err(e) => {
+                    error!(
+                        "Failed to connect to MQTT broker at {}:{} - Error: {:?}",
+                        remote_endpoint.0, remote_endpoint.1, e
+                    );
+                    error!("This could be because:");
+                    error!(
+                        "1. MQTT broker is not running at {}:{}",
+                        remote_endpoint.0, remote_endpoint.1
+                    );
+                    error!("2. Network connectivity issues");
+                    error!("3. Firewall blocking the connection");
+                    error!("4. Wrong IP address or port");
+                    error!("Retrying connection in 5 seconds...");
+                    Timer::after(Duration::from_millis(5000)).await;
+                    continue;
+                }
+            }
         }
         Timer::after(Duration::from_millis(500)).await;
     }

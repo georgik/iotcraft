@@ -1,0 +1,190 @@
+(
+  name: "Test Block Count Synchronization",
+  description: "Test if all players have the same block count after Alice shares world and others join",
+  version: "1.0",
+  infrastructure: (
+    mqtt_server: (
+      required: true,
+      port: 1883,
+      config_file: None,
+      options: None,
+    ),
+    mqtt_observer: Some((
+      required: true, 
+      topics: Some(["#"]),
+      client_id: Some("sync_test_observer"),
+    )),
+    mcp_server: None,
+    services: None,
+  ),
+  clients: [
+    (
+      id: "alice",
+      player_id: "alice",
+      mcp_port: 3001,
+      client_type: "desktop",
+      name: Some("Alice - World Host"),
+      config: Some({
+        "enable_mcp": true,
+        "readiness_probe": {
+          "type": "tcp_port", 
+          "port": 3001,
+          "initial_delay_seconds": 5,
+          "timeout_seconds": 10
+        },
+        "liveness_probe": {
+          "type": "mcp_ping",
+          "interval_seconds": 30,
+          "timeout_seconds": 10,
+          "failure_threshold": 5
+        }
+      }),
+    ),
+    (
+      id: "bob",
+      player_id: "bob",
+      mcp_port: 3002,
+      client_type: "desktop",
+      name: Some("Bob - Joiner"),
+      config: Some({
+        "enable_mcp": true,
+        "readiness_probe": {
+          "type": "tcp_port", 
+          "port": 3002,
+          "initial_delay_seconds": 5,
+          "timeout_seconds": 10
+        },
+        "liveness_probe": {
+          "type": "mcp_ping",
+          "interval_seconds": 30,
+          "timeout_seconds": 10,
+          "failure_threshold": 5
+        }
+      }),
+    )
+  ],
+  steps: [
+    // Alice creates world with template
+    (
+      name: "alice_create_world",
+      description: "Alice creates a world with template",
+      client: "alice",
+      action: (
+        type: "mcp_call",
+        tool: "create_world",
+        arguments: {
+          "world_name": "sync_test_world",
+          "description": "Test world for synchronization",
+          "template": "default"
+        },
+      ),
+      depends_on: [],
+      wait_before: 1000,
+      wait_after: 5000,  // Wait for template to complete
+      timeout: 30000,
+      success_condition: None,
+    ),
+    
+    // Alice publishes her world
+    (
+      name: "alice_publish_world",
+      description: "Alice publishes her world",
+      client: "alice",
+      action: (
+        type: "mcp_call",
+        tool: "publish_world",
+        arguments: {
+          "world_name": "sync_test_world",
+          "max_players": 2,
+          "is_public": true,
+        },
+      ),
+      depends_on: ["alice_create_world"],
+      wait_before: 1000,
+      wait_after: 3000,
+      timeout: 20000,
+      success_condition: None,
+    ),
+    
+    // Alice checks her block count
+    (
+      name: "alice_check_blocks",
+      description: "Alice checks her world block count",
+      client: "alice",
+      action: (
+        type: "mcp_call",
+        tool: "get_world_status",
+        arguments: {},
+      ),
+      depends_on: ["alice_publish_world"],
+      wait_before: 1000,
+      wait_after: 1000,
+      timeout: 10000,
+      success_condition: None,
+    ),
+    
+    // Bob joins the world
+    (
+      name: "bob_join_world",
+      description: "Bob joins Alice's world",
+      client: "bob",
+      action: (
+        type: "mcp_call",
+        tool: "join_world",
+        arguments: {
+          "world_id": "sync_test_world"
+        },
+      ),
+      depends_on: ["alice_check_blocks"],
+      wait_before: 1000,
+      wait_after: 2000,
+      timeout: 20000,
+      success_condition: None,
+    ),
+    
+    // Bob loads world from MQTT
+    (
+      name: "bob_load_from_mqtt",
+      description: "Bob loads the world data from MQTT",
+      client: "bob",
+      action: (
+        type: "mcp_call",
+        tool: "load_world_from_mqtt",
+        arguments: {
+          "world_name": "sync_test_world"
+        },
+      ),
+      depends_on: ["bob_join_world"],
+      wait_before: 1000,
+      wait_after: 3000,  // Wait for world data reconstruction
+      timeout: 20000,
+      success_condition: None,
+    ),
+    
+    // Bob checks his block count (should match Alice's)
+    (
+      name: "bob_check_blocks",
+      description: "Bob checks his world block count (should match Alice)",
+      client: "bob",
+      action: (
+        type: "mcp_call",
+        tool: "get_world_status",
+        arguments: {},
+      ),
+      depends_on: ["bob_load_from_mqtt"],
+      wait_before: 1000,
+      wait_after: 1000,
+      timeout: 10000,
+      success_condition: None,
+    ),
+  ],
+  config: Some((
+    timeout_ms: Some(120000),  // 2 minutes max runtime
+    logging: None,
+    environment: None,
+    settings: Some({
+      "cleanup_on_exit": true,
+      "keep_logs": true
+    }),
+  )),
+)

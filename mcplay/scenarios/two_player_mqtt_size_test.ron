@@ -1,0 +1,199 @@
+// Two-player MQTT world sharing test - focus on message size debugging
+// Alice creates and publishes world, Bob joins and attempts to load from MQTT
+// Key: Check if Bob receives both small (info) and large (data) messages
+
+Scenario(
+    name: "two_player_mqtt_size_test",
+    description: "Two-player MQTT size test - Alice creates and publishes world, Bob joins to check MQTT message reception",
+    version: "1.0",
+    
+    // Infrastructure setup
+    infrastructure: InfrastructureConfig(
+        mqtt_server: MqttServerConfig(
+            required: true,
+            port: 1883,
+            config_file: None,
+            options: None,
+        ),
+        mqtt_observer: Some(MqttObserverConfig(
+            required: true,
+            topics: Some(["iotcraft/worlds/+/info", "iotcraft/worlds/+/data", "#"]),
+            client_id: Some("mqtt_size_test_observer"),
+        )),
+        mcp_server: None,
+        services: None,
+    ),
+    
+    // Two clients: Alice (host) and Bob (joiner)
+    clients: [
+        ClientConfig(
+            id: "alice",
+            player_id: "alice", 
+            mcp_port: 3001,
+            client_type: "desktop",
+            name: Some("Alice (Host)"),
+            config: None,
+        ),
+        ClientConfig(
+            id: "bob",
+            player_id: "bob", 
+            mcp_port: 3002,
+            client_type: "desktop",
+            name: Some("Bob (Explorer)"),
+            config: None,
+        ),
+    ],
+    
+    steps: [
+        // Step 1: Alice creates a world with substantial content
+        Step(
+            name: "alice_create_world",
+            description: "Alice creates a world with substantial content for size testing",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "create_world",
+                arguments: {
+                    "world_name": "mqtt_size_test_world",
+                    "description": "World for testing MQTT message size limits", 
+                    "template": "default"
+                },
+            ),
+            wait_before: 2000,
+            wait_after: 8000,  // Allow time for world creation
+            timeout: 30000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: [],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 2: Alice publishes the world for multiplayer
+        Step(
+            name: "alice_publish_world",
+            description: "Alice publishes the world for multiplayer - this should create large MQTT messages",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "publish_world",
+                arguments: {
+                    "world_name": "mqtt_size_test_world",
+                    "max_players": 2,
+                    "is_public": true
+                },
+            ),
+            wait_before: 1000,
+            wait_after: 3000,  // Allow time for MQTT publishing
+            timeout: 15000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["alice_create_world"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 3: Bob lists online worlds (should see Alice's world)
+        Step(
+            name: "bob_list_worlds",
+            description: "Bob lists online worlds - should see Alice's world from small info message",
+            client: "bob",
+            action: (
+                type: "mcp_call", 
+                tool: "list_online_worlds",
+                arguments: {},
+            ),
+            wait_before: 1000,
+            wait_after: 2000,
+            timeout: 10000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["alice_publish_world"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 4: Bob joins Alice's world
+        Step(
+            name: "bob_join_world",
+            description: "Bob joins Alice's world",
+            client: "bob",
+            action: (
+                type: "mcp_call",
+                tool: "join_world", 
+                arguments: {
+                    "world_id": "mqtt_size_test_world_1757579029"
+                },
+            ),
+            wait_before: 1000, 
+            wait_after: 3000,  // Allow time for join process
+            timeout: 15000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["bob_list_worlds"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 5: Bob attempts to load world data from MQTT
+        // This is the critical test - will Bob receive the large world data message?
+        Step(
+            name: "bob_load_mqtt_world",
+            description: "Bob attempts to load world data from MQTT - critical test for large message reception",
+            client: "bob",
+            action: (
+                type: "mcp_call",
+                tool: "load_world_from_mqtt",
+                arguments: {
+                    "world_name": "mqtt_size_test_world"
+                },
+            ),
+            wait_before: 1000,
+            wait_after: 5000,  // Allow time for MQTT data retrieval
+            timeout: 15000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["bob_join_world"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 6: Bob checks world status (should show blocks > 0 if MQTT worked)
+        Step(
+            name: "bob_check_world_status",
+            description: "Bob checks world status - should show > 0 blocks if MQTT worked correctly",
+            client: "bob",
+            action: (
+                type: "mcp_call",
+                tool: "get_world_status", 
+                arguments: {},
+            ),
+            wait_before: 1000,
+            wait_after: 2000,
+            timeout: 10000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["bob_load_mqtt_world"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+    ]
+)

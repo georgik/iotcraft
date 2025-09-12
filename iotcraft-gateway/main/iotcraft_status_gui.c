@@ -288,6 +288,7 @@ static void* gui_thread(void* args)
         
         // Update service status from other modules
         current_status.mqtt_active = iotcraft_mqtt_is_running();
+        current_status.mqtt_connections = iotcraft_mqtt_get_client_count();
         current_status.mdns_active = true;  // TODO: get from iotcraft_mdns_is_running()
         current_status.http_active = true;  // TODO: get from iotcraft_http_is_running()
         
@@ -387,7 +388,13 @@ static void* gui_thread(void* args)
             draw_text_at(renderer, small_font, network_info, right_col_x + 8.0f, right_col_y, sta_color);
             right_col_y += 16.0f;
             
-            snprintf(network_info, sizeof(network_info), "Clients: %d", current_status.connected_clients);
+            // Show MQTT client connections
+            snprintf(network_info, sizeof(network_info), "MQTT Clients: %d", current_status.mqtt_connections);
+            draw_text_at(renderer, small_font, network_info, right_col_x + 8.0f, right_col_y, white);
+            right_col_y += 16.0f;
+            
+            // Show total network clients (DHCP clients)
+            snprintf(network_info, sizeof(network_info), "WiFi Clients: %d", current_status.connected_clients);
             draw_text_at(renderer, small_font, network_info, right_col_x + 8.0f, right_col_y, white);
             right_col_y += 16.0f;
         }

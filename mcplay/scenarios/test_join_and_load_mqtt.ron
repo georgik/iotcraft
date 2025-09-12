@@ -1,0 +1,206 @@
+(
+  name: "Test Join World and Load from MQTT",
+  description: "Test the workflow: Alice publishes world, Bob joins, Bob loads from MQTT",
+  version: "1.0",
+  infrastructure: (
+    mqtt_server: (
+      required: true,
+      port: 1883,
+      config_file: None,
+      options: None,
+    ),
+    mqtt_observer: Some((
+      required: true, 
+      topics: Some(["#"]),
+      client_id: Some("observer_join_load_mqtt_test"),
+    )),
+    mcp_server: None,
+    services: None,
+  ),
+  clients: [
+    (
+      id: "alice",
+      player_id: "alice",
+      mcp_port: 3001,
+      client_type: "desktop",
+      name: Some("Alice - World Host"),
+      config: Some({
+        "enable_mcp": true,
+        "readiness_probe": {
+          "type": "tcp_port", 
+          "port": 3001,
+          "initial_delay_seconds": 5,
+          "timeout_seconds": 10
+        },
+        "liveness_probe": {
+          "type": "mcp_ping",
+          "interval_seconds": 30,
+          "timeout_seconds": 10,
+          "failure_threshold": 5
+        }
+      }),
+    ),
+    (
+      id: "bob",
+      player_id: "bob",
+      mcp_port: 3002,
+      client_type: "desktop",
+      name: Some("Bob - World Joiner"),
+      config: Some({
+        "enable_mcp": true,
+        "readiness_probe": {
+          "type": "tcp_port", 
+          "port": 3002,
+          "initial_delay_seconds": 5,
+          "timeout_seconds": 10
+        },
+        "liveness_probe": {
+          "type": "mcp_ping",
+          "interval_seconds": 30,
+          "timeout_seconds": 10,
+          "failure_threshold": 5
+        }
+      }),
+    )
+  ],
+  steps: [
+    // Alice creates and publishes a world
+    (
+      name: "alice_create_world",
+      description: "Alice creates a simple world",
+      client: "alice",
+      action: (
+        type: "mcp_call",
+        tool: "create_world",
+        arguments: {
+          "world_name": "test_join_mqtt_world",
+          "description": "Test world for join and MQTT load",
+          "template": "default"
+        },
+      ),
+      depends_on: [],
+      wait_before: 1000,
+      wait_after: 3000,  // Wait for world creation
+      timeout: 30000,
+      success_condition: None,
+    ),
+    
+    (
+      name: "alice_publish_world", 
+      description: "Alice publishes her world for multiplayer",
+      client: "alice",
+      action: (
+        type: "mcp_call",
+        tool: "publish_world",
+        arguments: {
+          "world_name": "test_join_mqtt_world",
+          "max_players": 2,
+          "is_public": true,
+        },
+      ),
+      depends_on: ["alice_create_world"],
+      wait_before: 1000,
+      wait_after: 5000,   // Wait for world to be published and available via MQTT
+      timeout: 25000,
+      success_condition: None,
+    ),
+    
+    // Alice checks her multiplayer status
+    (
+      name: "alice_check_hosting_status",
+      description: "Alice verifies she's in hosting mode",
+      client: "alice",
+      action: (
+        type: "mcp_call",
+        tool: "get_multiplayer_status",
+        arguments: {},
+      ),
+      depends_on: ["alice_publish_world"],
+      wait_before: 1000,
+      wait_after: 1000,
+      timeout: 10000,
+      success_condition: None,
+    ),
+    
+    // Bob joins the world  
+    (
+      name: "bob_join_world",
+      description: "Bob joins Alice's world",
+      client: "bob",
+      action: (
+        type: "mcp_call",
+        tool: "join_world",
+        arguments: {
+          "world_id": "test_join_mqtt_world"
+        },
+      ),
+      depends_on: ["alice_check_hosting_status"],
+      wait_before: 1000,
+      wait_after: 5000,   // Wait longer for join to complete and multiplayer mode to change
+      timeout: 30000,
+      success_condition: None,
+    ),
+    
+    // Bob checks his multiplayer status to confirm he's joined
+    (
+      name: "bob_check_joined_status", 
+      description: "Bob verifies he's in joined world mode",
+      client: "bob",
+      action: (
+        type: "mcp_call",
+        tool: "get_multiplayer_status",
+        arguments: {},
+      ),
+      depends_on: ["bob_join_world"],
+      wait_before: 2000,  // Wait for multiplayer state to update
+      wait_after: 2000,
+      timeout: 15000,
+      success_condition: None,
+    ),
+    
+    // Now Bob tries to load from MQTT (this should work if he's in multiplayer mode)
+    (
+      name: "bob_load_from_mqtt",
+      description: "Bob loads the world data from MQTT after joining",
+      client: "bob",
+      action: (
+        type: "mcp_call",
+        tool: "load_world_from_mqtt",
+        arguments: {
+          "world_name": "test_join_mqtt_world"
+        },
+      ),
+      depends_on: ["bob_check_joined_status"],
+      wait_before: 1000,
+      wait_after: 2000,
+      timeout: 20000,
+      success_condition: None,
+    ),
+    
+    // Bob verifies game state after loading
+    (
+      name: "bob_verify_game_state_after_mqtt_load",
+      description: "Bob verifies he's in the game after loading from MQTT",
+      client: "bob",
+      action: (
+        type: "mcp_call",
+        tool: "get_game_state",
+        arguments: {},
+      ),
+      depends_on: ["bob_load_from_mqtt"],
+      wait_before: 1000,
+      wait_after: 1000,
+      timeout: 10000,
+      success_condition: None,
+    ),
+  ],
+  config: Some((
+    timeout_ms: Some(240000),  // 4 minutes max runtime
+    logging: None,
+    environment: None,
+    settings: Some({
+      "cleanup_on_exit": true,
+      "keep_logs": true
+    }),
+  )),
+)

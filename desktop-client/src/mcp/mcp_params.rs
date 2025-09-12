@@ -25,6 +25,7 @@ pub struct CoreMcpParams<'w, 's> {
     pub command_executed_events: EventWriter<'w, CommandExecutedEvent>,
     pub temperature: Res<'w, TemperatureResource>,
     pub mqtt_config: Res<'w, MqttConfig>,
+    pub core_mqtt_status: Option<Res<'w, crate::mqtt::core_service::CoreMqttConnectionStatus>>,
     // PhantomData to use the 's lifetime
     _phantom: std::marker::PhantomData<&'s ()>,
 }
@@ -36,9 +37,13 @@ pub struct WorldMcpParams<'w, 's> {
     pub voxel_world: ResMut<'w, VoxelWorld>,
     pub create_world_events: EventWriter<'w, CreateWorldEvent>,
     pub load_world_events: EventWriter<'w, LoadWorldEvent>,
+    pub start_world_creation_events: Option<EventWriter<'w, crate::world::StartWorldCreationEvent>>,
     pub current_world: Option<Res<'w, CurrentWorld>>,
     pub discovered_worlds: ResMut<'w, DiscoveredWorlds>,
     pub next_game_state: Option<ResMut<'w, NextState<GameState>>>,
+    pub inventory: ResMut<'w, crate::inventory::PlayerInventory>,
+    pub place_events: EventWriter<'w, crate::inventory::PlaceBlockEvent>,
+    pub break_events: EventWriter<'w, crate::inventory::BreakBlockEvent>,
     // PhantomData to use the 's lifetime
     _phantom: std::marker::PhantomData<&'s ()>,
 }
@@ -123,7 +128,11 @@ mod tests {
         world.insert_resource(VoxelWorld::default());
         world.init_resource::<Events<CreateWorldEvent>>();
         world.init_resource::<Events<LoadWorldEvent>>();
+        world.init_resource::<Events<crate::world::StartWorldCreationEvent>>();
         world.insert_resource(DiscoveredWorlds::default());
+        world.insert_resource(crate::inventory::PlayerInventory::new());
+        world.init_resource::<Events<crate::inventory::PlaceBlockEvent>>();
+        world.init_resource::<Events<crate::inventory::BreakBlockEvent>>();
 
         // Test system that uses WorldMcpParams
         let test_system = |_params: WorldMcpParams| {

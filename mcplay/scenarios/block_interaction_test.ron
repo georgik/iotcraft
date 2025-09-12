@@ -1,0 +1,626 @@
+// Block Interaction Test Scenario
+// Tests enhanced block placement and removal functionality with multiplayer synchronization
+Scenario(
+    name: "block_interaction_test",
+    description: "Comprehensive test of block placement and removal with visual entity sync and multiplayer compatibility",
+    version: "1.0",
+    
+    // Infrastructure setup
+    infrastructure: InfrastructureConfig(
+        mqtt_server: MqttServerConfig(
+            required: true,
+            port: 1883,
+            config_file: None,
+            options: None,
+        ),
+        mqtt_observer: None,
+        mcp_server: None,
+        services: None,
+    ),
+    
+    // Two test clients - desktop and WASM to test cross-platform compatibility
+    clients: [
+        ClientConfig(
+            id: "alice",
+            player_id: "alice", 
+            mcp_port: 8080,
+            client_type: "desktop",
+            name: Some("Alice - Desktop Client"),
+            config: None,
+        ),
+        ClientConfig(
+            id: "bob",
+            player_id: "bob",
+            mcp_port: 8081,
+            client_type: "wasm", 
+            name: Some("Bob - WASM Client"),
+            config: None,
+        ),
+    ],
+    
+    // Comprehensive test steps
+    steps: [
+        // === PHASE 1: SETUP AND INITIALIZATION ===
+        
+        // Step 1: Initialize Alice's MCP connection
+        Step(
+            name: "alice_mcp_initialize",
+            description: "Initialize Alice's MCP connection",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "initialize",
+                arguments: {
+                    "protocolVersion": "2024-11-05",
+                    "capabilities": {
+                        "tools": {}
+                    },
+                    "clientInfo": {
+                        "name": "block-test-alice",
+                        "version": "1.0.0"
+                    }
+                },
+            ),
+            wait_before: 500,
+            wait_after: 200,
+            timeout: 10000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: [],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 2: Initialize Bob's MCP connection  
+        Step(
+            name: "bob_mcp_initialize",
+            description: "Initialize Bob's MCP connection",
+            client: "bob",
+            action: (
+                type: "mcp_call",
+                tool: "initialize",
+                arguments: {
+                    "protocolVersion": "2024-11-05",
+                    "capabilities": {
+                        "tools": {}
+                    },
+                    "clientInfo": {
+                        "name": "block-test-bob",
+                        "version": "1.0.0"
+                    }
+                },
+            ),
+            wait_before: 500,
+            wait_after: 200,
+            timeout: 10000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["alice_mcp_initialize"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+
+        // Step 3: Alice creates and publishes a world
+        Step(
+            name: "alice_create_world",
+            description: "Alice creates a new world for block interaction testing",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "create_world",
+                arguments: {
+                    "world_name": "block_interaction_world",
+                    "description": "World for testing block placement and removal"
+                },
+            ),
+            wait_before: 1000,
+            wait_after: 2000,
+            timeout: 15000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["bob_mcp_initialize"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+
+        // Step 4: Alice publishes the world for multiplayer
+        Step(
+            name: "alice_publish_world",
+            description: "Alice publishes the world for Bob to join",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "publish_world",
+                arguments: {
+                    "world_name": "block_interaction_world",
+                    "max_players": 4,
+                    "is_public": true
+                },
+            ),
+            wait_before: 1000,
+            wait_after: 3000,
+            timeout: 15000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["alice_create_world"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+
+        // Step 5: Bob lists available worlds
+        Step(
+            name: "bob_list_worlds",
+            description: "Bob discovers available worlds",
+            client: "bob",
+            action: (
+                type: "mcp_call",
+                tool: "list_online_worlds",
+                arguments: {},
+            ),
+            wait_before: 2000,
+            wait_after: 1000,
+            timeout: 10000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["alice_publish_world"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+
+        // Step 6: Bob joins Alice's world
+        Step(
+            name: "bob_join_world",
+            description: "Bob joins Alice's published world",
+            client: "bob",
+            action: (
+                type: "mcp_call",
+                tool: "join_world",
+                arguments: {
+                    "world_id": "block_interaction_world"
+                },
+            ),
+            wait_before: 1000,
+            wait_after: 3000,
+            timeout: 15000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["bob_list_worlds"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // === PHASE 2: BLOCK PLACEMENT TESTING ===
+        
+        // Step 7: Alice places a variety of blocks
+        Step(
+            name: "alice_place_stone_block",
+            description: "Alice places a stone block at coordinates (5, 1, 0)",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "place_block",
+                arguments: {
+                    "block_type": "stone",
+                    "x": 5,
+                    "y": 1,
+                    "z": 0,
+                },
+            ),
+            wait_before: 1000,
+            wait_after: 2000,
+            timeout: 10000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["bob_join_world"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+
+        // Step 8: Alice places a second block
+        Step(
+            name: "alice_place_grass_block",
+            description: "Alice places a grass block at coordinates (6, 1, 0)",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "place_block",
+                arguments: {
+                    "block_type": "grass",
+                    "x": 6,
+                    "y": 1,
+                    "z": 0,
+                },
+            ),
+            wait_before: 500,
+            wait_after: 2000,
+            timeout: 10000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["alice_place_stone_block"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+
+        // Step 9: Bob places blocks from WASM client
+        Step(
+            name: "bob_place_dirt_block",
+            description: "Bob (WASM) places a dirt block at coordinates (-5, 1, 0)",
+            client: "bob",
+            action: (
+                type: "mcp_call",
+                tool: "place_block",
+                arguments: {
+                    "block_type": "dirt",
+                    "x": -5,
+                    "y": 1,
+                    "z": 0,
+                },
+            ),
+            wait_before: 500,
+            wait_after: 2000,
+            timeout: 10000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["alice_place_grass_block"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+
+        // Step 10: Bob places a decorative block
+        Step(
+            name: "bob_place_quartz_block",
+            description: "Bob (WASM) places a quartz block at coordinates (-6, 1, 0)",
+            client: "bob",
+            action: (
+                type: "mcp_call",
+                tool: "place_block",
+                arguments: {
+                    "block_type": "quartz_block",
+                    "x": -6,
+                    "y": 1,
+                    "z": 0,
+                },
+            ),
+            wait_before: 500,
+            wait_after: 2000,
+            timeout: 10000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["bob_place_dirt_block"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+
+        // Step 11: Create a wall structure for testing
+        Step(
+            name: "alice_create_test_wall",
+            description: "Alice creates a small wall structure for removal testing",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "create_wall",
+                arguments: {
+                    "block_type": "cyan_terracotta",
+                    "x1": 0,
+                    "y1": 1,
+                    "z1": 5,
+                    "x2": 2,
+                    "y2": 3,
+                    "z2": 5,
+                },
+            ),
+            wait_before: 1000,
+            wait_after: 3000,
+            timeout: 15000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["bob_place_quartz_block"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // === PHASE 3: BLOCK REMOVAL TESTING ===
+        
+        // Step 12: Alice removes one of her own blocks (testing visual entity removal)
+        Step(
+            name: "alice_remove_stone_block",
+            description: "Alice removes the stone block she placed earlier (tests visual entity removal)",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "remove_block",
+                arguments: {
+                    "x": 5,
+                    "y": 1,
+                    "z": 0,
+                },
+            ),
+            wait_before: 1000,
+            wait_after: 2000,
+            timeout: 10000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["alice_create_test_wall"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+
+        // Step 13: Bob removes one of his own blocks (testing WASM block removal)
+        Step(
+            name: "bob_remove_dirt_block",
+            description: "Bob (WASM) removes the dirt block he placed (tests WASM block removal)",
+            client: "bob",
+            action: (
+                type: "mcp_call",
+                tool: "remove_block",
+                arguments: {
+                    "x": -5,
+                    "y": 1,
+                    "z": 0,
+                },
+            ),
+            wait_before: 1000,
+            wait_after: 2000,
+            timeout: 10000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["alice_remove_stone_block"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+
+        // Step 14: Alice removes one of Bob's blocks (cross-client removal testing)
+        Step(
+            name: "alice_remove_bob_block",
+            description: "Alice removes Bob's quartz block (tests cross-client block removal sync)",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "remove_block",
+                arguments: {
+                    "x": -6,
+                    "y": 1,
+                    "z": 0,
+                },
+            ),
+            wait_before: 1000,
+            wait_after: 2000,
+            timeout: 10000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["bob_remove_dirt_block"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+
+        // Step 15: Bob removes blocks from the wall (testing multiple block removal)
+        Step(
+            name: "bob_remove_wall_block_1",
+            description: "Bob removes one block from Alice's wall (position 0,1,5)",
+            client: "bob",
+            action: (
+                type: "mcp_call",
+                tool: "remove_block",
+                arguments: {
+                    "x": 0,
+                    "y": 1,
+                    "z": 5,
+                },
+            ),
+            wait_before: 1000,
+            wait_after: 2000,
+            timeout: 10000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["alice_remove_bob_block"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+
+        // Step 16: Bob removes another wall block
+        Step(
+            name: "bob_remove_wall_block_2",
+            description: "Bob removes second block from wall (position 1,2,5)",
+            client: "bob",
+            action: (
+                type: "mcp_call",
+                tool: "remove_block",
+                arguments: {
+                    "x": 1,
+                    "y": 2,
+                    "z": 5,
+                },
+            ),
+            wait_before: 1000,
+            wait_after: 2000,
+            timeout: 10000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["bob_remove_wall_block_1"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+
+        // Step 17: Test removing non-existent block (error handling)
+        Step(
+            name: "alice_remove_nonexistent_block",
+            description: "Alice attempts to remove a block that doesn't exist (tests error handling)",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "remove_block",
+                arguments: {
+                    "x": 100,
+                    "y": 100,
+                    "z": 100,
+                },
+            ),
+            wait_before: 500,
+            wait_after: 1000,
+            timeout: 10000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success", // Should succeed but report no block found
+            )),
+            depends_on: ["bob_remove_wall_block_2"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // === PHASE 4: VERIFICATION AND STATUS CHECKS ===
+
+        // Step 18: Alice checks world status after all changes
+        Step(
+            name: "alice_final_world_status",
+            description: "Alice verifies final world state after placement and removal operations",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "get_world_status",
+                arguments: {},
+            ),
+            wait_before: 1000,
+            wait_after: 1000,
+            timeout: 10000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["alice_remove_nonexistent_block"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+
+        // Step 19: Bob checks world status for synchronization verification
+        Step(
+            name: "bob_final_world_status",
+            description: "Bob verifies that his world state matches Alice's (multiplayer sync check)",
+            client: "bob",
+            action: (
+                type: "mcp_call",
+                tool: "get_world_status",
+                arguments: {},
+            ),
+            wait_before: 500,
+            wait_after: 1000,
+            timeout: 10000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["alice_final_world_status"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+
+        // Step 20: Final multiplayer status verification
+        Step(
+            name: "final_multiplayer_verification",
+            description: "Final verification that both clients are still synchronized in multiplayer",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "get_multiplayer_status",
+                arguments: {},
+            ),
+            wait_before: 500,
+            wait_after: 1000,
+            timeout: 10000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["bob_final_world_status"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+    ],
+    
+    // Test configuration
+    config: Some(ScenarioConfig(
+        timeout_ms: Some(300000), // 5 minutes total timeout
+        logging: Some(LoggingConfig(
+            level: Some("info"),
+            log_mqtt: Some(true),
+            log_client_actions: Some(true),
+            filters: Some([
+                "mcp/*", 
+                "world/*", 
+                "multiplayer/*",
+                "place_block",
+                "remove_block",
+                "create_wall",
+                "BlockPlaced",
+                "BlockRemoved", 
+                "BreakBlockEvent",
+                "GameState",
+                "visual_entity",
+                "alice",
+                "bob"
+            ]),
+        )),
+        environment: Some({
+            "RUST_LOG": "info,iotcraft_desktop_client=info",
+            "SCENARIO_NAME": "block_interaction_test",
+            "ENABLE_MCP": "true",
+            "MULTIPLAYER_MODE": "true",
+        }),
+        settings: Some({
+            "auto_cleanup": true,
+            "preserve_logs": true,
+            "fail_fast": true,
+        }),
+    )),
+)

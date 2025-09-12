@@ -165,12 +165,6 @@ pub fn execute_mcp_tool(
             }],
             is_error: Some(false),
         }),
-        "ping" => Ok(McpToolResult {
-            content: vec![McpContent::Text {
-                text: "pong".to_string(),
-            }],
-            is_error: Some(false),
-        }),
         _ => Err(McpError {
             code: -32601,
             message: format!("Tool '{}' not found", tool_name),

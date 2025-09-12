@@ -1,0 +1,237 @@
+// Debug Block Placement Test
+// Minimal scenario to test different block types and isolate the freezing issue
+Scenario(
+    name: "debug_block_placement",
+    description: "Debug test to isolate the block placement freezing issue",
+    version: "1.0",
+    
+    // Minimal infrastructure
+    infrastructure: InfrastructureConfig(
+        mqtt_server: MqttServerConfig(
+            required: true,
+            port: 1883,
+            config_file: None,
+            options: None,
+        ),
+        mqtt_observer: Some(MqttObserverConfig(
+            required: true,
+            topics: Some(["#"]),
+            client_id: Some("debug_observer"),
+        )),
+        mcp_server: None,
+        services: None,
+    ),
+    
+    // Single client
+    clients: [
+        ClientConfig(
+            id: "debug_client",
+            player_id: "debug_client", 
+            mcp_port: 8080,
+            client_type: "desktop",
+            name: Some("Debug Client"),
+            config: None,
+        ),
+    ],
+    
+    // Debug steps
+    steps: [
+        // Step 1: Initialize
+        Step(
+            name: "debug_mcp_initialize",
+            description: "Initialize MCP connection",
+            client: "debug_client",
+            action: (
+                type: "mcp_call",
+                tool: "initialize",
+                arguments: {
+                    "protocolVersion": "2024-11-05",
+                    "capabilities": { "tools": {} },
+                    "clientInfo": {
+                        "name": "debug-test",
+                        "version": "1.0.0"
+                    }
+                },
+            ),
+            wait_before: 2000,
+            wait_after: 500,
+            timeout: 10000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: [],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 2: Create world
+        Step(
+            name: "debug_create_world",
+            description: "Create a minimal world",
+            client: "debug_client",
+            action: (
+                type: "mcp_call",
+                tool: "create_world",
+                arguments: {
+                    "world_name": "debug_world",
+                    "description": "Debug test world",
+                    "template": "default"
+                },
+            ),
+            wait_before: 1000,
+            wait_after: 2000,
+            timeout: 15000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["debug_mcp_initialize"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 3: Place stone block (this works)
+        Step(
+            name: "debug_place_stone",
+            description: "Place a stone block - should work",
+            client: "debug_client",
+            action: (
+                type: "mcp_call",
+                tool: "place_block",
+                arguments: {
+                    "block_type": "stone",
+                    "x": 1,
+                    "y": 1,
+                    "z": 0
+                },
+            ),
+            wait_before: 500,
+            wait_after: 1000,
+            timeout: 15000, // Increased timeout
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["debug_create_world"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+
+        // Step 4: Place dirt block (test another block type)
+        Step(
+            name: "debug_place_dirt",
+            description: "Place a dirt block - should also work",
+            client: "debug_client",
+            action: (
+                type: "mcp_call",
+                tool: "place_block",
+                arguments: {
+                    "block_type": "dirt",
+                    "x": 2,
+                    "y": 1,
+                    "z": 0
+                },
+            ),
+            wait_before: 500,
+            wait_after: 1000,
+            timeout: 15000, // Increased timeout
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["debug_place_stone"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+
+        // Step 5: Place grass block
+        Step(
+            name: "debug_place_grass",
+            description: "Place a grass block",
+            client: "debug_client",
+            action: (
+                type: "mcp_call",
+                tool: "place_block",
+                arguments: {
+                    "block_type": "grass",
+                    "x": 3,
+                    "y": 1,
+                    "z": 0
+                },
+            ),
+            wait_before: 500,
+            wait_after: 1000,
+            timeout: 15000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["debug_place_dirt"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+
+        // Step 6: Try quartz block last
+        Step(
+            name: "debug_place_quartz",
+            description: "Place a quartz block - this is the problematic one",
+            client: "debug_client",
+            action: (
+                type: "mcp_call",
+                tool: "place_block",
+                arguments: {
+                    "block_type": "quartz_block",
+                    "x": 4,
+                    "y": 1,
+                    "z": 0
+                },
+            ),
+            wait_before: 500,
+            wait_after: 1000,
+            timeout: 15000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["debug_place_grass"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+    ],
+    
+    config: Some(ScenarioConfig(
+        timeout_ms: Some(90000), // 90 seconds total timeout
+        logging: Some(LoggingConfig(
+            level: Some("debug"),
+            log_mqtt: Some(true),
+            log_client_actions: Some(true),
+            filters: Some([
+                "mcp/*", 
+                "place_block",
+                "sync_block_visuals",
+                "visual/*",
+                "texture/*",
+                "quartz*",
+                "CommandExecutedEvent",
+                "execute_mcp_command*"
+            ]),
+        )),
+        environment: Some({
+            "RUST_LOG": "debug,iotcraft_desktop_client=trace",
+            "SCENARIO_NAME": "debug_block_placement",
+            "ENABLE_MCP": "true",
+        }),
+        settings: Some({
+            "auto_cleanup": true,
+            "preserve_logs": true,
+            "fail_fast": true,
+        }),
+    )),
+)

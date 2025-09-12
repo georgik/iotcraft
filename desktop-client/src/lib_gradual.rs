@@ -255,7 +255,7 @@ pub fn touch_camera_control_system(
 
                 #[cfg(target_arch = "wasm32")]
                 web_sys::console::log_1(&format!(
-                    "📱 Touch debug: pos=({:.1},{:.1}), screen={:.1}x{:.1}, split_x={:.1}, left_side={}", 
+                    "📱 Touch debug: pos=({:.1},{:.1}), screen={:.1}x{:.1}, split_x={:.1}, left_side={}",
                     touch_pos.x, touch_pos.y, touch_state.screen_width, touch_state.screen_height,
                     touch_state.look_area_min_x, is_left_side
                 ).into());
@@ -2400,6 +2400,7 @@ pub fn handle_block_interaction_input_web(
                             if ghost_state.can_place {
                                 place_block_events.write(PlaceBlockEvent {
                                     position: placement_position,
+                                    block_type: Some(block_type),
                                 });
 
                                 #[cfg(target_arch = "wasm32")]

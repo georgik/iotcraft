@@ -1,0 +1,510 @@
+(
+  name: "Four Player Multiplayer World",
+  description: "Alice creates and shares a world, Bob/Charlie/David join, each moves in different directions and places blocks, then verify synchronization",
+  version: "1.0",
+  infrastructure: (
+    mqtt_server: (
+      required: true,
+      port: 1883,
+      config_file: None,
+      options: None,
+    ),
+    mqtt_observer: Some((
+      required: true, 
+      topics: Some(["#"]),
+      client_id: Some("four_player_observer"),
+    )),
+    mcp_server: None,
+    services: None,
+  ),
+  clients: [
+    (
+      id: "alice",
+      player_id: "alice",
+      mcp_port: 3001,
+      client_type: "desktop",
+      name: Some("Alice - World Host"),
+      config: Some({
+        "enable_mcp": true,
+        "readiness_probe": {
+          "type": "tcp_port", 
+          "port": 3001,
+          "initial_delay_seconds": 5,
+          "timeout_seconds": 15
+        },
+        "liveness_probe": {
+          "type": "mcp_ping",
+          "interval_seconds": 30,
+          "timeout_seconds": 10,
+          "failure_threshold": 5
+        }
+      }),
+    ),
+    (
+      id: "bob",
+      player_id: "bob",
+      mcp_port: 3002,
+      client_type: "desktop",
+      name: Some("Bob - North Player"),
+      config: Some({
+        "enable_mcp": true,
+        "readiness_probe": {
+          "type": "tcp_port", 
+          "port": 3002,
+          "initial_delay_seconds": 5,
+          "timeout_seconds": 15
+        },
+        "liveness_probe": {
+          "type": "mcp_ping",
+          "interval_seconds": 30,
+          "timeout_seconds": 10,
+          "failure_threshold": 5
+        }
+      }),
+    ),
+    (
+      id: "charlie",
+      player_id: "charlie",
+      mcp_port: 3003,
+      client_type: "desktop",
+      name: Some("Charlie - South Player"),
+      config: Some({
+        "enable_mcp": true,
+        "readiness_probe": {
+          "type": "tcp_port", 
+          "port": 3003,
+          "initial_delay_seconds": 5,
+          "timeout_seconds": 15
+        },
+        "liveness_probe": {
+          "type": "mcp_ping",
+          "interval_seconds": 30,
+          "timeout_seconds": 10,
+          "failure_threshold": 5
+        }
+      }),
+    ),
+    (
+      id: "david",
+      player_id: "david",
+      mcp_port: 3004,
+      client_type: "desktop",
+      name: Some("David - East/West Player"),
+      config: Some({
+        "enable_mcp": true,
+        "readiness_probe": {
+          "type": "tcp_port", 
+          "port": 3004,
+          "initial_delay_seconds": 5,
+          "timeout_seconds": 15
+        },
+        "liveness_probe": {
+          "type": "mcp_ping",
+          "interval_seconds": 30,
+          "timeout_seconds": 10,
+          "failure_threshold": 5
+        }
+      }),
+    )
+  ],
+  steps: [
+    // Step 1: Alice creates new world
+    (
+      name: "alice_create_world",
+      description: "Alice creates a new world for 4-player multiplayer testing",
+      client: "alice",
+      action: (
+        type: "mcp_call",
+        tool: "create_world",
+        arguments: {
+          "world_name": "four_player_world",
+          "description": "A world for 4-player multiplayer testing with directional movement and block placement",
+          "template": "default"
+        },
+      ),
+      depends_on: [],
+      wait_before: 2000,
+      wait_after: 3000,
+      timeout: 30000,
+      success_condition: None,
+    ),
+    
+    // Step 2: Alice publishes world
+    (
+      name: "alice_publish_world",
+      description: "Alice shares the world via MQTT for multiplayer access",
+      client: "alice",
+      action: (
+        type: "mcp_call",
+        tool: "publish_world",
+        arguments: {
+          "world_name": "four_player_world",
+          "max_players": 4,
+          "is_public": true
+        },
+      ),
+      depends_on: ["alice_create_world"],
+      wait_before: 2000,
+      wait_after: 4000,  // Wait for MQTT publishing to complete
+      timeout: 20000,
+      success_condition: None,
+    ),
+    
+    // Step 3: Bob discovers online worlds
+    (
+      name: "bob_list_online_worlds",
+      description: "Bob gets list of available online worlds via MQTT",
+      client: "bob",
+      action: (
+        type: "mcp_call",
+        tool: "list_online_worlds",
+        arguments: {},
+      ),
+      depends_on: ["alice_publish_world"],
+      wait_before: 2000,
+      wait_after: 2000,
+      timeout: 15000,
+      success_condition: None,
+    ),
+    
+    // Step 4: Charlie discovers online worlds
+    (
+      name: "charlie_list_online_worlds",
+      description: "Charlie gets list of available online worlds via MQTT",
+      client: "charlie",
+      action: (
+        type: "mcp_call",
+        tool: "list_online_worlds",
+        arguments: {},
+      ),
+      depends_on: ["alice_publish_world"],
+      wait_before: 2000,
+      wait_after: 2000,
+      timeout: 15000,
+      success_condition: None,
+    ),
+    
+    // Step 5: David discovers online worlds  
+    (
+      name: "david_list_online_worlds",
+      description: "David gets list of available online worlds via MQTT",
+      client: "david",
+      action: (
+        type: "mcp_call",
+        tool: "list_online_worlds",
+        arguments: {},
+      ),
+      depends_on: ["alice_publish_world"],
+      wait_before: 2000,
+      wait_after: 2000,
+      timeout: 15000,
+      success_condition: None,
+    ),
+    
+    // Step 6: Bob joins Alice's world
+    (
+      name: "bob_join_world",
+      description: "Bob loads the world from MQTT topic and joins multiplayer",
+      client: "bob",
+      action: (
+        type: "mcp_call",
+        tool: "join_world",
+        arguments: {
+          "world_id": "four_player_world"
+        },
+      ),
+      depends_on: ["bob_list_online_worlds"],
+      wait_before: 1000,
+      wait_after: 3000,
+      timeout: 25000,
+      success_condition: None,
+    ),
+    
+    // Step 7: Charlie joins Alice's world
+    (
+      name: "charlie_join_world",
+      description: "Charlie loads the world from MQTT topic and joins multiplayer",
+      client: "charlie",
+      action: (
+        type: "mcp_call",
+        tool: "join_world",
+        arguments: {
+          "world_id": "four_player_world"
+        },
+      ),
+      depends_on: ["charlie_list_online_worlds"],
+      wait_before: 1000,
+      wait_after: 3000,
+      timeout: 25000,
+      success_condition: None,
+    ),
+    
+    // Step 8: David joins Alice's world
+    (
+      name: "david_join_world",
+      description: "David loads the world from MQTT topic and joins multiplayer",
+      client: "david",
+      action: (
+        type: "mcp_call",
+        tool: "join_world",
+        arguments: {
+          "world_id": "four_player_world"
+        },
+      ),
+      depends_on: ["david_list_online_worlds"],
+      wait_before: 1000,
+      wait_after: 3000,
+      timeout: 25000,
+      success_condition: None,
+    ),
+    
+    // Step 9: Alice moves to center (remains at spawn)
+    (
+      name: "alice_stay_center",
+      description: "Alice verifies her position at center/spawn point",
+      client: "alice",
+      action: (
+        type: "mcp_call",
+        tool: "player_move",
+        arguments: {
+          "x": 0.0,
+          "y": 0.5,
+          "z": 0.0
+        },
+      ),
+      depends_on: ["bob_join_world", "charlie_join_world", "david_join_world"],
+      wait_before: 2000,
+      wait_after: 1000,
+      timeout: 10000,
+      success_condition: None,
+    ),
+    
+    // Step 10: Bob moves north 
+    (
+      name: "bob_move_north",
+      description: "Bob moves north (negative Z direction)",
+      client: "bob",
+      action: (
+        type: "mcp_call",
+        tool: "player_move",
+        arguments: {
+          "x": 0.0,
+          "y": 0.5,
+          "z": -5.0
+        },
+      ),
+      depends_on: ["alice_stay_center"],
+      wait_before: 1000,
+      wait_after: 1000,
+      timeout: 10000,
+      success_condition: None,
+    ),
+    
+    // Step 11: Charlie moves south
+    (
+      name: "charlie_move_south",
+      description: "Charlie moves south (positive Z direction)",
+      client: "charlie",
+      action: (
+        type: "mcp_call",
+        tool: "player_move",
+        arguments: {
+          "x": 0.0,
+          "y": 0.5,
+          "z": 5.0
+        },
+      ),
+      depends_on: ["alice_stay_center"],
+      wait_before: 1000,
+      wait_after: 1000,
+      timeout: 10000,
+      success_condition: None,
+    ),
+    
+    // Step 12: David moves east
+    (
+      name: "david_move_east",
+      description: "David moves east (positive X direction)",
+      client: "david",
+      action: (
+        type: "mcp_call",
+        tool: "player_move",
+        arguments: {
+          "x": 5.0,
+          "y": 0.5,
+          "z": 0.0
+        },
+      ),
+      depends_on: ["alice_stay_center"],
+      wait_before: 1000,
+      wait_after: 1000,
+      timeout: 10000,
+      success_condition: None,
+    ),
+    
+    // Step 13: Alice places a block at center (grass block as marker)
+    (
+      name: "alice_place_block_center",
+      description: "Alice places a grass block at the center spawn point",
+      client: "alice",
+      action: (
+        type: "mcp_call",
+        tool: "place_block",
+        arguments: {
+          "block_type": "grass",
+          "x": 0,
+          "y": 1,
+          "z": 0
+        },
+      ),
+      depends_on: ["bob_move_north", "charlie_move_south", "david_move_east"],
+      wait_before: 1000,
+      wait_after: 2000,  // Wait for block sync via MQTT
+      timeout: 10000,
+      success_condition: None,
+    ),
+    
+    // Step 14: Bob places a block to the north
+    (
+      name: "bob_place_block_north",
+      description: "Bob places a stone block north of spawn",
+      client: "bob",
+      action: (
+        type: "mcp_call",
+        tool: "place_block",
+        arguments: {
+          "block_type": "stone",
+          "x": 0,
+          "y": 1,
+          "z": -5
+        },
+      ),
+      depends_on: ["alice_place_block_center"],
+      wait_before: 1000,
+      wait_after: 2000,  // Wait for block sync via MQTT
+      timeout: 10000,
+      success_condition: None,
+    ),
+    
+    // Step 15: Charlie places a block to the south
+    (
+      name: "charlie_place_block_south",
+      description: "Charlie places a dirt block south of spawn",
+      client: "charlie",
+      action: (
+        type: "mcp_call",
+        tool: "place_block",
+        arguments: {
+          "block_type": "dirt",
+          "x": 0,
+          "y": 1,
+          "z": 5
+        },
+      ),
+      depends_on: ["bob_place_block_north"],
+      wait_before: 1000,
+      wait_after: 2000,  // Wait for block sync via MQTT
+      timeout: 10000,
+      success_condition: None,
+    ),
+    
+    // Step 16: David places a block to the east
+    (
+      name: "david_place_block_east",
+      description: "David places a quartz block east of spawn",
+      client: "david",
+      action: (
+        type: "mcp_call",
+        tool: "place_block",
+        arguments: {
+          "block_type": "quartz_block",
+          "x": 5,
+          "y": 1,
+          "z": 0
+        },
+      ),
+      depends_on: ["charlie_place_block_south"],
+      wait_before: 1000,
+      wait_after: 3000,  // Wait for final block sync via MQTT
+      timeout: 10000,
+      success_condition: None,
+    ),
+    
+    // Step 17: Alice verifies block count (should see all 4 blocks)
+    (
+      name: "alice_verify_blocks",
+      description: "Alice verifies the total number of blocks in the world (should be 4)",
+      client: "alice",
+      action: (
+        type: "mcp_call",
+        tool: "get_world_status",
+        arguments: {},
+      ),
+      depends_on: ["david_place_block_east"],
+      wait_before: 2000,
+      wait_after: 1000,
+      timeout: 10000,
+      success_condition: None,
+    ),
+    
+    // Step 18: Bob verifies block count (should see all 4 blocks) 
+    (
+      name: "bob_verify_blocks",
+      description: "Bob verifies the total number of blocks in the world (should be 4)",
+      client: "bob",
+      action: (
+        type: "mcp_call",
+        tool: "get_world_status",
+        arguments: {},
+      ),
+      depends_on: ["alice_verify_blocks"],
+      wait_before: 1000,
+      wait_after: 1000,
+      timeout: 10000,
+      success_condition: None,
+    ),
+    
+    // Step 19: Charlie verifies block count (should see all 4 blocks)
+    (
+      name: "charlie_verify_blocks",
+      description: "Charlie verifies the total number of blocks in the world (should be 4)",
+      client: "charlie",
+      action: (
+        type: "mcp_call",
+        tool: "get_world_status",
+        arguments: {},
+      ),
+      depends_on: ["bob_verify_blocks"],
+      wait_before: 1000,
+      wait_after: 1000,
+      timeout: 10000,
+      success_condition: None,
+    ),
+    
+    // Step 20: David verifies block count (should see all 4 blocks)
+    (
+      name: "david_verify_blocks",
+      description: "David verifies the total number of blocks in the world (should be 4)",
+      client: "david",
+      action: (
+        type: "mcp_call",
+        tool: "get_world_status",
+        arguments: {},
+      ),
+      depends_on: ["charlie_verify_blocks"],
+      wait_before: 1000,
+      wait_after: 2000,
+      timeout: 10000,
+      success_condition: None,
+    ),
+  ],
+  config: Some((
+    timeout_ms: Some(300000),  // 5 minutes max runtime
+    logging: None,
+    environment: None,
+    settings: Some({
+      "cleanup_on_exit": true,
+      "keep_logs": true
+    }),
+  )),
+)

@@ -1,0 +1,65 @@
+// Debug Simple Ping Test
+// Tests the most basic MCP command (ping) to isolate connection issues
+Scenario(
+    name: "debug_simple_ping_test",
+    description: "Debug test for basic MCP ping to isolate connection issues",
+    version: "1.0",
+    
+    // Infrastructure setup - minimal
+    infrastructure: InfrastructureConfig(
+        mqtt_server: MqttServerConfig(
+            required: true,
+            port: 1883,
+            config_file: None,
+            options: None,
+        ),
+        mqtt_observer: None,
+        mcp_server: None,
+        services: None,
+    ),
+    
+    // Single test client
+    clients: [
+        ClientConfig(
+            id: "ping_client",
+            player_id: "ping_player",
+            mcp_port: 3002,
+            client_type: "desktop",
+            name: Some("Ping Test Client"),
+            config: Some({
+                "enable_mcp": true,
+                "readiness_probe": {
+                    "type": "tcp_port",
+                    "port": 3002,
+                    "initial_delay_seconds": 5,
+                    "timeout_seconds": 15
+                }
+            }),
+        ),
+    ],
+    
+    // Single ping test
+    steps: [
+        Step(
+            name: "tools_list_only",
+            description: "Test basic MCP tools/list command only",
+            client: "ping_client",
+            action: (
+                type: "mcp_call",
+                tool: "tools/list",
+                arguments: {},
+            ),
+            wait_before: 1000,
+            wait_after: 1000,
+            timeout: 15000,
+            success_condition: None,
+            depends_on: [],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+    ],
+    
+    // Global configuration - minimal
+    config: None,
+)
