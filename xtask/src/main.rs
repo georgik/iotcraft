@@ -615,8 +615,10 @@ fn run_rust_tests(
     // Add report generation
     if generate_reports {
         if use_nextest {
-            let report_path = format!("{}/{}-nextest-report.xml", output_dir, test_type);
-            cmd.args(&["--junit-output", &report_path]);
+            // Note: Modern nextest doesn't support --junit-output directly
+            // For now, we'll use the built-in human format with message-format for structured output
+            cmd.args(&["--message-format", "human"]);
+            println!("⚠️  Note: JUnit XML output not supported with nextest, using human format");
         } else {
             let json_path = format!("{}/{}-results.json", output_dir, test_type);
             cmd.args(&["--", "--format", "json", "--show-output"])
