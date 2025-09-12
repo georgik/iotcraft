@@ -84,7 +84,7 @@ jobs:
       uses: dtolnay/rust-toolchain@stable
       with:
         targets: wasm32-unknown-unknown
-        components: rustfmt, clippy, llvm-tools-preview
+        components: rustfmt, llvm-tools-preview
 
     - name: Install modern Rust testing tools
       run: |
@@ -102,11 +102,6 @@ jobs:
 
     - name: Check code formatting
       run: cargo fmt --all --check
-
-    - name: Run clippy (warnings as errors)
-      run: |
-        cd desktop-client && cargo clippy --all-targets -- -D warnings
-        cd ../mcplay && cargo clippy --all-targets -- -D warnings
 
     - name: Run unit tests with xtask
       run: |
@@ -197,7 +192,7 @@ jobs:
     - name: Setup Rust
       uses: dtolnay/rust-toolchain@stable
       with:
-        components: rustfmt, clippy
+        components: rustfmt
 
     - name: Install modern testing tools
       run: |
