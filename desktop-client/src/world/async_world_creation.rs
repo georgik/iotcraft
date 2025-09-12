@@ -534,7 +534,9 @@ fn parse_template_file(template_path: &str) -> Result<Vec<TemplateCommand>, Stri
 /// The PendingToolExecutions resource is optional to support non-MCP usage
 fn handle_world_creation_completion(
     mut completion_events: EventReader<WorldCreationCompletedEvent>,
-    mut pending_executions: Option<ResMut<crate::mcp::mcp_types::PendingToolExecutions>>,
+    #[cfg(not(target_arch = "wasm32"))] mut pending_executions: Option<
+        ResMut<crate::mcp::mcp_types::PendingToolExecutions>,
+    >,
 ) {
     // Only log when there are actual events to process
     for event in completion_events.read() {
@@ -543,6 +545,7 @@ fn handle_world_creation_completion(
             event.world_name, event.blocks_created, event.mcp_request_id
         );
 
+        #[cfg(not(target_arch = "wasm32"))]
         if let Some(mcp_request_id) = &event.mcp_request_id {
             // Only try to send MCP response if MCP is enabled (resource exists)
             if let Some(ref mut pending_executions) = pending_executions {

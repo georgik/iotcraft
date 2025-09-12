@@ -1,9 +1,13 @@
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
+use html5ever::parse_document;
+use html5ever::tendril::TendrilSink;
 use if_addrs;
+use markup5ever_rcdom::{Handle, NodeData, RcDom};
 use qr2term;
 use serde::Deserialize;
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use which;
@@ -18,20 +22,38 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Format all workspace members
+    /// Format all workspace members (Rust code and HTML)
     Format {
         /// Check formatting without modifying files
         #[arg(short, long)]
         check: bool,
+        /// Format HTML files in addition to Rust code
+        #[arg(long)]
+        html: bool,
+        /// Path to HTML files or directory (for HTML formatting)
+        #[arg(long, default_value = "web")]
+        html_path: String,
     },
     /// Build the web version using wasm-pack
     WebBuild {
         /// Build with release optimizations
         #[arg(short, long)]
         release: bool,
+        /// Output directory for the web build
+        #[arg(short, long, default_value = "web")]
+        output: String,
     },
     /// Serve the web version locally for testing
     WebServe {
+        /// Port to serve on (default: 8000)
+        #[arg(short, long, default_value = "8000")]
+        port: u16,
+        /// Directory to serve from
+        #[arg(short, long, default_value = "web")]
+        dir: String,
+    },
+    /// Build and serve the web version
+    WebDev {
         /// Port to serve on (default: 8000)
         #[arg(short, long, default_value = "8000")]
         port: u16,
@@ -58,14 +80,22 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match &cli.command {
-        Commands::Format { check } => {
-            format_workspace_members(*check)?;
+        Commands::Format {
+            check,
+            html,
+            html_path,
+        } => {
+            format_workspace_members(*check, *html, html_path)?;
         }
-        Commands::WebBuild { release } => {
-            build_web(*release)?;
+        Commands::WebBuild { release, output } => {
+            build_web(*release, output)?;
         }
-        Commands::WebServe { port } => {
-            serve_web(*port)?;
+        Commands::WebServe { port, dir } => {
+            serve_web(*port, dir)?;
+        }
+        Commands::WebDev { port } => {
+            build_web(false, "web")?;
+            serve_web(*port, "web")?;
         }
         Commands::Cleanup { check } => {
             cleanup_source_files(*check)?;
@@ -95,13 +125,19 @@ fn read_workspace_members() -> Result<Vec<String>> {
 }
 
 /// Format all workspace members
-fn format_workspace_members(check_only: bool) -> Result<()> {
+fn format_workspace_members(check_only: bool, include_html: bool, html_path: &str) -> Result<()> {
     let members = read_workspace_members().context("Failed to read workspace members")?;
 
     if check_only {
         println!("🔍 Checking code formatting for all workspace members...");
+        if include_html {
+            println!("   Including HTML formatting checks in: {}", html_path);
+        }
     } else {
         println!("🎨 Formatting code for all workspace members...");
+        if include_html {
+            println!("   Including HTML formatting in: {}", html_path);
+        }
     }
     println!("   Found {} workspace members", members.len());
     println!();
@@ -127,6 +163,8 @@ fn format_workspace_members(check_only: bool) -> Result<()> {
     let mut processed_members = 0;
     let mut failed_c_projects = Vec::new();
     let mut processed_c_projects = 0;
+    let mut failed_html_files = 0;
+    let mut processed_html_files = 0;
 
     // Format Rust workspace members
     for member in &members {
@@ -201,14 +239,48 @@ fn format_workspace_members(check_only: bool) -> Result<()> {
         }
     }
 
+    // Format HTML files if requested
+    if include_html {
+        print!("🌐 Processing HTML files in {}... ", html_path);
+        match format_html_files(html_path, check_only) {
+            Ok((processed, failed)) => {
+                processed_html_files = processed;
+                failed_html_files = failed;
+                if failed == 0 {
+                    if check_only {
+                        println!("✅ {} files properly formatted", processed);
+                    } else {
+                        println!("✅ {} files formatted successfully", processed);
+                    }
+                } else {
+                    if check_only {
+                        println!(
+                            "❌ {} files have formatting issues out of {}",
+                            failed, processed
+                        );
+                    } else {
+                        println!("❌ {} files failed to format out of {}", failed, processed);
+                    }
+                }
+            }
+            Err(e) => {
+                println!("❌ HTML formatting failed: {}", e);
+                failed_html_files = 1;
+            }
+        }
+    }
+
     println!();
     println!("📊 Summary:");
     println!("   Rust members processed: {}", processed_members);
     if !c_projects.is_empty() {
         println!("   C projects processed: {}", processed_c_projects);
     }
+    if include_html {
+        println!("   HTML files processed: {}", processed_html_files);
+    }
 
-    let total_failures = failed_members.len() + failed_c_projects.len();
+    let total_failures = failed_members.len() + failed_c_projects.len() + failed_html_files;
 
     if total_failures == 0 {
         if check_only {
@@ -472,8 +544,9 @@ PointerAlignment: Right
 }
 
 /// Build the web version using wasm-pack
-fn build_web(release: bool) -> Result<()> {
-    println!("🌐 Building IoTCraft for web (WASM)...");
+fn build_web(release: bool, output_dir: &str) -> Result<()> {
+    println!("🔨 Building IoTCraft for web (WASM)...");
+    println!("   Output directory: {}", output_dir);
 
     // Detect if we're in workspace root or desktop-client directory
     let (_workspace_root, desktop_client_dir) = if Path::new("desktop-client").exists() {
@@ -614,8 +687,10 @@ fn copy_dir_all(src: &Path, dst: &Path) -> Result<()> {
 }
 
 /// Serve the web version locally with enhanced mobile support
-fn serve_web(port: u16) -> Result<()> {
-    println!("🚀 Starting Rust HTTP server...");
+fn serve_web(port: u16, serve_dir_name: &str) -> Result<()> {
+    println!("🚀 Starting HTTP server...");
+    println!("   Serving directory: {}", serve_dir_name);
+    println!("   Port: {}", port);
 
     // Detect if we're in workspace root or desktop-client directory
     let web_dir = if Path::new("desktop-client").exists() {
@@ -871,4 +946,199 @@ fn cleanup_rust_file(file_path: &Path, check_only: bool) -> Result<usize> {
     }
 
     Ok(issues_found)
+}
+
+/// Format HTML files in a directory
+fn format_html_files(path_str: &str, check_only: bool) -> Result<(usize, usize)> {
+    let path = Path::new(path_str);
+
+    let html_files = if path.is_file()
+        && path
+            .extension()
+            .map_or(false, |ext| ext == "html" || ext == "htm")
+    {
+        vec![path.to_path_buf()]
+    } else if path.is_dir() {
+        find_html_files(path)?
+    } else {
+        return Ok((0, 0)); // No HTML files found
+    };
+
+    if html_files.is_empty() {
+        return Ok((0, 0));
+    }
+
+    let mut files_processed = 0;
+    let mut files_failed = 0;
+
+    for html_file in html_files {
+        match process_html_file(&html_file, check_only) {
+            Ok(changed) => {
+                files_processed += 1;
+                if changed && !check_only {
+                    // File was changed during formatting
+                }
+            }
+            Err(_) => {
+                files_failed += 1;
+            }
+        }
+    }
+
+    Ok((files_processed, files_failed))
+}
+
+/// Find all HTML files in a directory recursively
+fn find_html_files(dir: &Path) -> Result<Vec<PathBuf>> {
+    let mut html_files = Vec::new();
+    find_html_files_recursive(dir, &mut html_files)?;
+    Ok(html_files)
+}
+
+fn find_html_files_recursive(dir: &Path, html_files: &mut Vec<PathBuf>) -> Result<()> {
+    for entry in
+        fs::read_dir(dir).with_context(|| format!("Failed to read directory: {}", dir.display()))?
+    {
+        let entry = entry.context("Failed to read directory entry")?;
+        let path = entry.path();
+        if path.is_dir() {
+            find_html_files_recursive(&path, html_files)?;
+        } else if let Some(ext) = path.extension() {
+            if ext == "html" || ext == "htm" {
+                html_files.push(path);
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Process a single HTML file with pure Rust HTML5 parser
+fn process_html_file(file_path: &Path, check_only: bool) -> Result<bool> {
+    let original_content = fs::read_to_string(file_path)
+        .with_context(|| format!("Failed to read file: {}", file_path.display()))?;
+
+    // Format the HTML using our pure Rust formatter
+    let formatted_content = format_html_content(&original_content)
+        .with_context(|| format!("Failed to format HTML file: {}", file_path.display()))?;
+
+    let changed = original_content != formatted_content;
+
+    if changed && !check_only {
+        fs::write(file_path, formatted_content)
+            .with_context(|| format!("Failed to write formatted file: {}", file_path.display()))?;
+    }
+
+    Ok(changed)
+}
+
+/// Pure Rust HTML formatter using html5ever
+fn format_html_content(content: &str) -> Result<String> {
+    // Parse the HTML document
+    let dom = parse_document(RcDom::default(), Default::default())
+        .from_utf8()
+        .read_from(&mut content.as_bytes())
+        .map_err(|e| anyhow::anyhow!("Failed to parse HTML: {}", e))?;
+
+    // Format the DOM back to HTML
+    let mut output = Vec::new();
+    serialize_node(&dom.document, &mut output, 0)?;
+
+    let formatted = String::from_utf8(output)
+        .map_err(|e| anyhow::anyhow!("Invalid UTF-8 in formatted HTML: {}", e))?;
+
+    Ok(formatted)
+}
+
+/// Serialize an HTML node to properly formatted output
+fn serialize_node(handle: &Handle, output: &mut Vec<u8>, indent_level: usize) -> Result<()> {
+    let indent = "    ".repeat(indent_level); // 4 spaces per indent level
+
+    match &handle.data {
+        NodeData::Document => {
+            // Process children without adding any content for the document node
+            for child in handle.children.borrow().iter() {
+                serialize_node(child, output, indent_level)?
+            }
+        }
+        NodeData::Doctype { name, .. } => writeln!(output, "<!DOCTYPE {}>", name)
+            .map_err(|e| anyhow::anyhow!("Write error: {}", e))?,
+        NodeData::Text { contents } => {
+            let text = contents.borrow();
+            let trimmed = text.trim();
+            if !trimmed.is_empty() {
+                // Only add indentation if we're not already on a line with content
+                if output.last().map_or(true, |&b| b == b'\n') {
+                    write!(output, "{}", indent)
+                        .map_err(|e| anyhow::anyhow!("Write error: {}", e))?
+                }
+                write!(output, "{}", trimmed).map_err(|e| anyhow::anyhow!("Write error: {}", e))?
+            }
+        }
+        NodeData::Comment { contents } => writeln!(output, "{}<!--{}-->", indent, contents)
+            .map_err(|e| anyhow::anyhow!("Write error: {}", e))?,
+        NodeData::Element { name, attrs, .. } => {
+            let tag_name = &name.local;
+
+            // Write opening tag with proper indentation
+            write!(output, "{}<{}", indent, tag_name)
+                .map_err(|e| anyhow::anyhow!("Write error: {}", e))?;
+
+            // Add attributes
+            for attr in attrs.borrow().iter() {
+                write!(output, " {}=\"{}\"", attr.name.local, attr.value)
+                    .map_err(|e| anyhow::anyhow!("Write error: {}", e))?;
+            }
+
+            let children = handle.children.borrow();
+            let has_children = !children.is_empty();
+
+            // Handle void elements (self-closing tags)
+            let void_elements = [
+                "area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta",
+                "param", "source", "track", "wbr",
+            ];
+
+            if void_elements.contains(&tag_name.as_ref()) {
+                writeln!(output, ">").map_err(|e| anyhow::anyhow!("Write error: {}", e))?
+            } else if !has_children {
+                writeln!(output, "></{}>", tag_name)
+                    .map_err(|e| anyhow::anyhow!("Write error: {}", e))?
+            } else {
+                writeln!(output, ">").map_err(|e| anyhow::anyhow!("Write error: {}", e))?;
+
+                // Handle special formatting for style and script tags
+                if tag_name.as_ref() == "style" || tag_name.as_ref() == "script" {
+                    // For style/script, preserve internal formatting but ensure proper indentation
+                    for child in children.iter() {
+                        if let NodeData::Text { contents } = &child.data {
+                            let text = contents.borrow();
+                            let lines: Vec<&str> = text.lines().collect();
+                            for line in lines {
+                                if !line.trim().is_empty() {
+                                    writeln!(output, "{}    {}", indent, line.trim())
+                                        .map_err(|e| anyhow::anyhow!("Write error: {}", e))?
+                                }
+                            }
+                        } else {
+                            serialize_node(child, output, indent_level + 1)?
+                        }
+                    }
+                } else {
+                    // Regular content - process children with increased indentation
+                    for child in children.iter() {
+                        serialize_node(child, output, indent_level + 1)?
+                    }
+                }
+
+                // Close tag
+                writeln!(output, "{}</{}>", indent, tag_name)
+                    .map_err(|e| anyhow::anyhow!("Write error: {}", e))?
+            }
+        }
+        _ => {
+            // Handle other node types if needed
+        }
+    }
+
+    Ok(())
 }

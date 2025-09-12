@@ -2400,6 +2400,7 @@ pub fn handle_block_interaction_input_web(
                             if ghost_state.can_place {
                                 place_block_events.write(PlaceBlockEvent {
                                     position: placement_position,
+                                    block_type: Some(block_type),
                                 });
 
                                 #[cfg(target_arch = "wasm32")]

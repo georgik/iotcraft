@@ -1,0 +1,300 @@
+// Inventory Independence Test
+// Tests that remote block placement works independently of receiver's inventory
+Scenario(
+    name: "alice_bob_inventory_test",
+    description: "Test that Alice's blocks appear on Bob's screen even when Bob has no blocks in inventory",
+    version: "1.0",
+    
+    infrastructure: InfrastructureConfig(
+        mqtt_server: MqttServerConfig(
+            required: true,
+            port: 1883,
+            config_file: None,
+            options: None,
+        ),
+        mqtt_observer: Some(MqttObserverConfig(
+            required: true,
+            topics: Some([
+                "iotcraft/worlds/+/info",
+                "iotcraft/worlds/+/state/blocks/+", 
+                "#"  // Monitor all topics
+            ]),
+            client_id: Some("inventory_test_observer"),
+        )),
+        mcp_server: None,
+        services: None,
+    ),
+    
+    clients: [
+        ClientConfig(
+            id: "alice",
+            player_id: "alice", 
+            mcp_port: 8080,
+            client_type: "desktop",
+            name: Some("Alice (Has Inventory)"),
+            config: None,
+        ),
+        ClientConfig(
+            id: "bob",
+            player_id: "bob", 
+            mcp_port: 8081,
+            client_type: "desktop",
+            name: Some("Bob (Empty Inventory)"),
+            config: None,
+        ),
+    ],
+    
+    steps: [
+        // Initialize MCP connections
+        Step(
+            name: "alice_mcp_initialize",
+            description: "Initialize Alice's MCP connection",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "initialize",
+                arguments: {
+                    "protocolVersion": "2024-11-05",
+                    "capabilities": { "tools": {} },
+                    "clientInfo": {
+                        "name": "alice-inventory-test",
+                        "version": "1.0.0"
+                    }
+                },
+            ),
+            wait_before: 500,
+            wait_after: 500,
+            timeout: 10000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: [],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        Step(
+            name: "bob_mcp_initialize",
+            description: "Initialize Bob's MCP connection",
+            client: "bob",
+            action: (
+                type: "mcp_call",
+                tool: "initialize",
+                arguments: {
+                    "protocolVersion": "2024-11-05",
+                    "capabilities": { "tools": {} },
+                    "clientInfo": {
+                        "name": "bob-inventory-test",
+                        "version": "1.0.0"
+                    }
+                },
+            ),
+            wait_before: 500,
+            wait_after: 500,
+            timeout: 10000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["alice_mcp_initialize"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Alice creates and publishes world
+        Step(
+            name: "alice_create_world",
+            description: "Alice creates a world for inventory testing",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "create_world",
+                arguments: {
+                    "world_name": "inventory_test_world",
+                    "template": "default"
+                },
+            ),
+            wait_before: 1000,
+            wait_after: 3000,
+            timeout: 30000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["bob_mcp_initialize"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        Step(
+            name: "alice_publish_world",
+            description: "Alice publishes the world for multiplayer",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "publish_world",
+                arguments: {
+                    "world_name": "inventory_test_world",
+                    "max_players": 2,
+                    "is_public": true
+                },
+            ),
+            wait_before: 1000,
+            wait_after: 2000,
+            timeout: 15000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["alice_create_world"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Bob joins the world (with empty inventory)
+        Step(
+            name: "bob_join_world",
+            description: "Bob joins Alice's world",
+            client: "bob",
+            action: (
+                type: "mcp_call",
+                tool: "join_world",
+                arguments: {
+                    "world_id": "inventory_test_world"
+                },
+            ),
+            wait_before: 1000,
+            wait_after: 2000,
+            timeout: 15000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["alice_publish_world"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Note: Alice's default world has blocks she can place
+        // Bob joins with an empty inventory, but should still see Alice's blocks
+        
+        // Alice places a stone block - key test!
+        Step(
+            name: "alice_place_stone",
+            description: "Alice places stone block (Bob should see it despite having no stone)",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "place_block",
+                arguments: {
+                    "block_type": "stone",
+                    "x": 15,
+                    "y": 2,
+                    "z": 15
+                },
+            ),
+            wait_before: 1000,
+            wait_after: 3000, // Wait for MQTT synchronization
+            timeout: 15000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["bob_join_world"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Verify Bob can see the stone block
+        Step(
+            name: "bob_check_stone_block",
+            description: "Bob checks if he can see Alice's stone block",
+            client: "bob",
+            action: (
+                type: "mcp_call",
+                tool: "get_block",
+                arguments: {
+                    "x": 15,
+                    "y": 2,
+                    "z": 15
+                },
+            ),
+            wait_before: 1000,
+            wait_after: 1000,
+            timeout: 10000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["alice_place_stone"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Verify Bob's inventory is still empty
+        Step(
+            name: "bob_check_inventory",
+            description: "Verify Bob's inventory is still empty",
+            client: "bob",
+            action: (
+                type: "mcp_call",
+                tool: "get_inventory",
+                arguments: {},
+            ),
+            wait_before: 500,
+            wait_after: 1000,
+            timeout: 10000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["bob_check_stone_block"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Final test: Bob tries to place a stone block (should fail)
+        Step(
+            name: "bob_attempt_place_stone",
+            description: "Bob attempts to place stone (should fail - no stone in inventory)",
+            client: "bob",
+            action: (
+                type: "mcp_call",
+                tool: "place_block",
+                arguments: {
+                    "block_type": "stone",
+                    "x": 16,
+                    "y": 2,
+                    "z": 15
+                },
+            ),
+            wait_before: 1000,
+            wait_after: 1000,
+            timeout: 10000,
+            success_condition: None, // This should fail, so no success condition
+            depends_on: ["bob_check_inventory"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+    ],
+    
+    config: Some(ScenarioConfig(
+        timeout_ms: Some(180000), // 3 minutes
+        logging: None,
+        environment: None,
+        settings: Some({
+            "auto_cleanup": true,
+            "preserve_logs": true,
+        }),
+    )),
+)

@@ -4,6 +4,7 @@ use crate::localization::{
     Language, LanguageChangeEvent, LocalizationBundle, LocalizationConfig, LocalizedText,
     get_localized_text,
 };
+#[cfg(not(target_arch = "wasm32"))]
 use crate::multiplayer::MultiplayerConnectionStatus;
 use crate::world::{
     CreateWorldEvent, DeleteWorldEvent, DiscoveredWorlds, LoadWorldEvent, SaveWorldEvent,
@@ -92,12 +93,18 @@ pub mod multiplayer_stubs {
             Self::SinglePlayer
         }
     }
+
+    /// Web-compatible stub for MultiplayerConnectionStatus
+    #[derive(Resource, Default)]
+    pub struct MultiplayerConnectionStatus {
+        pub connection_available: bool,
+    }
 }
 
 #[cfg(target_arch = "wasm32")]
 use multiplayer_stubs::{
-    JoinSharedWorldEvent, MultiplayerMode, OnlineWorlds, PublishWorldEvent,
-    RefreshOnlineWorldsEvent, WorldStateReceivedEvent,
+    JoinSharedWorldEvent, MultiplayerConnectionStatus, MultiplayerMode, OnlineWorlds,
+    PublishWorldEvent, RefreshOnlineWorldsEvent, WorldStateReceivedEvent,
 };
 
 #[cfg(not(target_arch = "wasm32"))]

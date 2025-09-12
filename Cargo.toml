@@ -3,7 +3,6 @@ resolver = "2"
 
 members = [
     "desktop-client",
-    "desktop-client/ctask",
     "iotcraft-mcp-protocol", 
     "mqtt-server",
     "mqtt-client",
@@ -47,7 +46,7 @@ iotcraft-mcp-protocol = { path = "iotcraft-mcp-protocol" }
 [workspace.lints.rust]
 unsafe_code = "forbid"
 unused_imports = "warn"
-dead_code = "allow"  # Allow dead code during development
+dead_code = "warn"  # Warn on dead code to keep codebase clean
 
 [workspace.lints.clippy]
 all = "warn"

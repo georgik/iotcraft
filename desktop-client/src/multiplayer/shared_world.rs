@@ -706,7 +706,7 @@ fn auto_enable_multiplayer_when_mqtt_available(
     mut multiplayer_mode: ResMut<MultiplayerMode>,
     multiplayer_status: Res<crate::multiplayer::MultiplayerConnectionStatus>,
     current_world: Option<Res<crate::world::CurrentWorld>>,
-    player_profile: Res<crate::profile::PlayerProfile>,
+    _player_profile: Res<crate::profile::PlayerProfile>,
     game_state: Res<State<crate::ui::GameState>>,
 ) {
     // Only auto-enable if we're currently in SinglePlayer mode AND in InGame state

@@ -184,7 +184,7 @@ pub fn initialize_core_mqtt_service(
             info!("🔧 Core MQTT Service configured with max packet size: 5MB");
 
             let (client, mut eventloop) = AsyncClient::new(opts, 100);
-            let mut current_world_id = String::from("default");
+            let current_world_id = String::from("default");
 
             // Send initial connection status
             let _ = connection_status_tx.send(false);
