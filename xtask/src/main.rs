@@ -803,8 +803,6 @@ fn format_workspace_members(check_only: bool, include_html: bool, html_path: &st
 
     let mut failed_members = Vec::new();
     let mut processed_members = 0;
-    let mut failed_c_projects: Vec<String> = Vec::new(); // Explicitly typed (unused when C formatting disabled)
-    let mut processed_c_projects = 0;
     let mut failed_html_files = 0;
     let mut processed_html_files = 0;
 
@@ -919,13 +917,16 @@ fn format_workspace_members(check_only: bool, include_html: bool, html_path: &st
     println!("📊 Summary:");
     println!("   Rust members processed: {}", processed_members);
     if !c_projects.is_empty() {
-        println!("   C projects processed: {}", processed_c_projects);
+        println!(
+            "   C projects skipped: {} (formatting disabled)",
+            c_projects.len()
+        );
     }
     if include_html {
         println!("   HTML files processed: {}", processed_html_files);
     }
 
-    let total_failures = failed_members.len() + failed_c_projects.len() + failed_html_files;
+    let total_failures = failed_members.len() + failed_html_files;
 
     if total_failures == 0 {
         if check_only {
@@ -945,17 +946,6 @@ fn format_workspace_members(check_only: bool, include_html: bool, html_path: &st
                     println!("      • {} (needs formatting)", member);
                 } else {
                     println!("      • {} (failed to format)", member);
-                }
-            }
-        }
-
-        if !failed_c_projects.is_empty() {
-            println!("   C projects:");
-            for c_project in &failed_c_projects {
-                if check_only {
-                    println!("      • {} (needs formatting)", c_project);
-                } else {
-                    println!("      • {} (failed to format)", c_project);
                 }
             }
         }
@@ -1029,163 +1019,6 @@ fn is_esp_idf_project(path: &Path) -> bool {
         || path.join("sdkconfig.defaults.esp-box-3").exists();
 
     has_cmake && has_main_dir && has_sdkconfig
-}
-
-/// Format a C project using clang-format
-fn format_c_project(project_path: &Path, check_only: bool) -> Result<()> {
-    // Check if clang-format is available
-    if which::which("clang-format").is_err() {
-        return Err(anyhow::anyhow!(
-            "clang-format not found. Please install it with: brew install clang-format (macOS) or your package manager"
-        ));
-    }
-
-    // Create default .clang-format if it doesn't exist
-    let clang_format_path = project_path.join(".clang-format");
-    if !clang_format_path.exists() {
-        create_default_clang_format(&clang_format_path)?;
-    }
-
-    // Find all C/C++ files in main/ and components/ directories
-    let c_files = find_c_files(project_path)?;
-
-    if c_files.is_empty() {
-        return Ok(());
-    }
-
-    let mut failed_files = Vec::new();
-
-    for c_file in c_files {
-        let mut cmd = Command::new("clang-format");
-        cmd.current_dir(project_path);
-
-        if check_only {
-            // Check if file needs formatting
-            cmd.args(&["--dry-run", "--Werror"]);
-        } else {
-            // Format in-place
-            cmd.arg("-i");
-        }
-
-        cmd.arg(&c_file);
-
-        let status = cmd
-            .status()
-            .with_context(|| format!("Failed to run clang-format on {}", c_file.display()))?;
-
-        if !status.success() {
-            failed_files.push(c_file);
-        }
-    }
-
-    if !failed_files.is_empty() {
-        return Err(anyhow::anyhow!(
-            "{} files need formatting",
-            failed_files.len()
-        ));
-    }
-
-    Ok(())
-}
-
-/// Find all C/C++ source files in an ESP-IDF project
-fn find_c_files(project_path: &Path) -> Result<Vec<PathBuf>> {
-    let mut c_files = Vec::new();
-
-    // Search in main/ directory
-    let main_dir = project_path.join("main");
-    if main_dir.exists() {
-        find_c_files_in_dir(&main_dir, &mut c_files)?;
-    }
-
-    // Search in components/ directory
-    let components_dir = project_path.join("components");
-    if components_dir.exists() {
-        find_c_files_in_dir(&components_dir, &mut c_files)?;
-    }
-
-    Ok(c_files)
-}
-
-/// Recursively find C/C++ files in a directory
-fn find_c_files_in_dir(dir: &Path, c_files: &mut Vec<PathBuf>) -> Result<()> {
-    for entry in
-        fs::read_dir(dir).with_context(|| format!("Failed to read directory {}", dir.display()))?
-    {
-        let entry = entry.context("Failed to read directory entry")?;
-        let path = entry.path();
-
-        if path.is_dir() {
-            find_c_files_in_dir(&path, c_files)?;
-        } else if let Some(extension) = path.extension().and_then(|e| e.to_str()) {
-            match extension {
-                "c" | "cpp" | "cc" | "cxx" | "h" | "hpp" | "hxx" => {
-                    c_files.push(path);
-                }
-                _ => {}
-            }
-        }
-    }
-
-    Ok(())
-}
-
-/// Create a default .clang-format configuration suitable for ESP-IDF projects
-fn create_default_clang_format(clang_format_path: &Path) -> Result<()> {
-    let config = r#"# ESP-IDF C/C++ Code Style Configuration
-# Based on ESP-IDF coding standards and common practices
-
-BasedOnStyle: Google
-
-# Indentation
-IndentWidth: 4
-TabWidth: 4
-UseTab: Never
-ContinuationIndentWidth: 8
-
-# Line length
-ColumnLimit: 120
-
-# Braces
-BreakBeforeBraces: Linux
-
-# Spaces
-SpaceBeforeParens: ControlStatements
-SpaceInEmptyParentheses: false
-SpacesBeforeTrailingComments: 2
-SpacesInAngles: false
-SpacesInContainerLiterals: false
-SpacesInCStyleCastParentheses: false
-SpacesInParentheses: false
-SpacesInSquareBrackets: false
-
-# Alignment
-AlignAfterOpenBracket: Align
-AlignConsecutiveAssignments: false
-AlignConsecutiveDeclarations: false
-AlignOperands: true
-AlignTrailingComments: true
-
-# Function declarations
-AllowShortFunctionsOnASingleLine: None
-AllowShortIfStatementsOnASingleLine: false
-AllowShortLoopsOnASingleLine: false
-
-# Include sorting
-SortIncludes: true
-IncludeBlocks: Preserve
-
-# Other formatting options
-KeepEmptyLinesAtTheStartOfBlocks: false
-MaxEmptyLinesToKeep: 2
-PointerAlignment: Right
-"#;
-
-    fs::write(clang_format_path, config)
-        .with_context(|| format!("Failed to create {}", clang_format_path.display()))?;
-
-    println!("   📝 Created default .clang-format configuration");
-    Ok(())
 }
 
 /// Build the web version using wasm-pack

@@ -11,7 +11,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpStream;
 use tokio::process::{Child, Command as TokioCommand};
 use tokio::sync::{broadcast, Mutex};
@@ -1728,14 +1728,13 @@ async fn run_scenario(
             .expect("Failed to install SIGINT handler");
 
         let mut sigint_count = 0;
-        let mut cleanup_started = false;
+        let cleanup_started = false;
 
         loop {
             tokio::select! {
                 _ = sigterm.recv() => {
                     println!("\n🛑 Received SIGTERM, initiating graceful shutdown...");
                     if !cleanup_started {
-                        cleanup_started = true;
                         let mut state = state_for_cleanup.lock().await;
                         let _ = cleanup(&mut state, verbose).await;
                     }
@@ -1749,7 +1748,6 @@ async fn run_scenario(
                         println!("   💡 Press Ctrl+C again to force immediate exit");
 
                         if !cleanup_started {
-                            cleanup_started = true;
                             // Start cleanup in background without blocking signal handler
                             let state_cleanup = Arc::clone(&state_for_cleanup);
                             tokio::spawn(async move {
@@ -2672,7 +2670,7 @@ async fn execute_step(
             command,
             working_dir,
             background,
-            timeout_seconds,
+            timeout_seconds: _,
         } => {
             if verbose {
                 println!("  🔧 System command: {:?}", command);
@@ -2689,7 +2687,7 @@ async fn execute_step(
         Action::OpenBrowser {
             url,
             browser,
-            wait_seconds,
+            wait_seconds: _,
         } => {
             if verbose {
                 println!("  🌐 Open browser: {} ({:?})", url, browser);

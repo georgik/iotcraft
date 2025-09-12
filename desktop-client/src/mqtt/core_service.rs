@@ -252,7 +252,7 @@ pub fn initialize_core_mqtt_service(
                             Err(e) => {
                                 error!("❌ MQTT connection error: {:?}", e);
                                 let _ = connection_status_tx.send(false);
-                                connected = false;
+                                connected = false; // Reset state before break - will be reinitialized in outer loop
                                 break;
                             }
                         }

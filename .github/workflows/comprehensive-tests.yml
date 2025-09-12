@@ -1,5 +1,13 @@
 name: Comprehensive Tests (Unit, Integration, Scenarios)
 
+# IoTCraft Test Architecture:
+# - Unit tests: Fast, isolated component testing
+# - Integration tests (xtask): Stable component interaction tests  
+# - Scenario tests (mcplay): Comprehensive MQTT/multiplayer integration testing
+# 
+# Note: Custom MQTT test infrastructure has been removed in favor of mcplay
+# for reliable, non-flaky integration testing in CI environments.
+
 on:
   push:
     branches: [ main, 'feature/**' ]
@@ -7,6 +15,7 @@ on:
       - 'desktop-client/**'
       - 'mcplay/**'
       - 'xtask/**'
+      - 'mqtt-server/**'
       - '.github/workflows/comprehensive-tests.yml'
   pull_request:
     branches: [ main ]
@@ -14,6 +23,7 @@ on:
       - 'desktop-client/**'
       - 'mcplay/**'
       - 'xtask/**'
+      - 'mqtt-server/**'
       - '.github/workflows/comprehensive-tests.yml'
   workflow_dispatch:
     inputs:
@@ -48,7 +58,8 @@ env:
   WGPU_BACKEND: vulkan
 
 jobs:
-  # Unit and Integration Tests
+  # Unit and Integration Tests (using xtask orchestration)
+  # Note: Complex integration testing is handled by mcplay scenarios
   unit-integration-tests:
     name: Unit & Integration Tests
     runs-on: ubuntu-latest
@@ -113,6 +124,8 @@ jobs:
           --verbose
 
     - name: Run integration tests with xtask
+      # Note: This runs stable integration tests via xtask.
+      # Complex MQTT/multiplayer integration testing is handled by mcplay scenarios.
       run: |
         cargo xtask test \
           --mode integration \
@@ -155,7 +168,9 @@ jobs:
           *.profdata
         retention-days: 30
 
-  # Scenario-based Tests with mcplay
+  # Scenario-based Tests with mcplay (Primary Integration Testing)
+  # This is the main integration testing approach for IoTCraft.
+  # mcplay provides comprehensive, reliable MQTT and multiplayer testing.
   scenario-tests:
     name: Scenario Tests (mcplay)
     runs-on: ubuntu-latest
@@ -216,6 +231,8 @@ jobs:
         cd ../desktop-client && cargo build --release
 
     - name: Validate all scenarios
+      # mcplay provides the reliable integration testing infrastructure
+      # This replaces flaky custom MQTT test setups
       run: |
         cd mcplay
         cargo run -- --validate-all
@@ -242,8 +259,8 @@ jobs:
         DISPLAY: :99
       run: |
         cd mcplay
-        # Run a comprehensive test scenario
-        timeout 300 cargo run scenarios/comprehensive_fast_test.ron || true
+        # mcplay handles its own timeouts and orchestration
+        cargo run scenarios/comprehensive_fast_test.ron
 
     - name: Upload scenario test reports
       if: always()
@@ -351,8 +368,9 @@ jobs:
           echo "Your IoTCraft implementation is ready for production deployment." >> test-summary.md
           echo "### Validated Features:" >> test-summary.md
           echo "- 🦀 **Rust Unit Tests**: Core functionality validation" >> test-summary.md
-          echo "- 🔗 **Integration Tests**: Component interaction testing" >> test-summary.md
-          echo "- 🎭 **Scenario Tests**: End-to-end workflow validation with mcplay" >> test-summary.md
+          echo "- 🔗 **Stable Integration Tests**: Component interaction testing via xtask" >> test-summary.md
+          echo "- 🎭 **mcplay Scenario Tests**: Comprehensive MQTT & multiplayer integration testing" >> test-summary.md
+          echo "- 🚀 **Reliable Test Infrastructure**: No flaky custom MQTT test setups" >> test-summary.md
           echo "- 🌐 **WASM Compatibility**: Web client functionality verified" >> test-summary.md
           echo "- 🖥️ **Virtual Display**: Headless GUI testing successful" >> test-summary.md
           echo "- 📱 **Cross-platform**: Linux, macOS, Windows compatibility" >> test-summary.md
