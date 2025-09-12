@@ -23,8 +23,6 @@ dependencies.lock
 
 # Swift build artifacts
 .build/
-
-# WARP local context (not for publishing)
 .warp/
 
 # Backup files
