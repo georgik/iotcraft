@@ -101,7 +101,7 @@ jobs:
         key: comprehensive-${{ runner.os }}
 
     - name: Check code formatting
-      run: cargo xtask format --check
+      run: cargo fmt --all --check
 
     - name: Run clippy (warnings as errors)
       run: |
