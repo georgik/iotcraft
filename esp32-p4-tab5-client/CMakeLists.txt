@@ -1,17 +1,28 @@
 cmake_minimum_required(VERSION 3.29)
 
-# Select board configuration based on -DBUILD_BOARD
-if(NOT DEFINED BUILD_BOARD)
-    message(WARNING "BUILD_BOARD CMake variable is not set, using m5stack_tab5. Use idf.py @boards/BOARD.cfg reconfigure")
-    set(ENV{BUILD_BOARD} "m5stack_tab5")
+if(CONFIG_SDL_BSP_ESP32_P4_FUNCTION_EV)
+    message(STATUS "Detected ESP32-P4 Function EV Board configuration")
+elseif(CONFIG_SDL_BSP_M5STACK_TAB5)
+    message(STATUS "Detected M5Stack Tab5 (ESP32-P4) configuration")
+elseif(CONFIG_SDL_BSP_ESP32_C6_DEVKIT)
+    message(STATUS "Detected ESP32-C6 DevKit configuration")
+elseif(CONFIG_SDL_BSP_ESP32_C3_LCDKIT)
+    message(STATUS "Detected ESP32-C3 LCDkit configuration")
+elseif(CONFIG_SDL_BSP_ESP_BOX_3)
+    message(STATUS "Detected ESP32-S3-BOX-3 configuration")
+elseif(CONFIG_SDL_BSP_ESP_BOX)
+    message(STATUS "Detected ESP-Box configuration")
+elseif(CONFIG_SDL_BSP_M5STACK_CORE_S3)
+    message(STATUS "Detected M5Stack Core S3 configuration")
+elseif(CONFIG_SDL_BSP_M5_ATOM_S3)
+    message(STATUS "Detected M5 Atom S3 configuration")
 else()
-    set(ENV{BUILD_BOARD} ${BUILD_BOARD})
+    message(STATUS "Board configuration will be detected at runtime")
 endif()
 
-# Add BSP-specific configurations
-if(BUILD_BOARD STREQUAL "m5stack_tab5")
-    add_compile_definitions(BSP_CONFIG_NO_GRAPHIC_LIB=1)
-endif()
+set(COMPONENTS
+    main
+) # "Trim" the build. Include the minimal set of components; main and anything it depends on.
 
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 project(iotcraft-esp32-p4-tab5-client)

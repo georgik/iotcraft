@@ -218,11 +218,11 @@ func sdl_thread_entry_point(arg: UnsafeMutableRawPointer?) -> UnsafeMutableRawPo
 
     SDL_InitFS();
 
-    TTF_Init()
-    let font = TTF_OpenFont("/assets/FreeSans.ttf", 36);
-    if (font == nil) {
-        print("Font load failed")
-    }
+    // TTF_Init() // Disabled SDL_ttf dependency
+    // let font = TTF_OpenFont("/assets/FreeSans.ttf", 36);
+    // if (font == nil) {
+    //     print("Font load failed")
+    // }
 
     // Generate the IoTCraft world
     let (blocks, devices) = generateSampleWorld()
@@ -374,19 +374,14 @@ func sdl_thread_entry_point(arg: UnsafeMutableRawPointer?) -> UnsafeMutableRawPo
         
         let statusText = "IoTCraft World | Blocks: \(worldBlocks.count) | Devices: \(onlineDevices) | Lamps: \(activeLamps)"
 
-        // Convert the string to a C-compatible null-terminated character buffer (CChar array)
+        // Use SDL's built-in debug text rendering instead of TTF
         var statusTextBuffer = Array(statusText.utf8CString)
-
-        // Render text to surface
-        let fontSurface = TTF_RenderText_Blended(font, &statusTextBuffer, 0, SDL_Color(r: 40, g: 255, b: 40, a: 255))
-
-        // Create texture from surface
-        let statusTexture = SDL_CreateTextureFromSurface(renderer, fontSurface)
         
-        var statusRect = SDL_FRect(x: 10.0, y: 10.0, w: screenWidth - 20, h: 50.0)
-        SDL_RenderTexture(renderer, statusTexture, nil, &statusRect)
-        SDL_DestroySurface(fontSurface)
-        SDL_DestroyTexture(statusTexture)
+        // Set text color to green
+        SDL_SetRenderDrawColor(renderer, 40, 255, 40, 255)
+        
+        // Render debug text using SDL's built-in functionality
+        SDL_RenderDebugText(renderer, 10.0, 10.0, statusTextBuffer)
 
         // Present the updated frame
         SDL_RenderPresent(renderer)
