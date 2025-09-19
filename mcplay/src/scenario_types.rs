@@ -224,9 +224,14 @@ pub struct Step {
     #[serde(default)]
     pub conditions: Option<Vec<Condition>>,
 
-    /// Expected outcomes/assertions (xtask extension)
+    /// Expected outcomes for this step (xtask extension)
     #[serde(default)]
     pub expectations: Option<Vec<Expectation>>,
+
+    /// Variables to extract from the step response (mcplay extension)
+    /// Format: { "variable_name": "json.path.to.value" }
+    #[serde(default)]
+    pub response_variables: Option<HashMap<String, String>>,
 }
 
 /// Action to perform in a step (unified enum supporting both formats)
@@ -313,7 +318,7 @@ pub enum ClientActionType {
     MoveTo,
     /// Place a block
     PlaceBlock,
-    /// Break a block  
+    /// Break a block
     BreakBlock,
     /// Use an item
     UseItem,
@@ -512,7 +517,7 @@ mod tests {
     fn test_mcplay_scenario_compatibility() {
         let json = r#"{
             "name": "test",
-            "description": "test description", 
+            "description": "test description",
             "version": "1.0.0",
             "clients": [{
                 "id": "alice",

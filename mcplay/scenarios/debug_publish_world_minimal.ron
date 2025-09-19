@@ -1,0 +1,141 @@
+// Minimal test to debug MCP world publishing issue
+// Focus on the blocking issue with world publishing
+Scenario(
+    name: "debug_publish_world_minimal",
+    description: "Minimal test to debug MCP world publishing blocking issue",
+    version: "1.0",
+    
+    // Infrastructure configuration - minimal for debugging
+    infrastructure: InfrastructureConfig(
+        mqtt_server: MqttServerConfig(
+            required: true,
+            port: 1883,
+            config_file: None,
+            options: None,
+        ),
+        mqtt_observer: None, // Skip observer to reduce complexity
+        mcp_server: None,
+        services: None,
+    ),
+    
+    // Single client for debugging
+    clients: [
+        ClientConfig(
+            id: "alice",
+            player_id: "alice", 
+            mcp_port: 8080,
+            client_type: "desktop",
+            name: Some("Alice - Debug Test"),
+            config: None,
+        ),
+    ],
+    
+    // Minimal test steps to isolate the issue
+    steps: [
+        // Step 1: Create world with simple template
+        Step(
+            name: "create_simple_world",
+            description: "Create world with simple default template",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "create_world",
+                arguments: {
+                    "world_name": "SimpleTest",
+                    "template": "default"  // Simpler template
+                },
+            ),
+            wait_before: 1000,
+            wait_after: 2000,
+            timeout: 15000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: [],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 2: Test MCP responsiveness after world creation
+        Step(
+            name: "test_ping_after_creation",
+            description: "Test that MCP server is still responsive after world creation",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "ping",
+                arguments: {},
+            ),
+            wait_before: 500,
+            wait_after: 500,
+            timeout: 5000,   // Short timeout to detect blocking quickly
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["create_simple_world"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 3: Try to publish world (this is where blocking likely occurs)
+        Step(
+            name: "publish_world_test",
+            description: "Attempt to publish world - this may cause blocking",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "publish_world",
+                arguments: {
+                    "max_players": 4,
+                    "is_public": true
+                },
+            ),
+            wait_before: 1000,
+            wait_after: 2000,
+            timeout: 10000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["test_ping_after_creation"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 4: Test MCP responsiveness after publishing
+        Step(
+            name: "test_ping_after_publish",
+            description: "Test that MCP server is still responsive after world publishing",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "ping",
+                arguments: {},
+            ),
+            wait_before: 500,
+            wait_after: 500,
+            timeout: 5000,   // Short timeout to detect blocking
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["publish_world_test"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+    ],
+    
+    // Global configuration
+    config: Some(ScenarioConfig(
+        timeout_ms: Some(60000),  // 1 minute total timeout
+        logging: None,
+        environment: None,
+        settings: None,
+    )),
+)

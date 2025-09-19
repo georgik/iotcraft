@@ -341,7 +341,7 @@ pub struct DeviceAnnouncementReceiver(pub Mutex<mpsc::Receiver<String>>);
 #[derive(Resource)]
 pub struct PoseReceiver(pub Mutex<mpsc::Receiver<PoseMessage>>);
 
-/// Resource for sending multiplayer pose messages  
+/// Resource for sending multiplayer pose messages
 #[derive(Resource)]
 pub struct PoseSender(pub Mutex<mpsc::Sender<PoseMessage>>);
 

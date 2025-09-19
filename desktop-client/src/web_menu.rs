@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 
-/// Simplified game states for web version  
+/// Simplified game states for web version
 #[derive(Debug, Clone, Eq, PartialEq, Hash, States, Default)]
 pub enum WebGameState {
     #[default]

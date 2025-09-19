@@ -315,6 +315,7 @@ pub fn update_diagnostics_content_bundled(mut params: ComprehensiveDebugParams) 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::debug::debug_params::DiagnosticsVisible;
     use bevy::{MinimalPlugins, app::App};
 
     #[test]

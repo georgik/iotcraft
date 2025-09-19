@@ -179,14 +179,20 @@ The mcplay orchestration platform provides comprehensive multi-client testing ca
 - **Observer Integration**: MQTT message monitoring and logging for debugging
 - **Clean Shutdown**: Proper cleanup of all processes and resources
 
-#### **🎨 TUI Interface Features**
-- **📋 Scenario Browser**: Navigate through all available scenarios with arrow keys
+#### **🎨 Enhanced TUI Interface Features**
+- **📋 Advanced Scenario Browser**: Navigate through all available scenarios with arrow keys
+- **🔍 Modal Search Dialog**: Press `/` to open centered search with:
+  - **Live filtering** and **text highlighting** in yellow
+  - **Smart previews** showing context from descriptions  
+  - **Results counter** displaying "Found: X of Y scenarios"
+  - **Real-time updates** as you type
 - **✅ Visual Status Indicators**: Real-time process status with Kubernetes-style indicators (⏳🟡🟢🔴🔵🟠)
-- **📊 Multi-Pane Logging**: Separate log views for each service with Tab/Shift+Tab navigation
+- **📊 Enhanced Multi-Pane Layout**: Optimized 35%/65% split with improved progress bars
 - **📖 Scenario Details**: Press `d` to view detailed scenario information
 - **🔍 Quick Validation**: Press `v` to validate scenarios without running them
 - **🔄 Live Refresh**: Press `r` to refresh the scenario list
 - **⚡ One-Click Execution**: Press `Enter` to run scenarios directly
+- **⌨️ Unix-Friendly Controls**: Support for `q`/`Esc`/`Ctrl+C` to quit
 
 ### Command Line Options
 

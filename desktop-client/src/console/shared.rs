@@ -90,7 +90,7 @@ impl SharedConsoleState {
     }
 }
 
-/// Console configuration resource  
+/// Console configuration resource
 #[allow(dead_code)]
 #[derive(Resource, Clone)]
 pub struct SharedConsoleConfig {

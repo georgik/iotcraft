@@ -87,7 +87,7 @@ pub fn execute_web_console_command(
         }
         ConsoleCommandType::PlaceBlock(cmd) => {
             info!("Executing place block command: {} at ({}, {}, {})", cmd.block_type, cmd.x, cmd.y, cmd.z);
-            
+
             let block_type = match cmd.block_type.as_str() {
                 "grass" => BlockType::Grass,
                 "dirt" => BlockType::Dirt,
@@ -121,7 +121,7 @@ pub fn execute_web_console_command(
         }
         ConsoleCommandType::RemoveBlock(cmd) => {
             info!("Executing remove block command at ({}, {}, {})", cmd.x, cmd.y, cmd.z);
-            
+
             let position = IVec3::new(cmd.x, cmd.y, cmd.z);
             if voxel_world.remove_block(&position).is_some() {
                 // Remove the block entity
@@ -136,9 +136,9 @@ pub fn execute_web_console_command(
             }
         }
         ConsoleCommandType::Wall(cmd) => {
-            info!("Executing wall command: {} from ({}, {}, {}) to ({}, {}, {})", 
+            info!("Executing wall command: {} from ({}, {}, {}) to ({}, {}, {})",
                 cmd.block_type, cmd.x1, cmd.y1, cmd.z1, cmd.x2, cmd.y2, cmd.z2);
-            
+
             let block_type = match cmd.block_type.as_str() {
                 "grass" => BlockType::Grass,
                 "dirt" => BlockType::Dirt,
@@ -175,12 +175,12 @@ pub fn execute_web_console_command(
                 }
             }
 
-            info!("Created wall of {} blocks from ({}, {}, {}) to ({}, {}, {})", 
+            info!("Created wall of {} blocks from ({}, {}, {}) to ({}, {}, {})",
                 blocks_added, cmd.x1, cmd.y1, cmd.z1, cmd.x2, cmd.y2, cmd.z2);
         }
         ConsoleCommandType::Teleport(cmd) => {
             info!("Executing teleport command to ({}, {}, {})", cmd.x, cmd.y, cmd.z);
-            
+
             if let Ok((mut transform, _)) = camera_query.single_mut() {
                 transform.translation = Vec3::new(cmd.x, cmd.y, cmd.z);
                 info!("Teleported to ({:.1}, {:.1}, {:.1})", cmd.x, cmd.y, cmd.z);
@@ -190,7 +190,7 @@ pub fn execute_web_console_command(
         }
         ConsoleCommandType::Look(cmd) => {
             info!("Executing look command: yaw={}, pitch={}", cmd.yaw, cmd.pitch);
-            
+
             if let Ok((mut transform, mut camera_controller)) = camera_query.single_mut() {
                 let yaw_rad = cmd.yaw.to_radians();
                 let pitch_rad = cmd.pitch.to_radians();
@@ -212,7 +212,7 @@ pub fn execute_web_console_command(
         }
         ConsoleCommandType::Give(cmd) => {
             info!("Executing give command: {} x{}", cmd.item_type, cmd.count);
-            
+
             let item_type = match cmd.item_type.as_str() {
                 "grass" => ItemType::Block(BlockType::Grass),
                 "dirt" => ItemType::Block(BlockType::Dirt),
@@ -232,7 +232,7 @@ pub fn execute_web_console_command(
         }
         ConsoleCommandType::List(_) => {
             info!("Executing list command");
-            
+
             let device_count = device_query.iter().count();
             if device_count == 0 {
                 info!("No connected devices found.");
@@ -261,7 +261,7 @@ pub fn execute_web_console_command(
             load_map_from_local_storage(&cmd.filename, voxel_world, commands, meshes, materials, asset_server, block_query);
         }
         ConsoleCommandType::Spawn(cmd) => {
-            info!("Spawn command: {} at ({}, {}, {}) (web mode - acknowledgement only)", 
+            info!("Spawn command: {} at ({}, {}, {}) (web mode - acknowledgement only)",
                 cmd.device_id, cmd.x, cmd.y, cmd.z);
             // In web version, just acknowledge - no direct MQTT
         }
@@ -346,14 +346,14 @@ fn load_map_from_local_storage(
                             for (entity, _) in block_query.iter() {
                                 commands.entity(entity).despawn();
                             }
-                            
+
                             voxel_world.blocks = loaded_blocks;
-                            
+
                             // Spawn all blocks
                             let cube_mesh = meshes.add(Cuboid::new(CUBE_SIZE, CUBE_SIZE, CUBE_SIZE));
                             for (position, block_type) in voxel_world.blocks.iter() {
                                 let material = create_block_material(*block_type, asset_server, materials);
-                                
+
                                 commands.spawn((
                                     Mesh3d(cube_mesh.clone()),
                                     MeshMaterial3d(material),
@@ -365,7 +365,7 @@ fn load_map_from_local_storage(
                                     VoxelBlock { position: *position },
                                 ));
                             }
-                            
+
                             info!("Map '{}' loaded from browser storage with {} blocks", filename, voxel_world.blocks.len());
                         }
                         Err(_) => {

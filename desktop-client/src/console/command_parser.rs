@@ -351,7 +351,7 @@ impl CommandParser {
             {
                 place_events.write(crate::inventory::PlaceBlockEvent {
                     position,
-                    // Since this is a console command, we'll force the placement
+                    block_type: Some(block_type), // Console command specifies block type
                 });
             }
 
@@ -501,6 +501,7 @@ impl CommandParser {
                         for z in z1..=z2 {
                             place_events.write(crate::inventory::PlaceBlockEvent {
                                 position: bevy::math::IVec3::new(x, y, z),
+                                block_type: Some(block_type_enum), // Console command specifies block type
                             });
                         }
                     }

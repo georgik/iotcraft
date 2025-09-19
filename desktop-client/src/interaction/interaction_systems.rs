@@ -307,17 +307,20 @@ fn update_ghost_block_preview(
 ) {
     #[cfg(feature = "console")]
     if *game_state.get() == crate::ui::GameState::ConsoleOpen {
-        ghost_state.position = None;
+        ghost_state.target_block_position = None;
+        ghost_state.placement_position = None;
         return;
     }
     #[cfg(not(feature = "console"))]
     if false {
-        ghost_state.position = None;
+        ghost_state.target_block_position = None;
+        ghost_state.placement_position = None;
         return;
     }
 
     let Ok(window) = windows.single() else {
-        ghost_state.position = None;
+        ghost_state.target_block_position = None;
+        ghost_state.placement_position = None;
         return;
     };
 
@@ -332,7 +335,8 @@ fn update_ghost_block_preview(
     };
 
     let Ok(ray) = camera.viewport_to_world(camera_transform, cursor_position) else {
-        ghost_state.position = None;
+        ghost_state.target_block_position = None;
+        ghost_state.placement_position = None;
         return;
     };
 
@@ -341,23 +345,39 @@ fn update_ghost_block_preview(
     let max_distance = 8.0; // Maximum reach distance
     let step_size = 0.1; // Fine-grained raycast steps
 
-    ghost_state.position = None;
+    ghost_state.target_block_position = None;
+    ghost_state.placement_position = None;
     ghost_state.can_place = false;
 
-    // Perform precise raycast to find which block face is being looked at.
-    let mut last_pos = (ray.origin + ray.direction * min_distance).as_ivec3();
+    // Perform precise raycast to find the first existing block (Minecraft-style targeting)
     let mut current_distance = min_distance;
+    let mut last_empty_pos = None;
+
     while current_distance <= max_distance {
         let check_position = (ray.origin + ray.direction * current_distance).as_ivec3();
+
         if voxel_world.is_block_at(check_position) {
-            // Hit a block. The placement position is the last position that was air.
-            if !voxel_world.is_block_at(last_pos) {
-                ghost_state.position = Some(last_pos);
+            // Found the first existing block - this is our target for highlighting (would be broken on left-click)
+            ghost_state.target_block_position = Some(check_position);
+
+            // Try to place on top face first (Minecraft-like behavior)
+            let top_face_pos = check_position + IVec3::new(0, 1, 0);
+            if !voxel_world.is_block_at(top_face_pos) {
+                // Top face is available - place there
+                ghost_state.placement_position = Some(top_face_pos);
                 ghost_state.can_place = true;
+            } else if let Some(empty_pos) = last_empty_pos {
+                // Top face blocked - fall back to closest face (ray approach)
+                if !voxel_world.is_block_at(empty_pos) {
+                    ghost_state.placement_position = Some(empty_pos);
+                    ghost_state.can_place = true;
+                }
             }
             break;
         }
-        last_pos = check_position;
+
+        // Track the last empty position
+        last_empty_pos = Some(check_position);
         current_distance += step_size;
     }
 }
@@ -399,14 +419,17 @@ fn draw_crosshair(
         Color::WHITE,
     );
 
-    // Draw ghost block if we have inventory item and valid placement position
+    // Draw ghost block wireframe around the target block (the one that would be broken)
+    // This provides visual feedback like in Minecraft/Luanti
     if let Some(_selected_item) = inventory.get_selected_item() {
-        if let Some(ghost_pos) = ghost_state.position {
+        if let Some(target_pos) = ghost_state.target_block_position {
             if ghost_state.can_place {
-                let position = ghost_pos.as_vec3();
+                // Convert voxel coordinates to world position (block corner)
+                // Voxel coordinates are integers representing cube corners, same as block rendering
+                let position = target_pos.as_vec3();
                 let color = Color::srgba(0.2, 1.0, 0.2, 0.5); // Semi-transparent green
 
-                // Draw wireframe cube
+                // Draw wireframe cube around the block center
                 let half_size = 0.5;
                 let corners = [
                     position + Vec3::new(-half_size, -half_size, -half_size),
@@ -446,11 +469,9 @@ fn handle_interaction_input(
     interactable_query: Query<&Interactable>,
     mut interaction_events: EventWriter<InteractionEvent>,
     mut place_block_events: EventWriter<PlaceBlockEvent>,
+    mut break_block_events: EventWriter<crate::inventory::BreakBlockEvent>,
     inventory: ResMut<PlayerInventory>,
-    _camera_query: Single<(&Camera, &GlobalTransform)>,
-    _windows: Query<&Window>,
     #[cfg(feature = "console")] game_state: Res<State<crate::ui::GameState>>,
-    _voxel_world: Res<VoxelWorld>,
     ghost_state: Res<GhostBlockState>,
 ) {
     // Don't interact when console is open
@@ -466,11 +487,23 @@ fn handle_interaction_input(
     if mouse_input.just_pressed(MouseButton::Left) {
         if let Some(entity) = hovered_entity.entity {
             if let Ok(interactable) = interactable_query.get(entity) {
+                // Interact with device (lamp, door, etc.)
                 interaction_events.write(InteractionEvent {
                     entity,
                     interaction_type: interactable.interaction_type.clone(),
                 });
                 info!("Player interacted with entity {:?}", entity);
+            }
+        } else {
+            // No device hovered - break the block that's currently highlighted by the ghost system
+            // This ensures perfect alignment between the wireframe highlight and block breaking
+            if let Some(target_position) = ghost_state.target_block_position {
+                // Break the same block that's being highlighted
+                break_block_events.write(crate::inventory::BreakBlockEvent {
+                    position: target_position,
+                });
+
+                info!("🔨 Breaking highlighted block at {:?}", target_position);
             }
         }
     }
@@ -480,16 +513,20 @@ fn handle_interaction_input(
         if let Some(selected_item) = inventory.get_selected_item() {
             let ItemType::Block(block_type) = selected_item.item_type;
 
-            // For block placement, we rely on the ghost_state which already uses correct cursor logic
-            // No need for additional raycasting here since ghost_state handles it
+            // For block placement, use the calculated placement position (adjacent to highlighted block)
+            // This matches Minecraft/Luanti behavior where blocks are placed adjacent to the highlighted block
 
-            if let Some(placement_position) = ghost_state.position {
+            if let Some(placement_position) = ghost_state.placement_position {
                 if ghost_state.can_place {
                     place_block_events.write(PlaceBlockEvent {
                         position: placement_position,
+                        block_type: None, // Use selected inventory item
                     });
 
-                    info!("Placed {:?} at {:?}", block_type, placement_position);
+                    info!(
+                        "Placed {:?} at {:?} (adjacent to highlighted block)",
+                        block_type, placement_position
+                    );
                 }
             }
         }

@@ -10,9 +10,8 @@ use crate::{
     world::{CreateWorldEvent, LoadWorldEvent},
 };
 use bevy::prelude::*;
-use bevy::tasks::AsyncComputeTaskPool;
 use chrono;
-use log::{debug, error, info};
+use log::{debug, error, info, warn};
 use serde_json::{Value, json};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{TcpListener, TcpStream};
@@ -52,33 +51,31 @@ impl Plugin for McpPlugin {
     }
 }
 
-/// Startup system to launch the MCP server using Bevy's AsyncComputeTaskPool
+/// Startup system to launch the MCP server using a dedicated Tokio runtime
 fn start_mcp_server(
-    mut server_state: ResMut<McpServerState>,
+    _server_state: ResMut<McpServerState>,
     request_channel: Res<McpRequestChannel>,
 ) {
     let sender = request_channel.sender.clone();
-    let task_pool = AsyncComputeTaskPool::get();
 
-    // Spawn the MCP server task with its own Tokio runtime
-    let task = task_pool.spawn(async move {
-        // Create a Tokio runtime for the MCP server
-        match tokio::runtime::Runtime::new() {
-            Ok(rt) => {
-                rt.block_on(async {
-                    if let Err(e) = run_mcp_server(sender).await {
-                        error!("MCP server error: {}", e);
-                    }
-                });
+    // Create a dedicated Tokio runtime for the MCP server
+    // This is necessary because the MCP server needs a Tokio reactor for TCP operations
+    let _runtime_handle = std::thread::spawn(move || {
+        let rt =
+            tokio::runtime::Runtime::new().expect("Failed to create Tokio runtime for MCP server");
+        rt.block_on(async move {
+            info!("Starting MCP server task...");
+            if let Err(e) = run_mcp_server(sender).await {
+                error!("MCP server error: {}", e);
             }
-            Err(e) => {
-                error!("Failed to create Tokio runtime for MCP server: {}", e);
-            }
-        }
+            info!("MCP server task completed");
+        });
     });
 
-    server_state.server_task = Some(task);
-    info!("MCP server started using Bevy AsyncComputeTaskPool");
+    // Store the thread handle instead of a task
+    // Note: We're not storing this in server_state since it expects a Task<()>
+    // The server will run in the background thread
+    info!("MCP server started using dedicated Tokio runtime (non-blocking)");
 }
 
 /// Main MCP server implementation using TCP JSON-RPC
@@ -204,6 +201,25 @@ async fn handle_mcp_connection(
     Ok(())
 }
 
+/// Get appropriate timeout duration for different MCP methods
+fn get_method_timeout(method: &str) -> std::time::Duration {
+    match method {
+        "tools/call" => {
+            // For tool calls, we need longer timeouts as they may involve world creation
+            // Medieval template can take up to 12-15 seconds to execute
+            std::time::Duration::from_secs(60) // 1 minute for world creation and complex operations
+        }
+        "initialize" | "tools/list" | "resources/list" | "ping" => {
+            // Quick operations that should respond immediately
+            std::time::Duration::from_secs(10)
+        }
+        _ => {
+            // Default timeout for unknown methods
+            std::time::Duration::from_secs(30)
+        }
+    }
+}
+
 /// Handle JSON-RPC request from TCP connection
 async fn handle_json_rpc_request(
     request: serde_json::Value,
@@ -257,9 +273,9 @@ async fn handle_json_rpc_request(
         });
     }
 
-    // Wait for the response from Bevy with timeout (reduced to 10 seconds for faster error handling)
-    let response_result =
-        tokio::time::timeout(std::time::Duration::from_secs(10), response_rx).await;
+    // Wait for the response from Bevy with appropriate timeout based on method
+    let timeout_duration = get_method_timeout(&method);
+    let response_result = tokio::time::timeout(timeout_duration, response_rx).await;
 
     match response_result {
         Ok(Ok(result)) => {
@@ -280,12 +296,16 @@ async fn handle_json_rpc_request(
             })
         }
         Err(_) => {
+            error!(
+                "MCP request timeout for method '{}' after {:?}",
+                method, timeout_duration
+            );
             json!({
                 "jsonrpc": "2.0",
                 "id": id,
                 "error": {
                     "code": -32603, // Internal error
-                    "message": "Request timeout"
+                    "message": format!("Request timeout after {:?} for method '{}'", timeout_duration, method)
                 }
             })
         }
@@ -465,6 +485,8 @@ fn handle_async_tool_call_request(
         },
     );
 
+    // Note: create_world will be handled specially in execute_mcp_commands system
+
     // Create MCP command execution request
     let mcp_command = McpCommandExecution {
         request_id: request_id.clone(),
@@ -524,6 +546,64 @@ fn execute_mcp_commands(
             "Executing MCP command: {} (ID: {})",
             mcp_command.tool_name, mcp_command.request_id
         );
+
+        // Special async handling for create_world command
+        if mcp_command.tool_name == "create_world" {
+            info!(
+                "🎯 [DEBUG] Executing create_world as async command with ID: {}",
+                mcp_command.request_id
+            );
+
+            // Check if the request ID still exists in pending executions
+            if core_params
+                .pending_executions
+                .executions
+                .contains_key(&mcp_command.request_id)
+            {
+                info!(
+                    "✅ [DEBUG] Request {} found in pending executions before async call",
+                    mcp_command.request_id
+                );
+            } else {
+                error!(
+                    "❌ [DEBUG] Request {} NOT found in pending executions before async call! Keys: {:?}",
+                    mcp_command.request_id,
+                    core_params
+                        .pending_executions
+                        .executions
+                        .keys()
+                        .collect::<Vec<_>>()
+                );
+            }
+
+            // Execute the async create_world command directly
+            match super::mcp_commands::execute_create_world_command(
+                &mcp_command.arguments,
+                &mut world_params,
+                &mut entity_params,
+                &mut state_params,
+                &mut core_params,
+                mcp_command.request_id.clone(),
+            ) {
+                Some(immediate_result) => {
+                    // Command completed immediately (error case)
+                    core_params
+                        .command_executed_events
+                        .write(CommandExecutedEvent {
+                            request_id: mcp_command.request_id,
+                            result: immediate_result,
+                        });
+                }
+                None => {
+                    // Command is executing asynchronously - response will be sent by completion handler
+                    info!(
+                        "create_world command {} started async execution",
+                        mcp_command.request_id
+                    );
+                }
+            }
+            continue; // Skip normal bundled execution for create_world
+        }
 
         // Execute MCP command with full functionality restored via parameter bundling
         let result = super::mcp_commands::execute_mcp_command_bundled(
@@ -1171,32 +1251,41 @@ fn execute_mcp_command_directly(
             }
         }
         "publish_world" => {
-            if let Some(world_name) = arguments.get("world_name").and_then(|v| v.as_str()) {
-                let max_players = arguments
-                    .get("max_players")
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(10) as u32;
-                let is_public = arguments
-                    .get("is_public")
-                    .and_then(|v| v.as_bool())
-                    .unwrap_or(true);
+            // Use current world name or provided world_name parameter
+            let world_name =
+                if let Some(provided_name) = arguments.get("world_name").and_then(|v| v.as_str()) {
+                    provided_name.to_string()
+                } else if let Some(current_world) = &current_world {
+                    current_world.name.clone()
+                } else {
+                    return "Error: No current world loaded and no world_name provided".to_string();
+                };
 
-                info!("Publishing world via MCP: {}", world_name);
+            let max_players = arguments
+                .get("max_players")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(10) as u32;
+            let is_public = arguments
+                .get("is_public")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(true);
 
-                // Emit PublishWorldEvent to trigger multiplayer mode transition (same as UI Share button)
-                publish_world_events.write(crate::multiplayer::shared_world::PublishWorldEvent {
-                    world_name: world_name.to_string(),
-                    max_players,
-                    is_public,
-                });
+            info!(
+                "Publishing world via MCP: {} (max_players: {}, public: {})",
+                world_name, max_players, is_public
+            );
 
-                format!(
-                    "World '{}' published for multiplayer (max_players: {}, public: {})",
-                    world_name, max_players, is_public
-                )
-            } else {
-                "Error: world_name is required for publish_world".to_string()
-            }
+            // Emit PublishWorldEvent to trigger multiplayer mode transition (same as UI Share button)
+            publish_world_events.write(crate::multiplayer::shared_world::PublishWorldEvent {
+                world_name: world_name.clone(),
+                max_players,
+                is_public,
+            });
+
+            format!(
+                "World '{}' published for multiplayer (max_players: {}, public: {})",
+                world_name, max_players, is_public
+            )
         }
         "set_game_state" => {
             if let Some(state_str) = arguments.get("state").and_then(|v| v.as_str()) {

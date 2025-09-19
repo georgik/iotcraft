@@ -31,10 +31,11 @@ use crate::multiplayer::{PoseMessage, PoseReceiver, PoseSender};
 use crate::environment::{BlockType, VoxelWorld};
 use crate::inventory::{BreakBlockEvent, ItemType, PlaceBlockEvent, PlayerInventory};
 
-// WASM-compatible GhostBlockState (simplified version for web)
+// WASM-compatible GhostBlockState (matches desktop behavior)
 #[derive(Resource, Default)]
 struct WebGhostBlockState {
-    pub position: Option<IVec3>,
+    pub target_block_position: Option<IVec3>, // Position of existing block that would be broken (highlighted)
+    pub placement_position: Option<IVec3>, // Position where new block would be placed (adjacent to target)
     pub can_place: bool,
 }
 
@@ -254,7 +255,7 @@ pub fn touch_camera_control_system(
 
                 #[cfg(target_arch = "wasm32")]
                 web_sys::console::log_1(&format!(
-                    "📱 Touch debug: pos=({:.1},{:.1}), screen={:.1}x{:.1}, split_x={:.1}, left_side={}", 
+                    "📱 Touch debug: pos=({:.1},{:.1}), screen={:.1}x{:.1}, split_x={:.1}, left_side={}",
                     touch_pos.x, touch_pos.y, touch_state.screen_width, touch_state.screen_height,
                     touch_state.look_area_min_x, is_left_side
                 ).into());
@@ -2370,19 +2371,22 @@ pub fn handle_block_interaction_input_web(
 
         // Check if there's a block at this position
         if voxel_world.is_block_at(voxel_position) {
-            // Found a block - handle interaction
-            let target_position = voxel_position;
-
-            // Left click - break block
+            // Left click - break the block that's currently highlighted by the ghost system
+            // This ensures perfect alignment between the wireframe highlight and block breaking
             if mouse_button_input.just_pressed(MouseButton::Left) {
-                break_block_events.write(BreakBlockEvent {
-                    position: target_position,
-                });
+                if let Some(ghost_state) = &ghost_block_state {
+                    if let Some(target_position) = ghost_state.target_block_position {
+                        break_block_events.write(BreakBlockEvent {
+                            position: target_position,
+                        });
 
-                #[cfg(target_arch = "wasm32")]
-                web_sys::console::log_1(
-                    &format!("🔨 Breaking block at {:?}", target_position).into(),
-                );
+                        #[cfg(target_arch = "wasm32")]
+                        web_sys::console::log_1(
+                            &format!("🔨 Breaking highlighted block at {:?}", target_position)
+                                .into(),
+                        );
+                    }
+                }
             }
 
             // Right click - place block (use ghost state logic like desktop)
@@ -2390,18 +2394,19 @@ pub fn handle_block_interaction_input_web(
                 // Get the currently selected item from inventory
                 if let Some(selected_item) = player_inventory.get_selected_item() {
                     let ItemType::Block(block_type) = selected_item.item_type;
-                    // Use ghost block state position if available (like desktop)
+                    // Use ghost block state placement position (adjacent to highlighted block, like desktop)
                     if let Some(ghost_state) = &ghost_block_state {
-                        if let Some(placement_position) = ghost_state.position {
+                        if let Some(placement_position) = ghost_state.placement_position {
                             if ghost_state.can_place {
                                 place_block_events.write(PlaceBlockEvent {
                                     position: placement_position,
+                                    block_type: Some(block_type),
                                 });
 
                                 #[cfg(target_arch = "wasm32")]
                                 web_sys::console::log_1(
                                     &format!(
-                                        "🧱 Placing {:?} block at {:?}",
+                                        "🧱 Placing {:?} block at {:?} (adjacent to highlighted block)",
                                         block_type, placement_position
                                     )
                                     .into(),
@@ -2427,17 +2432,20 @@ pub fn update_ghost_block_preview_web(
 ) {
     // Only process in InGame state
     if *game_state.get() != GameState::InGame {
-        ghost_state.position = None;
+        ghost_state.target_block_position = None;
+        ghost_state.placement_position = None;
         return;
     }
 
     let Ok(window) = windows.single() else {
-        ghost_state.position = None;
+        ghost_state.target_block_position = None;
+        ghost_state.placement_position = None;
         return;
     };
 
     let Ok((camera, camera_transform)) = camera_query.single() else {
-        ghost_state.position = None;
+        ghost_state.target_block_position = None;
+        ghost_state.placement_position = None;
         return;
     };
 
@@ -2446,7 +2454,8 @@ pub fn update_ghost_block_preview_web(
 
     // Use the camera component directly for raycasting
     let Ok(ray) = camera.viewport_to_world(camera_transform, cursor_position) else {
-        ghost_state.position = None;
+        ghost_state.target_block_position = None;
+        ghost_state.placement_position = None;
         return;
     };
 
@@ -2455,23 +2464,39 @@ pub fn update_ghost_block_preview_web(
     let max_distance = 8.0; // Maximum reach distance
     let step_size = 0.1; // Fine-grained raycast steps
 
-    ghost_state.position = None;
+    ghost_state.target_block_position = None;
+    ghost_state.placement_position = None;
     ghost_state.can_place = false;
 
-    // Perform precise raycast to find which block face is being looked at
-    let mut last_pos = (ray.origin + ray.direction * min_distance).as_ivec3();
+    // Perform precise raycast to find the first existing block (Minecraft-style targeting)
     let mut current_distance = min_distance;
+    let mut last_empty_pos = None;
+
     while current_distance <= max_distance {
         let check_position = (ray.origin + ray.direction * current_distance).as_ivec3();
+
         if voxel_world.is_block_at(check_position) {
-            // Hit a block. The placement position is the last position that was air.
-            if !voxel_world.is_block_at(last_pos) {
-                ghost_state.position = Some(last_pos);
+            // Found the first existing block - this is our target for highlighting (would be broken on left-click)
+            ghost_state.target_block_position = Some(check_position);
+
+            // Try to place on top face first (Minecraft-like behavior)
+            let top_face_pos = check_position + IVec3::new(0, 1, 0);
+            if !voxel_world.is_block_at(top_face_pos) {
+                // Top face is available - place there
+                ghost_state.placement_position = Some(top_face_pos);
                 ghost_state.can_place = true;
+            } else if let Some(empty_pos) = last_empty_pos {
+                // Top face blocked - fall back to closest face (ray approach)
+                if !voxel_world.is_block_at(empty_pos) {
+                    ghost_state.placement_position = Some(empty_pos);
+                    ghost_state.can_place = true;
+                }
             }
             break;
         }
-        last_pos = check_position;
+
+        // Track the last empty position
+        last_empty_pos = Some(check_position);
         current_distance += step_size;
     }
 }
@@ -2509,14 +2534,17 @@ pub fn draw_crosshair_web(
         Color::WHITE,
     );
 
-    // Draw ghost block if we have inventory item and valid placement position
+    // Draw ghost block wireframe around the target block (the one that would be broken)
+    // This provides visual feedback like in Minecraft/Luanti
     if let Some(_selected_item) = inventory.get_selected_item() {
-        if let Some(ghost_pos) = ghost_state.position {
+        if let Some(target_pos) = ghost_state.target_block_position {
             if ghost_state.can_place {
-                let position = ghost_pos.as_vec3();
+                // Convert voxel coordinates to world position (block corner)
+                // Voxel coordinates are integers representing cube corners, same as block rendering
+                let position = target_pos.as_vec3();
                 let color = Color::srgba(0.2, 1.0, 0.2, 0.5); // Semi-transparent green
 
-                // Draw wireframe cube
+                // Draw wireframe cube around the block center
                 let half_size = 0.5;
                 let corners = [
                     position + Vec3::new(-half_size, -half_size, -half_size),

@@ -14,9 +14,11 @@ mcplay is a comprehensive orchestration and testing platform for IoTCraft that e
 ### 🎨 **Visual Management**
 - **Real-Time TUI**: Kubernetes-style status indicators with emoji-coded service health
 - **Multi-Pane Logging**: Separate log streams for orchestrator, MQTT, and each client
+- **Interactive Search**: Modal search dialog with live filtering and text highlighting
 - **Interactive MCP Interface**: Send MCP commands directly from TUI
 - **System Monitoring**: Real-time CPU, memory, and process information
 - **Status Tracking**: Visual process states (Starting → Ready → Running → Stopped)
+- **Enhanced Navigation**: Improved layout with broader progress indicators
 
 ### 🌐 **WASM Client Support** 
 - **Browser Integration**: Automatic Chrome/Safari/Firefox launching
@@ -39,11 +41,47 @@ This project was extracted from the main `desktop-client` as a sibling project t
 3. **Better separation of concerns**: Testing/orchestration tools separate from the core client
 4. **Independent versioning**: McPlay can evolve independently from the desktop client
 
+## TUI Interface Guide
+
+### 📱 **Interactive Scenario Browser**
+When you run `cargo run` without arguments, mcplay opens an interactive TUI for browsing and running scenarios.
+
+#### **Navigation Controls:**
+- `↑`/`↓` - Navigate scenario list
+- `Enter` - Run selected scenario
+- `d` - View detailed scenario information
+- `v` - Validate scenario without running
+- `r` - Refresh scenario list
+- `q`/`Esc`/`Ctrl+C` - Quit application
+
+#### **🔍 Advanced Search Features:**
+- `/` - Open modal search dialog
+- **Live filtering** - Results update as you type
+- **Text highlighting** - Search matches highlighted in yellow
+- **Smart previews** - Shows context from scenario descriptions
+- **Results counter** - "Found: X of Y scenarios" display
+- `Enter` - Apply filter and close search
+- `Esc` - Cancel search and restore full list
+- `Backspace` - Delete characters from search query
+
+#### **📊 Enhanced Progress Display:**
+- **Improved layout** - 35% left panel, 65% right panel for better proportions
+- **Optimized progress bars** - Fit comfortably in left panel
+- **Real-time updates** - Live system monitoring and step progress
+- **Service status indicators** - Kubernetes-style emoji status (⏳🟡🟢🔴🔵🟠)
+
+#### **🎮 During Scenario Execution:**
+- `Tab`/`Shift+Tab` - Switch between log panes
+- `↑`/`↓` - Scroll through logs
+- `Enter` - Send MCP commands (when client selected)
+- `q`/`Esc`/`Ctrl+C` - Exit scenario
+
 ## Quick Start
 
 ### Cross-Platform Testing (Recommended)
 ```bash
-# Interactive scenario selector with TUI
+# Interactive scenario selector with enhanced TUI
+# Features: Modal search (/), text highlighting, improved layout, Ctrl+C support
 cargo run
 
 # Run Alice (desktop) + Bob (WASM browser) cross-platform test

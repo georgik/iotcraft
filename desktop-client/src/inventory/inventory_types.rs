@@ -216,6 +216,7 @@ pub struct GiveItemEvent {
 #[derive(Event, BufferedEvent)]
 pub struct PlaceBlockEvent {
     pub position: IVec3,
+    pub block_type: Option<crate::environment::BlockType>, // None means use selected inventory item
 }
 
 /// Event for when player tries to break a block

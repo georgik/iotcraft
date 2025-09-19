@@ -190,6 +190,25 @@ pub struct PendingToolExecutions {
     pub mcp_commands: Vec<McpCommandExecution>,
 }
 
+impl PendingToolExecutions {
+    /// Complete an async MCP execution with a result
+    pub fn complete_execution(&mut self, request_id: String, result: String) {
+        let request_key = request_id;
+        if let Some(execution) = self.executions.remove(&request_key) {
+            let response = serde_json::json!({
+                "content": [{
+                    "type": "text",
+                    "text": result
+                }],
+                "is_error": false
+            });
+
+            // Send the response back to the MCP client
+            let _ = execution.response_sender.send(response);
+        }
+    }
+}
+
 /// Event to signal that a command has been executed and results are available
 #[derive(Event, BufferedEvent)]
 pub struct CommandExecutedEvent {

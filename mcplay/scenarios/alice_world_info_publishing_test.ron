@@ -1,0 +1,150 @@
+Scenario(
+  name: "alice_world_info_publishing_test",
+  description: "Test world info publishing - Alice creates world from template and shares it, observer should see the world announcement",
+  version: "1.0",
+  
+  // Infrastructure configuration
+  infrastructure: InfrastructureConfig(
+    // MQTT Server (required for world sharing)
+    mqtt_server: MqttServerConfig(
+      required: true,
+      port: 1883,
+      config_file: None,
+      options: None,
+    ),
+    
+    // MQTT Observer (essential - monitors world publishing)
+    mqtt_observer: Some(MqttObserverConfig(
+      required: true, 
+      topics: Some([
+        "iotcraft/worlds/+/info",        // World discovery messages
+        "iotcraft/worlds/+/data",        // World data (disabled but monitored)
+        "$SYS/broker/clients/connected",  // Connection monitoring
+        "#"                              // Catch-all for debugging
+      ]),
+      client_id: Some("world_publish_observer"),
+    )),
+    
+    // No MCP server needed
+    mcp_server: None,
+    services: None,
+  ),
+  
+  // Single client - Alice
+  clients: [
+    ClientConfig(
+      id: "alice_client",
+      player_id: "alice",
+      mcp_port: 3001,
+      client_type: "desktop",
+      name: Some("Alice World Publisher"),
+      config: None,
+    ),
+  ],
+  
+  // Execution steps - focused on world info publishing test
+  steps: [
+    Step(
+      name: "verify_mqtt_connection",
+      description: "Verify that Alice's client connects to MQTT and is ready for world operations",
+      client: "alice_client",
+      action: (
+        type: "mcp_call",
+        tool: "get_mqtt_status",
+        arguments: {},
+      ),
+      wait_before: 2000,  // Let connection stabilize
+      wait_after: 1000,
+      timeout: 10000,
+      success_condition: Some((
+        type: "mcp_response",
+        expected: "success",
+      )),
+      depends_on: [],
+      timing: None,
+      conditions: None,
+      expectations: None,
+    ),
+
+    Step(
+      name: "create_medieval_world",
+      description: "Create a world from medieval template to have meaningful content for publishing",
+      client: "alice_client",
+      action: (
+        type: "mcp_call",
+        tool: "create_world",
+        arguments: {
+          "world_name": "AliceSharedWorld",
+          "template": "medieval"
+        },
+      ),
+      wait_before: 1000,
+      wait_after: 5000,  // Give time for world creation
+      timeout: 20000,
+      success_condition: Some((
+        type: "mcp_response", 
+        expected: "success",
+      )),
+      depends_on: ["verify_mqtt_connection"],
+      timing: None,
+      conditions: None,
+      expectations: None,
+    ),
+
+    Step(
+      name: "publish_world_info_only",
+      description: "🌍 CRITICAL TEST: Publish world to MQTT - should see world info in observer logs (data publishing disabled)",
+      client: "alice_client",
+      action: (
+        type: "mcp_call",
+        tool: "publish_world",
+        arguments: {
+          "max_players": 4,
+          "is_public": true,
+          "description": "Alice's medieval world - info publishing test"
+        },
+      ),
+      wait_before: 3000,  // Extra time after world creation
+      wait_after: 8000,   // Extended wait to see MQTT messages in observer
+      timeout: 15000,
+      success_condition: Some((
+        type: "mcp_response",
+        expected: "success",
+      )),
+      depends_on: ["create_medieval_world"],  // Direct dependency on world creation
+      timing: None,
+      conditions: None,
+      expectations: None,
+    ),
+
+    Step(
+      name: "verify_publishing_result",
+      description: "Verify that the world publishing operation completed successfully",
+      client: "alice_client",
+      action: (
+        type: "mcp_call",
+        tool: "get_system_info",
+        arguments: {},
+      ),
+      wait_before: 2000,
+      wait_after: 3000,
+      timeout: 8000,
+      success_condition: Some((
+        type: "mcp_response",
+        expected: "success",
+      )),
+      depends_on: ["publish_world_info_only"],
+      timing: None,
+      conditions: None,
+      expectations: None,
+    ),
+  ],
+  
+  // Scenario configuration
+  config: Some(ScenarioConfig(
+    timeout_ms: Some(120000),  // 2 minutes total timeout
+    logging: None,
+    environment: None,
+    settings: None,
+  )),
+)

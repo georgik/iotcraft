@@ -1,0 +1,347 @@
+// Alice Medieval Gameplay Demo
+// Demonstrates Alice creating a medieval world, entering gameplay, moving, and placing blocks
+// This focuses on the working MCP functionality while multiplayer publish/join is still in development
+Scenario(
+    name: "alice_medieval_gameplay_demo",
+    description: "Alice creates a medieval world, enters gameplay, moves around, and places blocks to demonstrate the working MCP functionality",
+    version: "1.0",
+    
+    // Infrastructure setup
+    infrastructure: InfrastructureConfig(
+        mqtt_server: MqttServerConfig(
+            required: true,
+            port: 1883,
+            config_file: None,
+            options: None,
+        ),
+        mqtt_observer: Some(MqttObserverConfig(
+            required: true,
+            topics: Some(["#"]), // Monitor all MQTT topics for debugging
+            client_id: Some("alice_gameplay_observer"),
+        )),
+        mcp_server: None,
+        services: None,
+    ),
+    
+    // Single Alice client for demonstration
+    clients: [
+        ClientConfig(
+            id: "alice",
+            player_id: "alice", 
+            mcp_port: 8080,
+            client_type: "desktop",
+            name: Some("Alice - Medieval World Creator"),
+            config: None,
+        ),
+    ],
+    
+    // Gameplay demonstration steps
+    steps: [
+        // Step 1: Initialize Alice's MCP connection
+        Step(
+            name: "alice_mcp_initialize",
+            description: "Initialize Alice's MCP connection",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "initialize",
+                arguments: {
+                    "protocolVersion": "2024-11-05",
+                    "capabilities": { "tools": {} },
+                    "clientInfo": {
+                        "name": "alice-medieval-demo",
+                        "version": "1.0.0"
+                    }
+                },
+            ),
+            wait_before: 2000,
+            wait_after: 500,
+            timeout: 10000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: [],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 2: Check available templates
+        Step(
+            name: "alice_list_templates",
+            description: "Alice lists available world templates",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "list_world_templates",
+                arguments: {},
+            ),
+            wait_before: 500,
+            wait_after: 500,
+            timeout: 10000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["alice_mcp_initialize"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 3: Alice creates a medieval world  
+        Step(
+            name: "alice_create_medieval_world",
+            description: "Alice creates a new medieval world with castle, village, and forest",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "create_world",
+                arguments: {
+                    "world_name": "alice_medieval_demo",
+                    "description": "A medieval world for gameplay demonstration",
+                    "template": "medieval"
+                },
+            ),
+            wait_before: 1000,
+            wait_after: 3000, // Wait for world creation to complete
+            timeout: 20000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["alice_list_templates"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 4: Wait for medieval template execution
+        Step(
+            name: "wait_for_medieval_template",
+            description: "Wait for medieval template commands to execute (castle, village, forest structures)",
+            client: "orchestrator",
+            action: (
+                type: "delay",
+                duration: 12000, // 12 seconds for full medieval template
+            ),
+            wait_before: 0,
+            wait_after: 0,
+            timeout: 15000,
+            success_condition: None,
+            depends_on: ["alice_create_medieval_world"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 5: Alice checks the created world status
+        Step(
+            name: "alice_check_medieval_world",
+            description: "Alice checks world status to validate medieval template created blocks",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "get_world_status",
+                arguments: {},
+            ),
+            wait_before: 1000,
+            wait_after: 1000,
+            timeout: 10000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["wait_for_medieval_template"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 6: Alice verifies she's in InGame state
+        Step(
+            name: "alice_verify_ingame_state",
+            description: "Alice verifies she successfully transitioned to InGame state",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "get_game_state",
+                arguments: {},
+            ),
+            wait_before: 500,
+            wait_after: 500,
+            timeout: 10000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["alice_check_medieval_world"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 7: Alice moves forward to explore the medieval world
+        Step(
+            name: "alice_moves_forward",
+            description: "Alice moves forward 3 blocks to explore the medieval castle",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "player_move",
+                arguments: {
+                    "x": 3.0,
+                    "y": 1.0,
+                    "z": 0.0
+                },
+            ),
+            wait_before: 500,
+            wait_after: 1000,
+            timeout: 10000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["alice_verify_ingame_state"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 8: Alice places a stone block in her medieval world
+        Step(
+            name: "alice_places_stone_block",
+            description: "Alice places a stone block to add to the medieval castle",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "place_block",
+                arguments: {
+                    "block_type": "stone",
+                    "x": 4,
+                    "y": 1,
+                    "z": 0
+                },
+            ),
+            wait_before: 500,
+            wait_after: 1500,
+            timeout: 10000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["alice_moves_forward"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 9: Alice places a second block (quartz) to demonstrate building
+        Step(
+            name: "alice_places_quartz_block",
+            description: "Alice places a quartz block to demonstrate building in the medieval world",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "place_block",
+                arguments: {
+                    "block_type": "quartz_block",
+                    "x": 5,
+                    "y": 1,
+                    "z": 0
+                },
+            ),
+            wait_before: 500,
+            wait_after: 1500,
+            timeout: 10000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["alice_places_stone_block"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 10: Final validation - check world status to confirm block additions
+        Step(
+            name: "alice_final_world_check",
+            description: "Alice checks final world status to confirm her added blocks (should be 4457 blocks: 4455 + 2)",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "get_world_status",
+                arguments: {},
+            ),
+            wait_before: 1000,
+            wait_after: 500,
+            timeout: 10000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["alice_places_quartz_block"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 11: Alice gets her client info for final summary
+        Step(
+            name: "alice_final_client_info",
+            description: "Alice gets final client information summary",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "get_client_info",
+                arguments: {},
+            ),
+            wait_before: 500,
+            wait_after: 1000,
+            timeout: 10000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["alice_final_world_check"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+    ],
+    
+    // Configuration for demonstration
+    config: Some(ScenarioConfig(
+        timeout_ms: Some(120000), // 2 minutes total timeout
+        logging: Some(LoggingConfig(
+            level: Some("info"),
+            log_mqtt: Some(true),
+            log_client_actions: Some(true),
+            filters: Some([
+                "mcp/*", 
+                "world/*",
+                "medieval/*",
+                "template/*",
+                "create_world",
+                "get_world_status",
+                "place_block",
+                "player_move",
+                "get_game_state",
+                "get_client_info",
+                "visual/*"
+            ]),
+        )),
+        environment: Some({
+            "RUST_LOG": "info,iotcraft_desktop_client=debug",
+            "SCENARIO_NAME": "alice_medieval_gameplay_demo",
+            "ENABLE_MCP": "true",
+        }),
+        settings: Some({
+            "auto_cleanup": true,
+            "preserve_logs": true,
+            "fail_fast": true,
+        }),
+    )),
+)

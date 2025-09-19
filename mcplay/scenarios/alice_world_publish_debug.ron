@@ -1,0 +1,197 @@
+// Alice World Publishing Debug Test
+// Simple test to verify Alice can create and publish world data to MQTT
+Scenario(
+    name: "alice_world_publish_debug",
+    description: "Debug test for Alice world publishing - create world, publish, verify MQTT messages",
+    version: "1.0",
+    
+    // Full infrastructure with MQTT observer for debugging
+    infrastructure: InfrastructureConfig(
+        mqtt_server: MqttServerConfig(
+            required: true,
+            port: 1883,
+            config_file: None,
+            options: None,
+        ),
+        mqtt_observer: Some(MqttObserverConfig(
+            required: true,
+            topics: Some([
+                "iotcraft/worlds/+/info",
+                "iotcraft/worlds/+/data", 
+                "iotcraft/worlds/+/data/chunk",
+                "#"  // Monitor all topics for debugging
+            ]),
+            client_id: Some("alice_world_debug_observer"),
+        )),
+        mcp_server: None,
+        services: None,
+    ),
+    
+    // Single client: Alice (host)
+    clients: [
+        ClientConfig(
+            id: "alice",
+            player_id: "alice", 
+            mcp_port: 8080,
+            client_type: "desktop",
+            name: Some("Alice (Host - World Publisher)"),
+            config: None,
+        ),
+    ],
+    
+    // Simple world publishing workflow
+    steps: [
+        // Step 1: Initialize Alice
+        Step(
+            name: "alice_mcp_initialize",
+            description: "Initialize Alice's MCP connection",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "initialize",
+                arguments: {
+                    "protocolVersion": "2024-11-05",
+                    "capabilities": { "tools": {} },
+                    "clientInfo": {
+                        "name": "alice-world-publisher-debug",
+                        "version": "1.0.0"
+                    }
+                },
+            ),
+            wait_before: 1000,
+            wait_after: 500,
+            timeout: 10000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: [],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 2: Alice creates a world
+        Step(
+            name: "alice_create_world",
+            description: "Alice creates a new world for debugging",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "create_world",
+                arguments: {
+                    "world_name": "alice_debug_world",
+                    "description": "Alice's debug world for MQTT testing",
+                    "template": "creative"
+                },
+            ),
+            wait_before: 1000,
+            wait_after: 3000, // Wait for world creation to complete
+            timeout: 20000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["alice_mcp_initialize"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 3: Alice checks world status before publishing  
+        Step(
+            name: "alice_world_status_before",
+            description: "Alice checks world status before publishing",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "get_world_status",
+                arguments: {},
+            ),
+            wait_before: 500,
+            wait_after: 1000,
+            timeout: 10000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["alice_create_world"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 4: Alice publishes the world (KEY STEP!)
+        Step(
+            name: "alice_publish_world",
+            description: "Alice publishes her world to MQTT for debugging",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "publish_world",
+                arguments: {
+                    "world_name": "alice_debug_world",
+                    "max_players": 4,
+                    "is_public": true
+                },
+            ),
+            wait_before: 1000,
+            wait_after: 5000, // Wait longer for MQTT publishing
+            timeout: 15000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["alice_world_status_before"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 5: Alice checks multiplayer status after publishing
+        Step(
+            name: "alice_multiplayer_status",
+            description: "Alice checks multiplayer status after publishing",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "get_multiplayer_status",
+                arguments: {},
+            ),
+            wait_before: 500,
+            wait_after: 1000,
+            timeout: 10000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["alice_publish_world"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 6: Alice checks world status after publishing
+        Step(
+            name: "alice_world_status_after",
+            description: "Alice checks world status after publishing",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "get_world_status", 
+                arguments: {},
+            ),
+            wait_before: 500,
+            wait_after: 2000,
+            timeout: 10000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["alice_multiplayer_status"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+    ]
+)

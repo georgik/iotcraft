@@ -1,0 +1,103 @@
+// MQTT Infrastructure Validation Test
+// Simple test to validate MQTT server and observer are working correctly
+// Instructions: While this scenario is running, open another terminal and run:
+//   cd ../desktop-device-client && cargo run -- --device-id test-lamp-01
+// The MQTT observer should detect the device announcement messages
+Scenario(
+    name: "mqtt_infrastructure_validation",
+    description: "Validate MQTT server and observer - start desktop-device-client in separate terminal during test",
+    version: "1.0",
+    
+    // Infrastructure with MQTT observer monitoring ALL topics
+    infrastructure: InfrastructureConfig(
+        mqtt_server: MqttServerConfig(
+            required: true,
+            port: 1883,
+            config_file: None,
+            options: None,
+        ),
+        mqtt_observer: Some(MqttObserverConfig(
+            required: true,
+            topics: Some(["#"]),  // Monitor ALL topics - will catch device announcements
+            client_id: Some("infrastructure_test_observer"),
+        )),
+        mcp_server: None,
+        services: None,
+    ),
+    
+    // No game clients needed - just testing MQTT infrastructure
+    clients: [],
+    
+    // Simple orchestrator steps with longer observation period
+    steps: [
+        // Step 1: Wait and provide instructions
+        Step(
+            name: "wait_and_instruct",
+            description: "Wait for infrastructure setup and provide user instructions",
+            client: "orchestrator",
+            action: (
+                type: "wait_condition",
+                condition: "time_elapsed",
+                expected_value: Some("5000"),  // Wait 5 seconds for MQTT setup
+                timeout: 10000,
+            ),
+            wait_before: 0,
+            wait_after: 1000,
+            timeout: 10000,
+            success_condition: None,
+            depends_on: [],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 2: Long observation period for manual testing
+        Step(
+            name: "observe_mqtt_traffic",
+            description: "Observe MQTT traffic - NOW start device client in separate terminal",
+            client: "orchestrator",
+            action: (
+                type: "wait_condition",
+                condition: "time_elapsed",
+                expected_value: Some("30000"),  // 30 seconds to observe
+                timeout: 40000,
+            ),
+            wait_before: 0,
+            wait_after: 5000,  // Extra wait to capture final messages
+            timeout: 40000,
+            success_condition: None,
+            depends_on: ["wait_and_instruct"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+    ],
+    
+    // Configuration with enhanced logging
+    config: Some(ScenarioConfig(
+        timeout_ms: Some(60000), // 1 minute total
+        logging: Some(LoggingConfig(
+            level: Some("info"),
+            log_mqtt: Some(true),
+            log_client_actions: Some(false),  // No game clients
+            filters: Some([
+                "mqtt/*",
+                "device/*",
+                "announce",
+                "light",
+                "position",
+            ]),
+        )),
+        environment: Some({
+            "RUST_LOG": "info",
+            "SCENARIO_NAME": "mqtt_infrastructure_validation",
+        }),
+        settings: Some({
+            "auto_cleanup": true,
+            "preserve_logs": true,
+            "fail_fast": false,
+            "verbose_mqtt": true,
+            "capture_full_mqtt_log": true,
+        }),
+    )),
+)
