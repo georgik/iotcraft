@@ -1,0 +1,619 @@
+// Four Player Multiplayer Test - FIXED VERSION
+// Alice creates world, Bob/Charlie/David join AND load world data, all check block counts
+Scenario(
+    name: "four_player_multiplayer_fixed",
+    description: "FIXED: Four-player multiplayer test - Alice creates world, Bob/Charlie/David join AND LOAD world data to sync properly",
+    version: "1.0",
+    
+    // Full infrastructure with MQTT observer for debugging
+    infrastructure: InfrastructureConfig(
+        mqtt_server: MqttServerConfig(
+            required: true,
+            port: 1883,
+            config_file: None,
+            options: None,
+        ),
+        mqtt_observer: Some(MqttObserverConfig(
+            required: true,
+            topics: Some(["#"]), // Monitor all MQTT topics for synchronization debugging
+            client_id: Some("four_player_fixed_observer"),
+        )),
+        mcp_server: None,
+        services: None,
+    ),
+    
+    // Four clients: Alice (host) and Bob/Charlie/David (joiners)
+    clients: [
+        ClientConfig(
+            id: "alice",
+            player_id: "alice", 
+            mcp_port: 8080,
+            client_type: "desktop",
+            name: Some("Alice (Host)"),
+            config: None,
+        ),
+        ClientConfig(
+            id: "bob",
+            player_id: "bob", 
+            mcp_port: 8081,
+            client_type: "desktop",
+            name: Some("Bob (Explorer)"),
+            config: None,
+        ),
+        ClientConfig(
+            id: "charlie",
+            player_id: "charlie", 
+            mcp_port: 8082,
+            client_type: "desktop",
+            name: Some("Charlie (Builder)"),
+            config: None,
+        ),
+        ClientConfig(
+            id: "david",
+            player_id: "david", 
+            mcp_port: 8083,
+            client_type: "desktop",
+            name: Some("David (Tester)"),
+            config: None,
+        ),
+    ],
+    
+    // Four player multiplayer workflow steps - FIXED VERSION
+    steps: [
+        // Step 1-4: Initialize all players
+        Step(
+            name: "alice_mcp_initialize",
+            description: "Initialize Alice's MCP connection",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "initialize",
+                arguments: {
+                    "protocolVersion": "2024-11-05",
+                    "capabilities": { "tools": {} },
+                    "clientInfo": {
+                        "name": "alice-multiplayer-host",
+                        "version": "1.0.0"
+                    }
+                },
+            ),
+            wait_before: 1000,
+            wait_after: 200,
+            timeout: 10000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: [],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        Step(
+            name: "bob_mcp_initialize",
+            description: "Initialize Bob's MCP connection",
+            client: "bob",
+            action: (
+                type: "mcp_call",
+                tool: "initialize",
+                arguments: {
+                    "protocolVersion": "2024-11-05",
+                    "capabilities": { "tools": {} },
+                    "clientInfo": {
+                        "name": "bob-multiplayer-client",
+                        "version": "1.0.0"
+                    }
+                },
+            ),
+            wait_before: 500,
+            wait_after: 200,
+            timeout: 10000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["alice_mcp_initialize"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        Step(
+            name: "charlie_mcp_initialize",
+            description: "Initialize Charlie's MCP connection",
+            client: "charlie",
+            action: (
+                type: "mcp_call",
+                tool: "initialize",
+                arguments: {
+                    "protocolVersion": "2024-11-05",
+                    "capabilities": { "tools": {} },
+                    "clientInfo": {
+                        "name": "charlie-multiplayer-client",
+                        "version": "1.0.0"
+                    }
+                },
+            ),
+            wait_before: 500,
+            wait_after: 200,
+            timeout: 10000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["bob_mcp_initialize"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        Step(
+            name: "david_mcp_initialize",
+            description: "Initialize David's MCP connection",
+            client: "david",
+            action: (
+                type: "mcp_call",
+                tool: "initialize",
+                arguments: {
+                    "protocolVersion": "2024-11-05",
+                    "capabilities": { "tools": {} },
+                    "clientInfo": {
+                        "name": "david-multiplayer-client",
+                        "version": "1.0.0"
+                    }
+                },
+            ),
+            wait_before: 500,
+            wait_after: 200,
+            timeout: 10000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["charlie_mcp_initialize"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 5: Alice creates a world
+        Step(
+            name: "alice_create_world",
+            description: "Alice creates a new world for 4-player multiplayer testing",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "create_world",
+                arguments: {
+                    "world_name": "four_player_fixed_world",
+                    "description": "Alice's FIXED world for 4-player multiplayer testing",
+                    "template": "default"
+                },
+            ),
+            wait_before: 500,
+            wait_after: 2000, // Wait for world creation to complete
+            timeout: 20000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["david_mcp_initialize"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 6: Alice publishes the world
+        Step(
+            name: "alice_publish_world",
+            description: "Alice publishes her world for 4-player multiplayer",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "publish_world",
+                arguments: {
+                    "world_name": "four_player_fixed_world",
+                    "max_players": 4,
+                    "is_public": true
+                },
+            ),
+            wait_before: 1000,
+            wait_after: 2000, // Wait for world to be published
+            timeout: 15000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["alice_create_world"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 7: Alice checks initial world status
+        Step(
+            name: "alice_initial_world_status",
+            description: "Alice checks her initial world status",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "get_world_status",
+                arguments: {},
+            ),
+            wait_before: 500,
+            wait_after: 500,
+            timeout: 10000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["alice_publish_world"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 8-13: Bob joins and loads world data
+        Step(
+            name: "bob_join_world",
+            description: "Bob joins Alice's 4-player world",
+            client: "bob",
+            action: (
+                type: "mcp_call",
+                tool: "join_world",
+                arguments: {
+                    "world_id": "four_player_fixed_world"
+                },
+            ),
+            wait_before: 1000,
+            wait_after: 2000,
+            timeout: 20000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["alice_initial_world_status"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // 🔧 FIX: Bob explicitly loads the world data after joining
+        Step(
+            name: "bob_load_world",
+            description: "🔧 FIX: Bob loads the shared world data after joining",
+            client: "bob",
+            action: (
+                type: "mcp_call",
+                tool: "load_world_from_mqtt",
+                arguments: {
+                    "world_name": "four_player_fixed_world"
+                },
+            ),
+            wait_before: 1000,
+            wait_after: 2000, // Wait for world data to load
+            timeout: 20000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["bob_join_world"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        Step(
+            name: "charlie_join_world",
+            description: "Charlie joins Alice's 4-player world",
+            client: "charlie",
+            action: (
+                type: "mcp_call",
+                tool: "join_world",
+                arguments: {
+                    "world_id": "four_player_fixed_world"
+                },
+            ),
+            wait_before: 1000,
+            wait_after: 2000,
+            timeout: 20000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["bob_load_world"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // 🔧 FIX: Charlie explicitly loads the world data after joining
+        Step(
+            name: "charlie_load_world",
+            description: "🔧 FIX: Charlie loads the shared world data after joining",
+            client: "charlie",
+            action: (
+                type: "mcp_call",
+                tool: "load_world_from_mqtt",
+                arguments: {
+                    "world_name": "four_player_fixed_world"
+                },
+            ),
+            wait_before: 1000,
+            wait_after: 2000, // Wait for world data to load
+            timeout: 20000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["charlie_join_world"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        Step(
+            name: "david_join_world",
+            description: "David joins Alice's 4-player world",
+            client: "david",
+            action: (
+                type: "mcp_call",
+                tool: "join_world",
+                arguments: {
+                    "world_id": "four_player_fixed_world"
+                },
+            ),
+            wait_before: 1000,
+            wait_after: 2000,
+            timeout: 20000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["charlie_load_world"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // 🔧 FIX: David explicitly loads the world data after joining
+        Step(
+            name: "david_load_world",
+            description: "🔧 FIX: David loads the shared world data after joining",
+            client: "david",
+            action: (
+                type: "mcp_call",
+                tool: "load_world_from_mqtt",
+                arguments: {
+                    "world_name": "four_player_fixed_world"
+                },
+            ),
+            wait_before: 1000,
+            wait_after: 2000, // Wait for world data to load
+            timeout: 20000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["david_join_world"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 14-17: All players check world status (block counts should NOW match!)
+        Step(
+            name: "alice_check_world_status",
+            description: "Alice checks world status after all players joined and loaded",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "get_world_status",
+                arguments: {},
+            ),
+            wait_before: 1000,
+            wait_after: 500,
+            timeout: 15000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["david_load_world"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        Step(
+            name: "bob_check_world_status",
+            description: "Bob checks world status - should NOW match Alice's count",
+            client: "bob",
+            action: (
+                type: "mcp_call",
+                tool: "get_world_status",
+                arguments: {},
+            ),
+            wait_before: 500,
+            wait_after: 500,
+            timeout: 15000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["alice_check_world_status"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        Step(
+            name: "charlie_check_world_status",
+            description: "Charlie checks world status - should NOW match Alice's count",
+            client: "charlie",
+            action: (
+                type: "mcp_call",
+                tool: "get_world_status",
+                arguments: {},
+            ),
+            wait_before: 500,
+            wait_after: 500,
+            timeout: 15000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["bob_check_world_status"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        Step(
+            name: "david_check_world_status",
+            description: "David checks world status - should NOW match Alice's count",
+            client: "david",
+            action: (
+                type: "mcp_call",
+                tool: "get_world_status",
+                arguments: {},
+            ),
+            wait_before: 500,
+            wait_after: 500,
+            timeout: 15000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["charlie_check_world_status"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 18-21: All players get their client info for verification
+        Step(
+            name: "all_players_client_info_alice",
+            description: "Alice gets her client info",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "get_client_info",
+                arguments: {},
+            ),
+            wait_before: 500,
+            wait_after: 200,
+            timeout: 10000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["david_check_world_status"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        Step(
+            name: "all_players_client_info_bob",
+            description: "Bob gets his client info",
+            client: "bob",
+            action: (
+                type: "mcp_call",
+                tool: "get_client_info",
+                arguments: {},
+            ),
+            wait_before: 200,
+            wait_after: 200,
+            timeout: 10000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["all_players_client_info_alice"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        Step(
+            name: "all_players_client_info_charlie",
+            description: "Charlie gets his client info",
+            client: "charlie",
+            action: (
+                type: "mcp_call",
+                tool: "get_client_info",
+                arguments: {},
+            ),
+            wait_before: 200,
+            wait_after: 200,
+            timeout: 10000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["all_players_client_info_bob"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        Step(
+            name: "all_players_client_info_david",
+            description: "David gets his client info",
+            client: "david",
+            action: (
+                type: "mcp_call",
+                tool: "get_client_info",
+                arguments: {},
+            ),
+            wait_before: 200,
+            wait_after: 1000,
+            timeout: 10000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["all_players_client_info_charlie"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+    ],
+    
+    // Configuration for 4-player testing
+    config: Some(ScenarioConfig(
+        timeout_ms: Some(240000), // 4 minutes total timeout (increased for load_world steps)
+        logging: Some(LoggingConfig(
+            level: Some("info"),
+            log_mqtt: Some(true),
+            log_client_actions: Some(true),
+            filters: Some([
+                "mcp/*", 
+                "multiplayer/*",
+                "world/*",
+                "create_world",
+                "publish_world",
+                "join_world",
+                "load_world_from_mqtt", // Updated to use new specific command
+                "get_world_status",
+                "get_client_info",
+                "set_game_state",
+                "visual/*",
+                "sync/*",
+                "WorldStateReceivedEvent", // Monitor world data loading
+                "JoinSharedWorldEvent",
+            ]),
+        )),
+        environment: Some({
+            "RUST_LOG": "info,iotcraft_desktop_client=debug",
+            "SCENARIO_NAME": "four_player_multiplayer_FIXED",
+            "ENABLE_MCP": "true",
+        }),
+        settings: Some({
+            "auto_cleanup": true,
+            "preserve_logs": true,
+            "fail_fast": true,
+        }),
+    )),
+)

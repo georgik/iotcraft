@@ -1,5 +1,5 @@
+// Import GameState - use desktop UI system for both desktop and web
 use crate::ui::GameState;
-use avian3d::prelude::*;
 use bevy::prelude::*;
 
 /// Plugin for player controller functionality
@@ -10,6 +10,7 @@ impl Plugin for PlayerControllerPlugin {
         app.insert_resource(PlayerMode::Walking).add_systems(
             Update,
             (
+                enable_gravity_after_world_populated,
                 handle_mode_switch,
                 player_movement,
                 force_walking_mode_on_world_start,
@@ -147,6 +148,8 @@ pub struct PlayerMovement {
     pub ground_check_distance: f32,
     pub last_spacebar_press: Option<f64>,
     pub double_tap_window: f64,
+    /// Whether gravity has been properly initialized after world generation
+    pub gravity_initialized: bool,
 }
 
 impl Default for PlayerMovement {
@@ -160,6 +163,7 @@ impl Default for PlayerMovement {
             ground_check_distance: 10.0, // Increased from 1.2 to 10.0 for better ground detection
             last_spacebar_press: None,
             double_tap_window: 0.25,
+            gravity_initialized: false,
         }
     }
 }
@@ -192,16 +196,7 @@ fn player_movement(
     keyboard_input: Res<ButtonInput<KeyCode>>,
     mut player_mode: ResMut<PlayerMode>,
     mut commands: Commands,
-    mut camera_query: Query<
-        (
-            Entity,
-            &mut Transform,
-            Option<&mut LinearVelocity>,
-            Option<&mut PlayerMovement>,
-        ),
-        With<Camera>,
-    >,
-    spatial_query: SpatialQuery,
+    mut camera_query: Query<(Entity, &mut Transform, Option<&mut PlayerMovement>), With<Camera>>,
     voxel_world: Res<crate::environment::VoxelWorld>,
     game_state: Res<State<GameState>>,
 ) {
@@ -219,8 +214,7 @@ fn player_movement(
         return;
     }
 
-    let (camera_entity, transform, _linear_velocity, player_movement) =
-        camera_entities.into_iter().next().unwrap();
+    let (camera_entity, transform, player_movement) = camera_entities.into_iter().next().unwrap();
 
     // Debug logging every few seconds to understand what's happening
     static mut LAST_SYSTEM_DEBUG: f64 = 0.0;
@@ -292,7 +286,6 @@ fn player_movement(
                         &keyboard_input,
                         transform,
                         &mut movement,
-                        &spatial_query,
                         &voxel_world,
                         should_skip_jump,
                     );
@@ -354,6 +347,7 @@ fn force_walking_mode_on_world_start(
     mut commands: Commands,
     camera_query: Query<(Entity, Option<&PlayerMovement>), With<Camera>>,
     game_state: Res<State<GameState>>,
+    time: Res<Time>, // Use Bevy's Time instead of SystemTime
 ) {
     // When the game is in InGame state, ensure we're in walking mode and have the component
     if *game_state.get() == GameState::InGame {
@@ -381,10 +375,7 @@ fn force_walking_mode_on_world_start(
 
                 if camera_entities.is_empty() {
                     static mut LAST_NO_CAMERA_DEBUG: f64 = 0.0;
-                    let current_time = std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .unwrap()
-                        .as_secs_f64();
+                    let current_time = time.elapsed_secs_f64();
                     if current_time - LAST_NO_CAMERA_DEBUG > 5.0 {
                         LAST_NO_CAMERA_DEBUG = current_time;
                         info!("No camera entities found in InGame state");
@@ -404,10 +395,7 @@ fn force_walking_mode_on_world_start(
                     } else {
                         // Debug: Component already exists
                         static mut LAST_EXISTS_DEBUG: f64 = 0.0;
-                        let current_time = std::time::SystemTime::now()
-                            .duration_since(std::time::UNIX_EPOCH)
-                            .unwrap()
-                            .as_secs_f64();
+                        let current_time = time.elapsed_secs_f64();
                         if current_time - LAST_EXISTS_DEBUG > 5.0 {
                             LAST_EXISTS_DEBUG = current_time;
                             info!(
@@ -424,9 +412,38 @@ fn force_walking_mode_on_world_start(
     }
 }
 
+/// Enable gravity after the voxel world has been populated to avoid starting with gravity disabled
+fn enable_gravity_after_world_populated(
+    voxel_world: Res<crate::environment::VoxelWorld>,
+    mut camera_query: Query<(&mut Transform, &mut PlayerMovement), With<Camera>>,
+) {
+    if voxel_world.blocks.is_empty() {
+        return; // World not ready yet
+    }
+
+    if let Ok((mut transform, mut movement)) = camera_query.single_mut() {
+        if !movement.gravity_initialized {
+            movement.is_grounded = false; // allow gravity to start affecting the player
+            // Kickstart gravity slightly so it begins falling next frame
+            if movement.gravity_scale >= 0.0 {
+                movement.gravity_scale = -0.1;
+            }
+            movement.gravity_initialized = true;
+            // Ensure the player is not below the ground unexpectedly
+            if transform.translation.y < 1.5 {
+                transform.translation.y = 3.0;
+            }
+            info!(
+                "Gravity initialized after world population ({} blocks)",
+                voxel_world.blocks.len()
+            );
+        }
+    }
+}
+
 /// Physics-free walking movement for menu state - only applies gravity, no input processing
 /// Uses the same voxel-based collision system as the main gameplay to ensure consistency
-fn handle_physics_free_walking_movement_menu_only(
+pub fn handle_physics_free_walking_movement_menu_only(
     time: &Res<Time>,
     mut transform: Mut<Transform>,
     movement: &mut PlayerMovement,
@@ -570,12 +587,11 @@ fn handle_physics_free_walking_movement_menu_only(
 }
 
 /// Physics-free walking movement that simulates gravity and collision via Transform manipulation
-fn handle_physics_free_walking_movement(
+pub fn handle_physics_free_walking_movement(
     time: &Res<Time>,
     keyboard_input: &Res<ButtonInput<KeyCode>>,
     mut transform: Mut<Transform>,
     movement: &mut PlayerMovement,
-    _spatial_query: &SpatialQuery,
     voxel_world: &Res<crate::environment::VoxelWorld>,
     should_skip_jump: bool,
 ) {
@@ -867,10 +883,15 @@ fn handle_physics_free_walking_movement(
         voxel_world,
     ) {
         // Something went wrong, revert to original position
-        info!(
-            "Emergency collision revert from {:?} to {:?}",
-            transform.translation, original_position
-        );
+        // Only log if we're actually moving (avoid spam when stuck at origin)
+        if original_position != Vec3::ZERO
+            && transform.translation.distance(original_position) > 0.1
+        {
+            info!(
+                "Emergency collision revert from {:?} to {:?}",
+                transform.translation, original_position
+            );
+        }
         transform.translation = original_position;
         movement.gravity_scale = 0.0;
         movement.is_grounded = true;

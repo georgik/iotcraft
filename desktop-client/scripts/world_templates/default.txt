@@ -1,0 +1,65 @@
+# New World Initialization Script
+# Creates a basic world with grass plains and hills
+
+# Set initial camera position and orientation for better view
+# Position the camera to the left of the structure to avoid obstruction
+# Looking towards the center where lamps might spawn
+tp -8 3 15
+look -34 -3
+
+# Create a large grass plain (80x80 area)
+wall grass -40 0 -40 40 0 40
+
+# Create some hills around the plain
+# Hill 1 - Southeast
+wall dirt 15 1 15 20 3 20
+wall grass 15 4 15 20 4 20
+
+# Hill 2 - Northwest
+wall dirt -20 1 -20 -15 4 -15
+wall grass -20 5 -20 -15 5 -15
+
+# Hill 3 - Northeast
+wall dirt 18 1 -18 22 2 -14
+wall grass 18 3 -18 22 3 -14
+
+# Hill 4 - Southwest
+wall dirt -22 1 18 -18 3 22
+wall grass -22 4 18 -18 4 22
+
+# Create a small structure away from spawn
+wall stone 3 1 3 7 3 7
+wall stone 4 4 4 6 4 6
+
+# Place some decorative blocks
+place quartz_block 5 5 5
+place glass_pane 10 1 10
+place glass_pane -10 1 -10
+place cyan_terracotta 5 1 -5
+place cyan_terracotta -5 1 5
+
+# Create a contained water pond in the corner of the map
+# First create stone walls for containment (1 block high)
+# Note: coordinates must be ordered from smaller to larger values
+
+# North wall (z=-26)
+wall stone 21 1 -26 26 1 -26
+# South wall (z=-21)  
+wall stone 21 1 -21 26 1 -21
+# West wall (x=21)
+wall stone 21 1 -26 21 1 -21
+# East wall (x=26)
+wall stone 26 1 -26 26 1 -21
+
+# Fill the inside with water at level 1 (above the grass ground)
+wall water 22 1 -25 25 1 -22
+
+# Give the player some starting items for building
+give grass 64
+give dirt 32
+give stone 32
+give quartz_block 16
+give glass_pane 8
+give cyan_terracotta 8
+give water 8
+

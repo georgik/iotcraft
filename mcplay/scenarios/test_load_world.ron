@@ -1,0 +1,128 @@
+( 
+  name: "Test Load World Command",
+  description: "Simple test to debug the load_world MCP command issue",
+  version: "1.0",
+  infrastructure: (
+    mqtt_server: (
+      required: true,
+      port: 1883,
+      config_file: None,
+      options: None,
+    ),
+    mqtt_observer: Some((
+      required: true, 
+      topics: Some(["#"]),
+      client_id: Some("observer_load_test"),
+    )),
+    mcp_server: None,
+    services: None,
+  ),
+  clients: [
+    (
+      id: "alice",
+      player_id: "alice",
+      mcp_port: 3001,
+      client_type: "desktop",
+      name: Some("Alice - Load World Test"),
+      config: Some({
+        "enable_mcp": true,
+        "readiness_probe": {
+          "type": "tcp_port", 
+          "port": 3001,
+          "initial_delay_seconds": 5,
+          "timeout_seconds": 10
+        },
+        "liveness_probe": {
+          "type": "mcp_ping",
+          "interval_seconds": 30,
+          "timeout_seconds": 10,
+          "failure_threshold": 5
+        }
+      }),
+    )
+  ],
+  steps: [
+    // Alice checks client info
+    (
+      name: "alice_get_client_info",
+      description: "Alice checks her client status",
+      client: "alice",
+      action: (
+        type: "mcp_call",
+        tool: "get_client_info",
+        arguments: {},
+      ),
+      depends_on: [],
+      wait_before: 1000,
+      wait_after: 2000,
+      timeout: 10000,
+      success_condition: None,
+    ),
+    
+    // Alice creates a world
+    (
+      name: "alice_create_world",
+      description: "Alice creates a new world for testing load_world",
+      client: "alice",
+      action: (
+        type: "mcp_call",
+        tool: "create_world",
+        arguments: {
+          "world_name": "test_load_world",
+          "description": "A test world for debugging load_world command",
+          "template": "medieval"
+        },
+      ),
+      depends_on: ["alice_get_client_info"],
+      wait_before: 1000,
+      wait_after: 3000,
+      timeout: 30000,
+      success_condition: None,
+    ),
+    
+    // Alice attempts to load the world from filesystem (updated to use new command)
+    (
+      name: "alice_load_world",
+      description: "Alice tries to load the world she just created from filesystem",
+      client: "alice",
+      action: (
+        type: "mcp_call",
+        tool: "load_world_from_fs",
+        arguments: {
+          "world_name": "test_load_world"
+        },
+      ),
+      depends_on: ["alice_create_world"],
+      wait_before: 1000,
+      wait_after: 2000,
+      timeout: 30000,
+      success_condition: None,
+    ),
+    
+    // Alice checks her game state after loading
+    (
+      name: "alice_verify_game_state",
+      description: "Alice verifies she's in the game after loading",
+      client: "alice",
+      action: (
+        type: "mcp_call",
+        tool: "get_game_state",
+        arguments: {},
+      ),
+      depends_on: ["alice_load_world"],
+      wait_before: 1000,
+      wait_after: 1000,
+      timeout: 10000,
+      success_condition: None,
+    ),
+  ],
+  config: Some((
+    timeout_ms: Some(120000),  // 2 minutes max runtime
+    logging: None,
+    environment: None,
+    settings: Some({
+      "cleanup_on_exit": true,
+      "keep_logs": true
+    }),
+  )),
+)

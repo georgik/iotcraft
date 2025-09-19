@@ -1,0 +1,128 @@
+# Creative Sandbox World Template  
+# Creates a world optimized for creative building with material samples and open areas
+
+# Set initial camera position for overview of creative areas
+tp 0 10 25
+look 180 -20
+
+# Create varied terrain sections for different building styles
+# Central grass area for main building
+wall grass -20 0 -20 20 0 20
+
+# Stone platform area (northwest)
+wall stone -35 0 -35 -15 0 -15
+
+# Dirt/natural area (northeast) 
+wall dirt 15 0 -35 35 0 -15
+
+# Water features area (southwest)
+wall stone -35 0 15 -15 0 35
+wall water -30 1 20 -20 1 30
+
+# Mixed materials showcase area (southeast)
+wall quartz_block 15 0 15 35 0 35
+
+# Create material sample towers to showcase available blocks
+# Tower 1 - Basic materials
+place grass 0 1 0
+place dirt 0 2 0  
+place stone 0 3 0
+place quartz_block 0 4 0
+
+# Tower 2 - Decorative materials
+place glass_pane 3 1 0
+place cyan_terracotta 3 2 0
+# Note: Water blocks show material variety but may not be visible as expected
+place water 3 3 0
+
+# Create building inspiration structures
+
+# Modern house example
+wall quartz_block 8 1 8 14 1 14
+wall quartz_block 8 2 8 14 2 14
+wall quartz_block 8 3 8 14 3 14
+# Add windows
+place glass_pane 9 2 8
+place glass_pane 11 2 8
+place glass_pane 13 2 8
+place glass_pane 9 2 14
+place glass_pane 11 2 14
+place glass_pane 13 2 14
+
+# Traditional house example
+wall stone -14 1 8 -8 1 14
+wall stone -14 2 8 -8 2 14  
+wall stone -14 3 8 -8 3 14
+# Add door opening
+wall grass -11 2 8 -11 3 8
+# Windows
+place glass_pane -13 2 10
+place glass_pane -9 2 10
+place glass_pane -11 2 14
+
+# Garden/landscaping area
+wall grass 8 1 -14 14 1 -8
+# Add some decorative elements
+place stone 10 2 -12
+place glass_pane 10 3 -12
+place cyan_terracotta 9 1 -10
+place cyan_terracotta 11 1 -10
+place cyan_terracotta 10 1 -9
+place cyan_terracotta 10 1 -11
+
+# Workshop/building area with raised platform
+wall stone -8 1 -14 8 1 -8
+wall stone -8 2 -14 8 2 -8
+
+# Create some terrain features for inspiration
+# Small hill
+wall dirt -25 1 -10 -20 1 -5
+wall dirt -24 2 -9 -21 2 -6
+wall grass -23 3 -8 -22 3 -7
+
+# Another hill with different materials
+wall stone 20 1 -10 25 1 -5  
+wall quartz_block 21 2 -9 24 2 -6
+place glass_pane 22 3 -8
+place glass_pane 23 3 -7
+
+# Create flat building pads at different levels
+wall stone -5 3 5 5 3 15    # Elevated platform 1
+wall quartz_block 10 2 -5 20 2 5   # Elevated platform 2  
+wall dirt -20 1 25 -10 1 35         # Ground level platform
+
+# Add some water features for variety
+wall water 0 1 22 10 1 28
+wall stone -1 1 21 11 1 21  # Water containment
+wall stone -1 1 29 11 1 29  # Water containment
+
+# Resource deposits (organized material areas)
+# Stone quarry
+wall stone -30 0 -5 -25 0 0
+wall stone -30 1 -5 -25 1 0
+
+# Glass workshop area  
+wall glass_pane 25 1 8 30 1 13
+place stone 26 1 9   # Workbench
+place stone 28 1 11  # Furnace
+
+# Terracotta workshop
+wall cyan_terracotta 25 1 20 30 1 25
+place quartz_block 27 2 22  # Display
+
+# Give extensive creative building supplies
+give grass 99
+give dirt 99
+give stone 99
+give quartz_block 99
+give glass_pane 64
+give cyan_terracotta 64  
+give water 32
+
+# Additional instruction comments
+# Players can use this world to:
+# - Experiment with different building styles
+# - Learn block placement techniques  
+# - Test architectural designs
+# - Practice landscaping
+# - Build whatever they imagine!

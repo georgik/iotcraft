@@ -1,0 +1,155 @@
+// Test Player Names Scenario
+// Verify that mcplay correctly passes player names to desktop clients
+Scenario(
+    name: "test_player_names",
+    description: "Test scenario to verify that player names are correctly passed from mcplay to desktop clients",
+    version: "1.0",
+    
+    // MQTT infrastructure required for client communication
+    infrastructure: InfrastructureConfig(
+        mqtt_server: MqttServerConfig(
+            required: true,
+            port: 1883,
+            config_file: None,
+            options: None,
+        ),
+        mqtt_observer: Some(MqttObserverConfig(
+            required: true,
+            topics: Some(["#"]), // Monitor all topics
+            client_id: Some("test_player_names_observer"),
+        )),
+        mcp_server: None,
+        services: None,
+    ),
+    
+    // Two clients with different names to test the fix
+    clients: [
+        ClientConfig(
+            id: "alice",
+            player_id: "alice_player", 
+            mcp_port: 8080,
+            client_type: "desktop",
+            name: Some("Alice - Test Player One"), // This should appear in the GUI
+            config: None,
+        ),
+        ClientConfig(
+            id: "bob",
+            player_id: "bob_player", 
+            mcp_port: 8081,
+            client_type: "desktop",
+            name: Some("Bob - Test Player Two"), // This should appear in the GUI
+            config: None,
+        ),
+    ],
+    
+    // Simple test steps to initialize and verify players
+    steps: [
+        // Initialize Alice
+        Step(
+            name: "alice_initialize",
+            description: "Initialize Alice's MCP connection",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "initialize",
+                arguments: {
+                    "protocolVersion": "2024-11-05",
+                    "capabilities": { "tools": {} },
+                    "clientInfo": {
+                        "name": "alice-test-client",
+                        "version": "1.0.0"
+                    }
+                },
+            ),
+            wait_before: 1000,
+            wait_after: 500,
+            timeout: 15000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: [],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Initialize Bob
+        Step(
+            name: "bob_initialize",
+            description: "Initialize Bob's MCP connection",
+            client: "bob",
+            action: (
+                type: "mcp_call",
+                tool: "initialize",
+                arguments: {
+                    "protocolVersion": "2024-11-05",
+                    "capabilities": { "tools": {} },
+                    "clientInfo": {
+                        "name": "bob-test-client",
+                        "version": "1.0.0"
+                    }
+                },
+            ),
+            wait_before: 500,
+            wait_after: 500,
+            timeout: 15000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["alice_initialize"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Test basic functionality - Alice gets client info
+        Step(
+            name: "alice_get_client_info",
+            description: "Alice gets client information to verify functionality",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "get_client_info",
+                arguments: {},
+            ),
+            wait_before: 500,
+            wait_after: 500,
+            timeout: 15000,
+            success_condition: Some((
+                type: "mcp_response", 
+                expected: "success",
+            )),
+            depends_on: ["bob_initialize"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Test basic functionality - Bob gets client info
+        Step(
+            name: "bob_get_client_info", 
+            description: "Bob gets client information to verify functionality",
+            client: "bob",
+            action: (
+                type: "mcp_call",
+                tool: "get_client_info",
+                arguments: {},
+            ),
+            wait_before: 500,
+            wait_after: 1000,
+            timeout: 15000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success", 
+            )),
+            depends_on: ["alice_get_client_info"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+    ],
+    
+    config: None,
+)

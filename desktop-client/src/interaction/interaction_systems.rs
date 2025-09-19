@@ -1,6 +1,5 @@
 use bevy::pbr::MeshMaterial3d;
 use bevy::prelude::*;
-use bevy_console::ConsoleOpen;
 use log::{error, info};
 use rumqttc::{Client, Event, MqttOptions, Outgoing, QoS};
 use std::time::Duration;
@@ -74,7 +73,7 @@ mod tests {
 
         // Send interaction event
         let mut event_writer = world.resource_mut::<Events<InteractionEvent>>();
-        event_writer.send(InteractionEvent {
+        event_writer.write(InteractionEvent {
             entity: device_entity,
             interaction_type: InteractionType::ToggleLamp,
         });
@@ -82,7 +81,7 @@ mod tests {
 
         let mut system = IntoSystem::into_system(handle_interaction_events);
         system.initialize(&mut world);
-        system.run((), &mut world);
+        let _ = system.run((), &mut world);
 
         // Check that lamp toggle event was generated - simplified test
         // In a real application, you'd need to set up proper event readers
@@ -114,7 +113,7 @@ mod tests {
 
         // Send door toggle event
         let mut event_writer = world.resource_mut::<Events<DoorToggleEvent>>();
-        event_writer.send(DoorToggleEvent {
+        event_writer.write(DoorToggleEvent {
             device_id: "test_door".to_string(),
             new_state: true,
         });
@@ -122,7 +121,7 @@ mod tests {
 
         let mut system = IntoSystem::into_system(handle_door_toggle_events);
         system.initialize(&mut world);
-        system.run((), &mut world);
+        let _ = system.run((), &mut world);
 
         // Check that door state was updated
         let door_state = world.entity(device_entity).get::<DoorState>().unwrap();
@@ -157,7 +156,7 @@ mod tests {
 
         let mut system = IntoSystem::into_system(update_door_visuals);
         system.initialize(&mut world);
-        system.run((), &mut world);
+        let _ = system.run((), &mut world);
 
         // Check that transform was updated for open door
         let transform = world.entity(device_entity).get::<Transform>().unwrap();
@@ -235,10 +234,16 @@ fn raycast_interaction_system(
     windows: Query<&Window>,
     interactable_query: Query<(Entity, &GlobalTransform), With<Interactable>>,
     mut hovered_entity: ResMut<HoveredEntity>,
-    console_open: Res<ConsoleOpen>,
+    #[cfg(feature = "console")] game_state: Res<State<crate::ui::GameState>>,
 ) {
     // Don't interact when console is open
-    if console_open.open {
+    #[cfg(feature = "console")]
+    if *game_state.get() == crate::ui::GameState::ConsoleOpen {
+        hovered_entity.entity = None;
+        return;
+    }
+    #[cfg(not(feature = "console"))]
+    if false {
         hovered_entity.entity = None;
         return;
     }
@@ -249,18 +254,12 @@ fn raycast_interaction_system(
 
     let (camera, camera_transform) = *camera_query;
 
-    // Use screen center when cursor is grabbed, otherwise use cursor position
-    let cursor_position = if window.cursor_options.grab_mode == bevy::window::CursorGrabMode::Locked
-    {
-        // When cursor is grabbed, use screen center where crosshair is displayed
+    // Assume cursor is grabbed when in game state and not in menu or console mode
+    // In Bevy 0.17, cursor grab state is managed by the game state system, not on Window
+    // This check is simplified since cursor state is managed elsewhere
+    let cursor_position = {
+        // For desktop app, when not in menu states, use screen center as cursor is grabbed
         Vec2::new(window.width() / 2.0, window.height() / 2.0)
-    } else {
-        // When cursor is not grabbed, use actual cursor position
-        let Some(cursor_pos) = window.cursor_position() else {
-            hovered_entity.entity = None;
-            return;
-        };
-        cursor_pos
     };
 
     // Calculate a ray pointing from the camera into the world based on the cursor's position
@@ -304,36 +303,40 @@ fn update_ghost_block_preview(
     windows: Query<&Window>,
     voxel_world: Res<VoxelWorld>,
     mut ghost_state: ResMut<GhostBlockState>,
-    console_open: Res<ConsoleOpen>,
+    #[cfg(feature = "console")] game_state: Res<State<crate::ui::GameState>>,
 ) {
-    if console_open.open {
-        ghost_state.position = None;
+    #[cfg(feature = "console")]
+    if *game_state.get() == crate::ui::GameState::ConsoleOpen {
+        ghost_state.target_block_position = None;
+        ghost_state.placement_position = None;
+        return;
+    }
+    #[cfg(not(feature = "console"))]
+    if false {
+        ghost_state.target_block_position = None;
+        ghost_state.placement_position = None;
         return;
     }
 
     let Ok(window) = windows.single() else {
-        ghost_state.position = None;
+        ghost_state.target_block_position = None;
+        ghost_state.placement_position = None;
         return;
     };
 
     let (camera, camera_transform) = *camera_query;
 
-    // Use screen center when cursor is grabbed, otherwise use cursor position
-    let cursor_position = if window.cursor_options.grab_mode == bevy::window::CursorGrabMode::Locked
-    {
-        // When cursor is grabbed, use screen center where crosshair is displayed
+    // Assume cursor is grabbed when in game state and not in menu or console mode
+    // In Bevy 0.17, cursor grab state is managed by the game state system, not on Window
+    // This check is simplified since cursor state is managed elsewhere
+    let cursor_position = {
+        // For desktop app, when not in menu states, use screen center as cursor is grabbed
         Vec2::new(window.width() / 2.0, window.height() / 2.0)
-    } else {
-        // When cursor is not grabbed, use actual cursor position
-        let Some(cursor_pos) = window.cursor_position() else {
-            ghost_state.position = None;
-            return;
-        };
-        cursor_pos
     };
 
     let Ok(ray) = camera.viewport_to_world(camera_transform, cursor_position) else {
-        ghost_state.position = None;
+        ghost_state.target_block_position = None;
+        ghost_state.placement_position = None;
         return;
     };
 
@@ -342,23 +345,39 @@ fn update_ghost_block_preview(
     let max_distance = 8.0; // Maximum reach distance
     let step_size = 0.1; // Fine-grained raycast steps
 
-    ghost_state.position = None;
+    ghost_state.target_block_position = None;
+    ghost_state.placement_position = None;
     ghost_state.can_place = false;
 
-    // Perform precise raycast to find which block face is being looked at.
-    let mut last_pos = (ray.origin + ray.direction * min_distance).as_ivec3();
+    // Perform precise raycast to find the first existing block (Minecraft-style targeting)
     let mut current_distance = min_distance;
+    let mut last_empty_pos = None;
+
     while current_distance <= max_distance {
         let check_position = (ray.origin + ray.direction * current_distance).as_ivec3();
+
         if voxel_world.is_block_at(check_position) {
-            // Hit a block. The placement position is the last position that was air.
-            if !voxel_world.is_block_at(last_pos) {
-                ghost_state.position = Some(last_pos);
+            // Found the first existing block - this is our target for highlighting (would be broken on left-click)
+            ghost_state.target_block_position = Some(check_position);
+
+            // Try to place on top face first (Minecraft-like behavior)
+            let top_face_pos = check_position + IVec3::new(0, 1, 0);
+            if !voxel_world.is_block_at(top_face_pos) {
+                // Top face is available - place there
+                ghost_state.placement_position = Some(top_face_pos);
                 ghost_state.can_place = true;
+            } else if let Some(empty_pos) = last_empty_pos {
+                // Top face blocked - fall back to closest face (ray approach)
+                if !voxel_world.is_block_at(empty_pos) {
+                    ghost_state.placement_position = Some(empty_pos);
+                    ghost_state.can_place = true;
+                }
             }
             break;
         }
-        last_pos = check_position;
+
+        // Track the last empty position
+        last_empty_pos = Some(check_position);
         current_distance += step_size;
     }
 }
@@ -366,12 +385,17 @@ fn update_ghost_block_preview(
 /// Draw a crosshair at the center of the screen and ghost block preview
 fn draw_crosshair(
     mut gizmos: Gizmos,
-    console_open: Res<ConsoleOpen>,
+    #[cfg(feature = "console")] game_state: Res<State<crate::ui::GameState>>,
     ghost_state: Res<GhostBlockState>,
     inventory: Res<PlayerInventory>,
     windows: Query<&Window>,
 ) {
-    if console_open.open {
+    #[cfg(feature = "console")]
+    if *game_state.get() == crate::ui::GameState::ConsoleOpen {
+        return;
+    }
+    #[cfg(not(feature = "console"))]
+    if false {
         return;
     }
 
@@ -395,14 +419,17 @@ fn draw_crosshair(
         Color::WHITE,
     );
 
-    // Draw ghost block if we have inventory item and valid placement position
+    // Draw ghost block wireframe around the target block (the one that would be broken)
+    // This provides visual feedback like in Minecraft/Luanti
     if let Some(_selected_item) = inventory.get_selected_item() {
-        if let Some(ghost_pos) = ghost_state.position {
+        if let Some(target_pos) = ghost_state.target_block_position {
             if ghost_state.can_place {
-                let position = ghost_pos.as_vec3();
+                // Convert voxel coordinates to world position (block corner)
+                // Voxel coordinates are integers representing cube corners, same as block rendering
+                let position = target_pos.as_vec3();
                 let color = Color::srgba(0.2, 1.0, 0.2, 0.5); // Semi-transparent green
 
-                // Draw wireframe cube
+                // Draw wireframe cube around the block center
                 let half_size = 0.5;
                 let corners = [
                     position + Vec3::new(-half_size, -half_size, -half_size),
@@ -442,26 +469,41 @@ fn handle_interaction_input(
     interactable_query: Query<&Interactable>,
     mut interaction_events: EventWriter<InteractionEvent>,
     mut place_block_events: EventWriter<PlaceBlockEvent>,
+    mut break_block_events: EventWriter<crate::inventory::BreakBlockEvent>,
     inventory: ResMut<PlayerInventory>,
-    _camera_query: Single<(&Camera, &GlobalTransform)>,
-    _windows: Query<&Window>,
-    console_open: Res<ConsoleOpen>,
-    _voxel_world: Res<VoxelWorld>,
+    #[cfg(feature = "console")] game_state: Res<State<crate::ui::GameState>>,
     ghost_state: Res<GhostBlockState>,
 ) {
     // Don't interact when console is open
-    if console_open.open {
+    #[cfg(feature = "console")]
+    if *game_state.get() == crate::ui::GameState::ConsoleOpen {
+        return;
+    }
+    #[cfg(not(feature = "console"))]
+    if false {
         return;
     }
 
     if mouse_input.just_pressed(MouseButton::Left) {
         if let Some(entity) = hovered_entity.entity {
             if let Ok(interactable) = interactable_query.get(entity) {
+                // Interact with device (lamp, door, etc.)
                 interaction_events.write(InteractionEvent {
                     entity,
                     interaction_type: interactable.interaction_type.clone(),
                 });
                 info!("Player interacted with entity {:?}", entity);
+            }
+        } else {
+            // No device hovered - break the block that's currently highlighted by the ghost system
+            // This ensures perfect alignment between the wireframe highlight and block breaking
+            if let Some(target_position) = ghost_state.target_block_position {
+                // Break the same block that's being highlighted
+                break_block_events.write(crate::inventory::BreakBlockEvent {
+                    position: target_position,
+                });
+
+                info!("🔨 Breaking highlighted block at {:?}", target_position);
             }
         }
     }
@@ -471,16 +513,20 @@ fn handle_interaction_input(
         if let Some(selected_item) = inventory.get_selected_item() {
             let ItemType::Block(block_type) = selected_item.item_type;
 
-            // For block placement, we rely on the ghost_state which already uses correct cursor logic
-            // No need for additional raycasting here since ghost_state handles it
+            // For block placement, use the calculated placement position (adjacent to highlighted block)
+            // This matches Minecraft/Luanti behavior where blocks are placed adjacent to the highlighted block
 
-            if let Some(placement_position) = ghost_state.position {
+            if let Some(placement_position) = ghost_state.placement_position {
                 if ghost_state.can_place {
                     place_block_events.write(PlaceBlockEvent {
                         position: placement_position,
+                        block_type: None, // Use selected inventory item
                     });
 
-                    info!("Placed {:?} at {:?}", block_type, placement_position);
+                    info!(
+                        "Placed {:?} at {:?} (adjacent to highlighted block)",
+                        block_type, placement_position
+                    );
                 }
             }
         }
@@ -717,10 +763,15 @@ fn draw_interaction_cursor(
     mut gizmos: Gizmos,
     hovered_entity: Res<HoveredEntity>,
     interactable_query: Query<&GlobalTransform, With<Interactable>>,
-    console_open: Res<ConsoleOpen>,
+    #[cfg(feature = "console")] game_state: Res<State<crate::ui::GameState>>,
     ground_query: Query<&GlobalTransform, With<Ground>>,
 ) {
-    if console_open.open {
+    #[cfg(feature = "console")]
+    if *game_state.get() == crate::ui::GameState::ConsoleOpen {
+        return;
+    }
+    #[cfg(not(feature = "console"))]
+    if false {
         return;
     }
 

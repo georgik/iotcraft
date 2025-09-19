@@ -1,0 +1,200 @@
+// Async MQTT Publishing Validation - Working RON Scenario
+// Tests the async MQTT implementation with observer monitoring
+(
+  name: "Async MQTT Publishing Validation",
+  description: "Validate async MQTT publishing with world creation and MQTT observer monitoring",
+  version: "1.0",
+  
+  infrastructure: (
+    mqtt_server: (
+      required: true,
+      port: 1883,
+      config_file: None,
+      options: None,
+    ),
+    mqtt_observer: Some((
+      required: true,
+      topics: Some([
+        "iotcraft/worlds/+/info",
+        "iotcraft/worlds/+/data",
+        "iotcraft/worlds/+/players/+/pose",
+        "home/+/light",
+        "home/sensor/temperature",
+        "devices/announce",
+        "#"  // Catch all for debugging
+      ]),
+      client_id: Some("async_mqtt_observer"),
+    )),
+    mcp_server: None,
+    services: None,
+  ),
+  
+  clients: [
+    (
+      id: "alice",
+      player_id: "alice",
+      mcp_port: 3001,
+      client_type: "desktop",
+      name: Some("Alice - Async MQTT Test Client"),
+      config: Some({
+        "enable_mcp": true,
+        "readiness_probe": {
+          "type": "tcp_port",
+          "port": 3001,
+          "initial_delay_seconds": 5,
+          "timeout_seconds": 20
+        },
+        "liveness_probe": {
+          "type": "mcp_ping",
+          "interval_seconds": 60,
+          "timeout_seconds": 15,
+          "failure_threshold": 3
+        }
+      }),
+    )
+  ],
+  
+  steps: [
+    // Step 1: Initialize MCP
+    (
+      name: "alice_initialize_mcp",
+      description: "Alice initializes MCP connection",
+      client: "alice",
+      action: (
+        type: "mcp_call",
+        tool: "get_client_info",
+        arguments: {},
+      ),
+      depends_on: [],
+      wait_before: 2000,
+      wait_after: 2000,
+      timeout: 15000,
+      success_condition: None,
+    ),
+    
+    // Step 2: Create a world
+    (
+      name: "alice_create_world",
+      description: "Alice creates a test world for async MQTT publishing",
+      client: "alice",
+      action: (
+        type: "mcp_call",
+        tool: "create_world",
+        arguments: {
+          "world_name": "async_mqtt_test_world",
+          "description": "Test world for async MQTT validation",
+          "template": "default"
+        },
+      ),
+      depends_on: ["alice_initialize_mcp"],
+      wait_before: 1000,
+      wait_after: 3000,
+      timeout: 25000,
+      success_condition: None,
+    ),
+    
+    // Step 3: Place some blocks
+    (
+      name: "alice_place_blocks",
+      description: "Alice places blocks to create world data",
+      client: "alice",
+      action: (
+        type: "mcp_call",
+        tool: "place_block",
+        arguments: {
+          "block_type": "grass",
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+      ),
+      depends_on: ["alice_create_world"],
+      wait_before: 500,
+      wait_after: 1000,
+      timeout: 10000,
+      success_condition: None,
+    ),
+    
+    // Step 4: Check world status
+    (
+      name: "alice_world_status",
+      description: "Alice checks world status before publishing",
+      client: "alice",
+      action: (
+        type: "mcp_call",
+        tool: "get_world_status",
+        arguments: {},
+      ),
+      depends_on: ["alice_place_blocks"],
+      wait_before: 500,
+      wait_after: 1000,
+      timeout: 10000,
+      success_condition: None,
+    ),
+    
+    // Step 5: CRITICAL - Publish world to MQTT
+    (
+      name: "alice_publish_world_async",
+      description: "🚨 CRITICAL: Alice publishes world to MQTT - async validation",
+      client: "alice",
+      action: (
+        type: "mcp_call",
+        tool: "publish_world",
+        arguments: {
+          "world_name": "async_mqtt_test_world",
+          "max_players": 4,
+          "is_public": true
+        },
+      ),
+      depends_on: ["alice_world_status"],
+      wait_before: 1000,
+      wait_after: 8000,  // Extended wait to capture MQTT messages
+      timeout: 20000,
+      success_condition: None,
+    ),
+    
+    // Step 6: Check multiplayer status
+    (
+      name: "alice_check_multiplayer_status",
+      description: "Alice checks multiplayer status after publishing",
+      client: "alice",
+      action: (
+        type: "mcp_call",
+        tool: "get_multiplayer_status",
+        arguments: {},
+      ),
+      depends_on: ["alice_publish_world_async"],
+      wait_before: 1000,
+      wait_after: 2000,
+      timeout: 10000,
+      success_condition: None,
+    ),
+    
+    // Step 7: List online worlds to verify discovery
+    (
+      name: "alice_list_online_worlds",
+      description: "Alice lists online worlds to verify MQTT discovery works",
+      client: "alice",
+      action: (
+        type: "mcp_call",
+        tool: "list_online_worlds",
+        arguments: {},
+      ),
+      depends_on: ["alice_check_multiplayer_status"],
+      wait_before: 2000,
+      wait_after: 3000,
+      timeout: 10000,
+      success_condition: None,
+    ),
+  ],
+  
+  config: Some((
+    timeout_ms: Some(240000),  // 4 minutes for comprehensive test
+    logging: None,
+    environment: None,
+    settings: Some({
+      "auto_cleanup": true,
+      "preserve_logs": true,
+    }),
+  )),
+)

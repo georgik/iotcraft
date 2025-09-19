@@ -1,8 +1,13 @@
 use bevy::prelude::*;
 
+pub mod inventory_commands;
+pub mod inventory_params;
 pub mod inventory_systems;
 pub mod inventory_types;
 
+// Specific imports to avoid unused warnings
+// pub use inventory_commands::handle_inventory_input_bundled;
+pub use inventory_params::*;
 pub use inventory_systems::*;
 pub use inventory_types::*;
 
@@ -17,7 +22,13 @@ impl Plugin for InventoryPlugin {
             .insert_resource(PlayerInventory::new())
             .add_systems(
                 Update,
-                (give_item_system, place_block_system, break_block_system),
+                (
+                    give_item_system,
+                    place_block_system,
+                    place_block_multiplayer_sync_system,
+                    break_block_system,
+                    break_block_multiplayer_sync_system,
+                ),
             );
     }
 }

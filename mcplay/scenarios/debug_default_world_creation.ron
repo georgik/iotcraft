@@ -1,0 +1,136 @@
+// Debug Default World Creation Test
+// Tests default world creation with comprehensive debugging
+Scenario(
+    name: "debug_default_world_creation",
+    description: "Debug test for default world creation to trace blocking issues",
+    version: "1.0",
+    
+    // Infrastructure setup
+    infrastructure: InfrastructureConfig(
+        mqtt_server: MqttServerConfig(
+            required: true,
+            port: 1883,
+            config_file: None,
+            options: None,
+        ),
+        mqtt_observer: None,
+        mcp_server: None,
+        services: None,
+    ),
+    
+    // Debug client for testing
+    clients: [
+        ClientConfig(
+            id: "debug_client",
+            player_id: "debug_player",
+            mcp_port: 3001,
+            client_type: "desktop",
+            name: Some("Debug Client"),
+            config: Some({
+                "enable_mcp": true,
+                "readiness_probe": {
+                    "type": "tcp_port",
+                    "port": 3001,
+                    "initial_delay_seconds": 5,
+                    "timeout_seconds": 15
+                },
+                "liveness_probe": {
+                    "type": "mcp_ping",
+                    "interval_seconds": 30,
+                    "timeout_seconds": 10,
+                    "failure_threshold": 3
+                }
+            }),
+        ),
+    ],
+    
+    // Test steps
+    steps: [
+        // Step 1: Initialize MCP connection
+        Step(
+            name: "mcp_initialize",
+            description: "Initialize MCP connection",
+            client: "debug_client",
+            action: (
+                type: "mcp_call",
+                tool: "initialize",
+                arguments: {},
+            ),
+            wait_before: 1000,
+            wait_after: 1000,
+            timeout: 15000,
+            success_condition: None,
+            depends_on: [],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 2: Test basic ping
+        Step(
+            name: "ping_test",
+            description: "Test basic MCP ping",
+            client: "debug_client",
+            action: (
+                type: "mcp_call",
+                tool: "ping",
+                arguments: {},
+            ),
+            wait_before: 500,
+            wait_after: 500,
+            timeout: 10000,
+            success_condition: None,
+            depends_on: ["mcp_initialize"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 3: Create default world (this is where we expect to see blocking)
+        Step(
+            name: "create_default_world",
+            description: "Create world with DEFAULT template (should be simple and fast)",
+            client: "debug_client",
+            action: (
+                type: "mcp_call",
+                tool: "create_world",
+                arguments: {
+                    "world_name": "DebugDefaultWorld",
+                    "description": "Simple default world for debugging",
+                    "template": "default"
+                },
+            ),
+            wait_before: 1000,
+            wait_after: 2000,
+            timeout: 30000, // Increased timeout for debugging
+            success_condition: None,
+            depends_on: ["ping_test"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 4: Verify world creation succeeded
+        Step(
+            name: "verify_world_created",
+            description: "Verify world was created successfully",
+            client: "debug_client",
+            action: (
+                type: "mcp_call",
+                tool: "get_world_status",
+                arguments: {},
+            ),
+            wait_before: 1000,
+            wait_after: 1000,
+            timeout: 10000,
+            success_condition: None,
+            depends_on: ["create_default_world"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+    ],
+    
+    // Global configuration - minimal for debugging  
+    config: None,
+)

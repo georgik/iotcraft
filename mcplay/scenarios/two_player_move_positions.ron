@@ -1,0 +1,265 @@
+// Two Player Move and Position Validation Scenario
+// Validates player movement via MCP and verifies positions in get_multiplayer_status responses
+Scenario(
+    name: "two_player_move_positions",
+    description: "Alice moves forward by 1 block, Bob moves backward by 1 block; verify positions via MCP",
+    version: "1.0",
+
+    infrastructure: InfrastructureConfig(
+        mqtt_server: MqttServerConfig(
+            required: true,
+            port: 1883,
+            config_file: None,
+            options: None,
+        ),
+        mqtt_observer: None,
+        mcp_server: None,
+        services: None,
+    ),
+
+    clients: [
+        ClientConfig(
+            id: "alice",
+            player_id: "alice",
+            mcp_port: 3001,
+            client_type: "desktop",
+            name: Some("Alice"),
+            config: None,
+        ),
+        ClientConfig(
+            id: "bob",
+            player_id: "bob",
+            mcp_port: 3002,
+            client_type: "desktop",
+            name: Some("Bob"),
+            config: None,
+        ),
+    ],
+
+    steps: [
+        // Initialize MCP on both clients (optional as tools/call initializes implicitly, but explicit here)
+        Step(
+            name: "alice_initialize",
+            description: "Initialize MCP for Alice",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "initialize",
+                arguments: {
+                    "protocolVersion": "2024-11-05",
+                    "capabilities": { "tools": {} },
+                    "clientInfo": {"name": "mcplay", "version": "1.0"}
+                },
+            ),
+            wait_before: 200,
+            wait_after: 300,
+            timeout: 15000,
+            success_condition: Some(( type: "mcp_response", expected: "success" )),
+            depends_on: [],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        Step(
+            name: "bob_initialize",
+            description: "Initialize MCP for Bob",
+            client: "bob",
+            action: (
+                type: "mcp_call",
+                tool: "initialize",
+                arguments: {
+                    "protocolVersion": "2024-11-05",
+                    "capabilities": { "tools": {} },
+                    "clientInfo": {"name": "mcplay", "version": "1.0"}
+                },
+            ),
+            wait_before: 200,
+            wait_after: 300,
+            timeout: 15000,
+            success_condition: Some(( type: "mcp_response", expected: "success" )),
+            depends_on: [],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+
+        // Alice creates a world and (optionally) publishes it
+        Step(
+            name: "alice_create_world",
+            description: "Alice creates a world for movement testing",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "create_world",
+                arguments: { "world_name": "move_test_world", "description": "Movement test world" },
+            ),
+            wait_before: 200,
+            wait_after: 1200,
+            timeout: 20000,
+            success_condition: Some(( type: "mcp_response", expected: "success" )),
+            depends_on: ["alice_initialize"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        Step(
+            name: "alice_publish_world",
+            description: "Alice publishes the world (optional, helps ensure multiplayer mode active)",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "publish_world",
+                arguments: { "world_name": "move_test_world", "max_players": 2, "is_public": true },
+            ),
+            wait_before: 200,
+            wait_after: 1000,
+            timeout: 20000,
+            success_condition: Some(( type: "mcp_response", expected: "success" )),
+            depends_on: ["alice_create_world"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+
+        // Log initial positions via multiplayer status
+        Step(
+            name: "alice_initial_status",
+            description: "Fetch Alice multiplayer status before movement (logs positions)",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "get_multiplayer_status",
+                arguments: {},
+            ),
+            wait_before: 200,
+            wait_after: 300,
+            timeout: 15000,
+            success_condition: Some(( type: "mcp_response", expected: "success" )),
+            depends_on: ["alice_publish_world"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        Step(
+            name: "bob_initial_status",
+            description: "Fetch Bob multiplayer status before movement (logs positions)",
+            client: "bob",
+            action: (
+                type: "mcp_call",
+                tool: "get_multiplayer_status",
+                arguments: {},
+            ),
+            wait_before: 200,
+            wait_after: 300,
+            timeout: 15000,
+            success_condition: Some(( type: "mcp_response", expected: "success" )),
+            depends_on: ["bob_initialize"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+
+        // Move players
+        Step(
+            name: "alice_moves_forward_1",
+            description: "Alice moves forward by 1 block on Z axis",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "player_move",
+                arguments: { "x": 0.0, "y": 1.8, "z": 1.0 },
+            ),
+            wait_before: 200,
+            wait_after: 500,
+            timeout: 15000,
+            success_condition: Some(( type: "mcp_response", expected: "success" )),
+            depends_on: ["alice_initial_status"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        Step(
+            name: "bob_moves_backward_1",
+            description: "Bob moves backward by 1 block on Z axis",
+            client: "bob",
+            action: (
+                type: "mcp_call",
+                tool: "player_move",
+                arguments: { "x": 0.0, "y": 1.8, "z": -1.0 },
+            ),
+            wait_before: 200,
+            wait_after: 500,
+            timeout: 15000,
+            success_condition: Some(( type: "mcp_response", expected: "success" )),
+            depends_on: ["bob_initial_status"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+
+        // Log updated positions via multiplayer status
+        Step(
+            name: "alice_updated_status",
+            description: "Fetch Alice multiplayer status after movement (positions should reflect change)",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "get_multiplayer_status",
+                arguments: {},
+            ),
+            wait_before: 200,
+            wait_after: 300,
+            timeout: 15000,
+            success_condition: Some(( type: "mcp_response", expected: "success" )),
+            depends_on: ["alice_moves_forward_1"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        Step(
+            name: "bob_updated_status",
+            description: "Fetch Bob multiplayer status after movement (positions should reflect change)",
+            client: "bob",
+            action: (
+                type: "mcp_call",
+                tool: "get_multiplayer_status",
+                arguments: {},
+            ),
+            wait_before: 200,
+            wait_after: 300,
+            timeout: 15000,
+            success_condition: Some(( type: "mcp_response", expected: "success" )),
+            depends_on: ["bob_moves_backward_1"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+    ],
+
+    config: Some(ScenarioConfig(
+        timeout_ms: Some(180000),
+        logging: Some(LoggingConfig(
+            level: Some("debug"),
+            log_mqtt: Some(true),
+            log_client_actions: Some(true),
+            filters: Some([
+                "mcp/*",
+                "multiplayer/*",
+                "get_multiplayer_status",
+                "player_move",
+                "player_positions",
+            ]),
+        )),
+        environment: Some({
+            "RUST_LOG": "debug,iotcraft_desktop_client=debug",
+            "SCENARIO_NAME": "two_player_move_positions",
+            "ENABLE_MCP": "true",
+        }),
+        settings: Some({
+            "auto_cleanup": true,
+            "preserve_logs": true,
+            "fail_fast": false,
+        }),
+    )),
+)
+

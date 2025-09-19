@@ -34,7 +34,7 @@ fn execute_background_world_script(
     mut pending_commands: ResMut<PendingCommands>,
 ) {
     info!("Executing background world script for web version");
-    
+
     // Background world script content (from scripts/background_world.txt)
     let background_script = vec![
         "# Background World Script".to_string(),
@@ -70,7 +70,7 @@ fn execute_background_world_script(
 
     info!("Executing background world script with {} commands", script_commands.len());
     pending_commands.commands.extend(script_commands);
-    
+
     // Add background setup complete resource to prevent re-execution
     commands.insert_resource(BackgroundWorldSetupComplete(true));
 }
@@ -144,7 +144,7 @@ pub fn get_new_world_script() -> Vec<String> {
 /// Execute new world script commands
 pub fn execute_new_world_script(pending_commands: &mut ResMut<PendingCommands>) {
     let script_content = get_new_world_script();
-    
+
     let script_commands = script_content
         .iter()
         .map(|line| line.trim())

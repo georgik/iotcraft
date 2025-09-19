@@ -24,9 +24,21 @@ IoTCraft is a multi-component Rust project showcasing MQTT-controlled IoT device
   - A rotating logo cube and thermometer indicator
   - **Enhanced WASD + mouse camera controls** - Physics-based walking mode as default
   - **Enhanced inventory system** - 9-slot hotbar with item management
+  - **WASM Support** - Full WebAssembly build for browser-based gameplay with identical features
+  - **MCP Integration** - Model Context Protocol server for AI assistant control
   - Comprehensive MQTT logging and diagnostics
 
-- **mqtt-server**  
+- **mcplay**  
+  A Rust **std** orchestration tool for multi-client scenario testing.  
+  - **Cross-Platform Testing** - Desktop + WASM browser client coordination
+  - **Visual Process Management** - Real-time TUI with status monitoring
+  - **Automated Infrastructure** - MQTT server, web server, and browser management
+  - **Scenario-Based Testing** - RON format scenarios with comprehensive test workflows
+  - **Health Monitoring** - Readiness and liveness probes for all services
+  - **System Integration** - Shell command execution, browser launching, rich messaging
+  - **Keep-Alive Mode** - Extended manual testing sessions with `--keep-alive` flag
+
+- **mqtt-server**
   A Rust **std** executable using `rumqttd` as an embedded MQTT broker.  
   Reads `rumqttd.toml` for configuration and handles MQTT v4/v5 and WebSocket connections.
 
@@ -71,6 +83,37 @@ cargo run
 cargo run -- --lang=de-DE  # German
 cargo run -- --lang=cs-CZ  # Czech
 ```
+
+**For detailed testing, multi-client setup, and web development:** See [desktop-client/README.md](desktop-client/README.md)
+
+### Cross-Platform Testing with mcplay
+
+**Multi-Client Orchestration:**
+```bash
+# Interactive scenario selector
+cd mcplay
+cargo run
+
+# Run cross-platform Alice (desktop) + Bob (WASM) testing
+cargo run scenarios/alice_desktop_bob_wasm_visual.ron
+
+# Extended manual testing with keep-alive
+cargo run scenarios/alice_desktop_bob_wasm_visual.ron --keep-alive
+
+# List all available scenarios
+cargo run -- --list-scenarios
+
+# Validate scenario without running
+cargo run scenarios/alice_desktop_bob_wasm_visual.ron --validate
+```
+
+**Key Features:**
+- **Automated Setup** - Builds WASM client, starts web server, opens browser
+- **Visual Management** - See both Alice (desktop) and Bob (WASM) in process list
+- **Cross-Platform Sync** - Test desktop ↔ browser multiplayer synchronization
+- **Rich Scenarios** - Medieval world creation with comprehensive testing guides
+
+**For comprehensive orchestration and testing:** See [mcplay/README.md](mcplay/README.md)
 
 ### MQTT Server
 
@@ -119,6 +162,34 @@ cargo build --release
 wokwi-cli
 ```
 
+### WASM Browser Support
+
+**Build and Serve Web Client (Recommended - from workspace root):**
+```bash
+# Build optimized WASM version
+cargo xtask web-build --release
+
+# Serve web client locally
+cargo xtask web-serve --port 8000
+
+# Combined build and serve for development
+cargo xtask web-dev
+
+# Open browser (after web server is running)
+open http://localhost:8000
+```
+
+**Cross-Platform Features:**
+- **Identical Functionality** - Same features as desktop (world building, MQTT, multiplayer)
+- **Interactive Minimap** - Full minimap support with player tracking and M-key toggle
+- **WebSocket MQTT** - Automatic WebSocket bridge for browser MQTT communication
+- **Shared Worlds** - Desktop and WASM clients can join the same multiplayer worlds
+- **Real-Time Sync** - Block placement, device control, and world state synchronization
+- **Browser Controls** - Full keyboard/mouse support with pointer lock for camera
+- **Stable Performance** - Fixed async task crashes and camera detection issues
+
+**For detailed WASM development:** See [desktop-client/README_WEB.md](desktop-client/README_WEB.md)
+
 ## Device Registration System
 
 The IoTCraft system now supports dynamic device registration:
@@ -163,10 +234,22 @@ To test with an ESP32-C6 device:
 
 ## Documentation
 
+### Core Components
+- **[Desktop Client README](desktop-client/README.md)** - Testing, multi-client setup, and web development
+- **[Desktop Client Web README](desktop-client/README_WEB.md)** - WASM build and browser deployment
+- **[mcplay Orchestrator README](mcplay/README.md)** - Multi-client testing and scenario management
+- **[Cross-Platform Testing Guide](mcplay/scenarios/README_cross_platform_testing.md)** - Desktop + WASM testing
+
+### Gameplay & Development
 - **[Quick Reference Guide](docs/quick-reference.md)** - Essential commands and workflows
 - **[Console Commands Reference](docs/console-commands.md)** - Complete guide to all console commands
 - **[Voxel System Documentation](docs/voxel-system.md)** - Detailed voxel world building guide
 - **[Example Scripts](desktop-client/scripts/)** - Sample building scripts including door demos
+
+### Integration & Testing
+- **[MCP Integration Guide](desktop-client/docs/MCP_INTEGRATION.md)** - Model Context Protocol API
+- **[MCP Testing Guide](desktop-client/docs/MCP_TESTING.md)** - AI assistant integration testing
+- **[Scenario Testing Guide](desktop-client/docs/SCENARIOS.md)** - Multi-client scenario documentation
 
 ## Key Features
 
@@ -211,6 +294,39 @@ To test with an ESP32-C6 device:
 - `load <script>` - Execute command scripts
 
 📖 **[Complete Console Commands Reference →](docs/console-commands.md)**
+
+### 🌐 Cross-Platform Testing & WASM Support
+
+**Desktop + WASM Orchestration:**
+- **mcplay Orchestrator** - Comprehensive multi-client scenario management
+- **Visual Process Management** - Real-time TUI with Alice (desktop) and Bob (WASM) clients
+- **Automated Infrastructure** - MQTT server, web server, browser launching all managed
+- **Scenario-Based Testing** - RON format scenarios with step-by-step workflows
+
+**Browser Client Features:**
+- **Identical Functionality** - Full feature parity with desktop client
+- **WebSocket MQTT** - Seamless browser-to-MQTT communication
+- **Cross-Platform Sync** - Real-time multiplayer between desktop and browser
+- **Optimized WASM Build** - Performance-optimized WebAssembly compilation
+
+**Testing Workflows:**
+```bash
+# Cross-platform Alice (desktop) + Bob (WASM) scenario
+cargo run scenarios/alice_desktop_bob_wasm_visual.ron
+
+# Extended manual testing
+cargo run scenarios/alice_desktop_bob_wasm_visual.ron --keep-alive
+
+# Interactive scenario selector
+cargo run  # Shows TUI with all available scenarios
+```
+
+**mcplay CLI Options:**
+- `--list-scenarios` - List all available test scenarios
+- `--validate <scenario>` - Validate scenario file without running
+- `--keep-alive` - Keep processes running for extended manual testing
+- `--verbose` - Enable verbose logging output
+- `--mqtt-port <port>` - Override default MQTT port (1883)
 
 ### 🗺️ Interactive Minimap
 

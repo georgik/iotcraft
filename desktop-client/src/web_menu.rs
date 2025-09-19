@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 
-/// Simplified game states for web version  
+/// Simplified game states for web version
 #[derive(Debug, Clone, Eq, PartialEq, Hash, States, Default)]
 pub enum WebGameState {
     #[default]
@@ -122,16 +122,23 @@ fn setup_settings_menu(_commands: Commands) {
 fn setup_in_game(
     mut windows: Query<&mut Window>,
     mut camera_controller: ResMut<crate::CameraController>,
+    mut cursor_options_query: Query<&mut bevy::window::CursorOptions>,
 ) {
     info!("Entering game - enabling camera control");
 
     // Enable camera controller
     camera_controller.enabled = true;
 
-    // Try to grab mouse for in-game experience
-    for mut window in &mut windows {
-        window.cursor_options.grab_mode = bevy::window::CursorGrabMode::Locked;
-        window.cursor_options.visible = false;
+    // Try to grab mouse for in-game experience (safe for mobile) using lib_gradual helper
+    if let Ok(mut cursor_options) = cursor_options_query.single_mut() {
+        for mut window in &mut windows {
+            crate::lib_gradual::safe_set_cursor_grab_mode(
+                &mut window,
+                Some(&mut cursor_options),
+                bevy::window::CursorGrabMode::Locked,
+                false,
+            );
+        }
     }
 }
 
@@ -161,14 +168,17 @@ fn cleanup_settings_menu(mut commands: Commands, query: Query<Entity, With<Setti
 
 fn cleanup_in_game(
     mut windows: Query<&mut Window>,
+    mut cursor_options_query: Query<&mut bevy::window::CursorOptions>,
     _camera_controller: ResMut<crate::CameraController>,
 ) {
     info!("Exiting game - releasing camera control");
 
     // Release mouse when leaving game
-    for mut window in &mut windows {
-        window.cursor_options.grab_mode = bevy::window::CursorGrabMode::None;
-        window.cursor_options.visible = true;
+    if let Ok(mut cursor_options) = cursor_options_query.single_mut() {
+        for _window in &mut windows {
+            cursor_options.grab_mode = bevy::window::CursorGrabMode::None;
+            cursor_options.visible = true;
+        }
     }
 }
 
@@ -313,10 +323,11 @@ fn handle_settings_menu_buttons(
     }
 }
 
-/// Handle keyboard and touch navigation
+/// Handle keyboard, touch, and mouse navigation (iPad compatible) - with crash protection
 fn handle_escape_key(
     keyboard_input: Res<ButtonInput<KeyCode>>,
     mut touch_events: EventReader<TouchInput>,
+    mouse_button_input: Res<ButtonInput<MouseButton>>,
     current_state: Res<State<WebGameState>>,
     mut next_state: ResMut<NextState<WebGameState>>,
 ) {
@@ -342,8 +353,10 @@ fn handle_escape_key(
     }
 
     // Handle touch input - tap anywhere on main menu to start game
+    let mut touch_detected = false;
     for touch in touch_events.read() {
         if touch.phase == bevy::input::touch::TouchPhase::Started {
+            touch_detected = true;
             match current_state.get() {
                 WebGameState::MainMenu => {
                     info!("📱 Starting game via touch input at {:?}", touch.position);
@@ -353,6 +366,21 @@ fn handle_escape_key(
                 }
                 _ => {}
             }
+        }
+    }
+
+    // iPad fallback: Handle mouse clicks as touch events (iPad Safari sometimes treats touches as mouse events)
+    if !touch_detected && mouse_button_input.just_pressed(MouseButton::Left) {
+        match current_state.get() {
+            WebGameState::MainMenu => {
+                info!("📱 Starting game via mouse click (iPad fallback)");
+                #[cfg(target_arch = "wasm32")]
+                web_sys::console::log_1(
+                    &"📱 Mouse click detected - starting game (iPad fallback)!".into(),
+                );
+                next_state.set(WebGameState::InGame);
+            }
+            _ => {}
         }
     }
 }

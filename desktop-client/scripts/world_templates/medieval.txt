@@ -1,0 +1,89 @@
+# Medieval World Template
+# Creates a medieval-themed world with castle, village, and forest
+
+# Set initial camera position for good overview
+tp -15 8 20
+look -45 -10
+
+# Create base terrain (smaller than default for more intimate feel)
+wall grass -30 0 -30 30 0 30
+
+# Build a castle in the center-north area
+# Castle foundation
+wall stone -8 1 -15 8 1 -8
+wall stone -8 2 -15 8 2 -8
+
+# Castle walls (outer perimeter)
+wall stone -10 3 -17 10 3 -17  # North wall
+wall stone -10 3 -6 10 3 -6    # South wall  
+wall stone -10 3 -17 -10 3 -6  # West wall
+wall stone 10 3 -17 10 3 -6    # East wall
+
+# Castle towers at corners
+wall stone -10 4 -17 -8 8 -15  # Northwest tower
+wall stone 8 4 -17 10 8 -15    # Northeast tower
+wall stone -10 4 -8 -8 8 -6    # Southwest tower
+wall stone 8 4 -8 10 8 -6      # Southeast tower
+
+# Castle gate (opening in south wall)
+wall grass -2 3 -6 2 3 -6
+wall grass -2 4 -6 2 4 -6
+
+# Village houses scattered around
+# House 1 - East of castle
+wall stone 15 1 -5 19 1 -1
+wall stone 15 2 -5 19 2 -1
+wall stone 15 3 -5 19 3 -5  # Front wall
+wall stone 15 3 -1 19 3 -1  # Back wall
+wall stone 15 3 -5 15 3 -1  # Left wall
+wall stone 19 3 -5 19 3 -1  # Right wall
+place quartz_block 17 4 -3   # Roof accent
+
+# House 2 - Southwest area
+wall stone -18 1 8 -14 1 12
+wall stone -18 2 8 -14 2 12
+wall stone -18 3 8 -18 3 12  # Front wall
+wall stone -14 3 8 -14 3 12  # Back wall
+wall stone -18 3 8 -14 3 8   # Left wall
+wall stone -18 3 12 -14 3 12 # Right wall
+
+# House 3 - Southeast area  
+wall stone 12 1 10 16 1 14
+wall stone 12 2 10 16 2 14
+wall stone 12 3 10 16 3 10   # Front wall
+wall stone 12 3 14 16 3 14   # Back wall
+wall stone 12 3 10 12 3 14   # Left wall
+wall stone 16 3 10 16 3 14   # Right wall
+
+# Forest area (using different heights for variety)
+# Tree stumps and logs
+place stone -25 1 -25
+place stone -23 1 -22  
+place stone -20 1 -28
+place stone 22 1 -20
+place stone 25 1 -18
+place stone 28 1 -25
+
+# Hills for terrain variety
+wall dirt -25 1 15 -20 2 20
+wall grass -25 3 15 -20 3 20
+
+wall dirt 20 1 20 25 3 25  
+wall grass 20 4 20 25 4 25
+
+# Medieval decorations
+place cyan_terracotta 0 1 -12  # Castle courtyard center
+place glass_pane 0 5 -12       # Castle banner pole
+
+# Small river
+wall water -5 1 25 5 1 28
+wall stone -6 1 24 6 1 24      # River bank
+wall stone -6 1 29 6 1 29      # River bank
+
+# Give medieval-appropriate starting items
+give stone 64
+give dirt 32  
+give grass 32
+give quartz_block 24
+give glass_pane 16
+give water 12

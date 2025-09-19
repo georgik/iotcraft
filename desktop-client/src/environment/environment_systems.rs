@@ -2,9 +2,14 @@ use bevy::pbr::MeshMaterial3d;
 use bevy::prelude::*;
 
 use super::environment_types::*;
+#[cfg(not(target_arch = "wasm32"))]
 use crate::camera_controllers::CameraController;
+#[cfg(feature = "console")]
 use crate::console::BlinkCube;
+#[cfg(target_arch = "wasm32")]
+use crate::lib_gradual::CameraController;
 use crate::mqtt::TemperatureResource;
+#[cfg(not(target_arch = "wasm32"))]
 use crate::script::script_types::PendingCommands;
 
 pub struct EnvironmentPlugin;
@@ -21,17 +26,29 @@ impl Plugin for EnvironmentPlugin {
             .add_systems(
                 Update,
                 (
-                    setup_background_world
-                        .run_if(|setup_complete: Res<BackgroundWorldSetupComplete>| {
-                            !setup_complete.0
-                        })
-                        .run_if(resource_exists::<PendingCommands>),
-                    blinking_system,
                     rotate_logo_system,
                     update_thermometer_material,
                     update_thermometer_scale,
                 ),
+            )
+            .add_systems(
+                Update,
+                (
+                    #[cfg(feature = "console")]
+                    blinking_system,
+                    #[cfg(not(feature = "console"))]
+                    noop_blinking_system,
+                ),
             );
+
+        // Add background world setup system for desktop only
+        #[cfg(not(target_arch = "wasm32"))]
+        app.add_systems(
+            Update,
+            setup_background_world
+                .run_if(|setup_complete: Res<BackgroundWorldSetupComplete>| !setup_complete.0)
+                .run_if(resource_exists::<PendingCommands>),
+        );
     }
 }
 
@@ -113,7 +130,15 @@ fn setup_environment(
         Transform::from_translation(Vec3::ONE).looking_at(Vec3::ZERO, Vec3::Y),
     ));
 
-    // camera
+    // camera (conditional for different platforms)
+    #[cfg(not(target_arch = "wasm32"))]
+    commands.spawn((
+        Camera3d::default(),
+        Transform::from_xyz(15.0, 5.0, 15.0).looking_at(Vec3::ZERO, Vec3::Y),
+        CameraController::default(),
+    ));
+
+    #[cfg(target_arch = "wasm32")]
     commands.spawn((
         Camera3d::default(),
         Transform::from_xyz(15.0, 5.0, 15.0).looking_at(Vec3::ZERO, Vec3::Y),
@@ -121,6 +146,7 @@ fn setup_environment(
     ));
 }
 
+#[cfg(feature = "console")]
 fn blinking_system(
     time: Res<Time>,
     mut blink_state: ResMut<crate::console::BlinkState>,
@@ -128,22 +154,26 @@ fn blinking_system(
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
     if blink_state.blinking {
-        blink_state.timer.tick(time.delta());
-        if blink_state.timer.just_finished() {
-            for mesh_material in &query {
-                let handle = mesh_material.clone();
-                if let Some(mat) = materials.get_mut(&handle) {
-                    if mat.base_color == Color::WHITE {
-                        blink_state.light_state = false;
-                        mat.base_color = Color::srgb(0.2, 0.2, 0.2);
-                    } else {
-                        blink_state.light_state = true;
-                        mat.base_color = Color::WHITE;
-                    }
+        // Update light state using the update_state method
+        blink_state.update_state(&time);
+
+        // Apply visual changes to materials when state changes
+        for mesh_material in &query {
+            let handle = mesh_material.clone();
+            if let Some(mat) = materials.get_mut(&handle) {
+                if blink_state.light_state {
+                    mat.base_color = Color::WHITE;
+                } else {
+                    mat.base_color = Color::srgb(0.2, 0.2, 0.2);
                 }
             }
         }
     }
+}
+
+#[cfg(not(feature = "console"))]
+fn noop_blinking_system() {
+    // No-op when console feature is disabled
 }
 
 fn rotate_logo_system(time: Res<Time>, mut query: Query<&mut Transform, With<LogoCube>>) {
@@ -179,7 +209,8 @@ fn update_thermometer_scale(
     }
 }
 
-/// Setup background world by executing the background world script
+/// Setup background world by executing the background world script (desktop only)
+#[cfg(not(target_arch = "wasm32"))]
 fn setup_background_world(
     mut pending_commands: ResMut<PendingCommands>,
     mut setup_complete: ResMut<BackgroundWorldSetupComplete>,

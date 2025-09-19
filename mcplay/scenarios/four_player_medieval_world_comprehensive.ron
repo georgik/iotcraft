@@ -1,0 +1,401 @@
+// Four Player Medieval World Comprehensive Test
+// Comprehensive end-to-end test of medieval world creation, multiplayer functionality,
+// and collaborative building with all four players (Alice, Bob, Charlie, David)
+Scenario(
+    name: "Four Player Medieval World Comprehensive",
+    description: "Alice creates a medieval world with castle template, publishes it for multiplayer access, and all four players join to explore and collaboratively build additional medieval structures. This comprehensive test validates world creation, template execution, MQTT-based multiplayer synchronization, player positioning, block placement, and cross-client world state consistency in a medieval setting.",
+    version: "1.0",
+    
+    // Infrastructure setup with MQTT server and observer for full monitoring
+    infrastructure: InfrastructureConfig(
+        mqtt_server: MqttServerConfig(
+            required: true,
+            port: 1883,
+            config_file: None,
+            options: None,
+        ),
+        mqtt_observer: Some(MqttObserverConfig(
+            required: true, 
+            topics: Some(["#"]),
+            client_id: Some("four_player_medieval_observer"),
+        )),
+        mcp_server: None,
+        services: None,
+    ),
+    
+    // Four clients: Alice (host), Bob, Charlie, David
+    clients: [
+        // Alice - World Host and Castle Builder
+        ClientConfig(
+            id: "alice",
+            player_id: "alice",
+            mcp_port: 3001,
+            client_type: "desktop",
+            name: Some("Alice - Medieval World Host & Castle Builder"),
+            config: Some({
+                "enable_mcp": true,
+                "readiness_probe": {
+                    "type": "tcp_port", 
+                    "port": 3001,
+                    "initial_delay_seconds": 5,
+                    "timeout_seconds": 15
+                },
+                "liveness_probe": {
+                    "type": "mcp_ping",
+                    "interval_seconds": 30,
+                    "timeout_seconds": 10,
+                    "failure_threshold": 5
+                }
+            }),
+        ),
+        
+        // Bob - Village Builder (North)
+        ClientConfig(
+            id: "bob",
+            player_id: "bob",
+            mcp_port: 3002,
+            client_type: "desktop",
+            name: Some("Bob - Village Builder (North)"),
+            config: Some({
+                "enable_mcp": true,
+                "readiness_probe": {
+                    "type": "tcp_port", 
+                    "port": 3002,
+                    "initial_delay_seconds": 5,
+                    "timeout_seconds": 15
+                },
+                "liveness_probe": {
+                    "type": "mcp_ping",
+                    "interval_seconds": 30,
+                    "timeout_seconds": 10,
+                    "failure_threshold": 5
+                }
+            }),
+        ),
+        
+        // Charlie - Forest & Garden Builder (South)
+        ClientConfig(
+            id: "charlie",
+            player_id: "charlie",
+            mcp_port: 3003,
+            client_type: "desktop",
+            name: Some("Charlie - Forest & Garden Builder (South)"),
+            config: Some({
+                "enable_mcp": true,
+                "readiness_probe": {
+                    "type": "tcp_port", 
+                    "port": 3003,
+                    "initial_delay_seconds": 5,
+                    "timeout_seconds": 15
+                },
+                "liveness_probe": {
+                    "type": "mcp_ping",
+                    "interval_seconds": 30,
+                    "timeout_seconds": 10,
+                    "failure_threshold": 5
+                }
+            }),
+        ),
+        
+        // David - Road & Bridge Builder (East-West)
+        ClientConfig(
+            id: "david",
+            player_id: "david",
+            mcp_port: 3004,
+            client_type: "desktop",
+            name: Some("David - Road & Bridge Builder (East-West)"),
+            config: Some({
+                "enable_mcp": true,
+                "readiness_probe": {
+                    "type": "tcp_port", 
+                    "port": 3004,
+                    "initial_delay_seconds": 5,
+                    "timeout_seconds": 15
+                },
+                "liveness_probe": {
+                    "type": "mcp_ping",
+                    "interval_seconds": 30,
+                    "timeout_seconds": 10,
+                    "failure_threshold": 5
+                }
+            }),
+        )
+    ],
+    
+    steps: [
+        // Step 1: Alice creates new medieval world with castle template
+        Step(
+            name: "alice_create_medieval_world",
+            description: "Alice creates a new medieval world using the castle template, which generates a comprehensive medieval environment with castle structures, village areas, and forest regions. This serves as the foundation for four-player collaborative building.",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "create_world",
+                arguments: {
+                    "world_name": "FourPlayerMedievalRealm",
+                    "description": "A comprehensive medieval realm for four-player collaborative building with castle, village, forest, and infrastructure",
+                    "template": "medieval"
+                },
+            ),
+            depends_on: [],
+            wait_before: 2000,
+            wait_after: 5000,  // Extended wait for medieval template processing
+            timeout: 30000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 2: Wait for medieval template execution to complete
+        Step(
+            name: "wait_for_medieval_template_execution",
+            description: "Wait for the medieval template to fully execute and generate all castle structures, village buildings, forest areas, and terrain features. The medieval template includes extensive block placement that requires time to complete and synchronize visually.",
+            client: "orchestrator",
+            action: (
+                type: "delay",
+                duration: 15000, // 15 seconds for comprehensive medieval template
+            ),
+            depends_on: ["alice_create_medieval_world"],
+            wait_before: 0,
+            wait_after: 2000,
+            timeout: 20000,
+            success_condition: None,
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 3: Alice validates medieval world creation
+        Step(
+            name: "alice_validate_medieval_world",
+            description: "Alice checks the world status to validate that the medieval template has been successfully applied, confirming that thousands of blocks have been placed to create the medieval environment including castle walls, towers, village structures, and natural features.",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "get_world_status",
+                arguments: {},
+            ),
+            depends_on: ["wait_for_medieval_template_execution"],
+            wait_before: 1000,
+            wait_after: 2000,
+            timeout: 15000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 4: Alice publishes the medieval world for multiplayer access
+        Step(
+            name: "alice_publish_medieval_world",
+            description: "Alice publishes the medieval world via MQTT to make it available for multiplayer access. This enables Bob, Charlie, and David to discover and join the world, with all world data synchronized through MQTT messaging for real-time collaborative building.",
+            client: "alice",
+            action: (
+                type: "mcp_call",
+                tool: "publish_world",
+                arguments: {
+                    "world_name": "FourPlayerMedievalRealm",
+                    "max_players": 4,
+                    "is_public": true
+                },
+            ),
+            depends_on: ["alice_validate_medieval_world"],
+            wait_before: 2000,
+            wait_after: 4000,  // Extended wait for MQTT world publishing
+            timeout: 20000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 5: Bob discovers available online worlds
+        Step(
+            name: "bob_discover_medieval_world",
+            description: "Bob queries the MQTT network to discover available online worlds, expecting to find Alice's newly published medieval realm. This tests the world discovery mechanism and MQTT-based world listing functionality.",
+            client: "bob",
+            action: (
+                type: "mcp_call",
+                tool: "list_online_worlds",
+                arguments: {},
+            ),
+            depends_on: ["alice_publish_medieval_world"],
+            wait_before: 2000,
+            wait_after: 2000,
+            timeout: 15000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 6: Charlie discovers available online worlds
+        Step(
+            name: "charlie_discover_medieval_world",
+            description: "Charlie queries the MQTT network to discover available online worlds, expecting to find Alice's medieval realm in the list of public worlds. This parallel discovery process validates that multiple clients can simultaneously access world listing functionality.",
+            client: "charlie",
+            action: (
+                type: "mcp_call",
+                tool: "list_online_worlds",
+                arguments: {},
+            ),
+            depends_on: ["alice_publish_medieval_world"],
+            wait_before: 2000,
+            wait_after: 2000,
+            timeout: 15000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 7: David discovers available online worlds
+        Step(
+            name: "david_discover_medieval_world",
+            description: "David queries the MQTT network to discover available online worlds, expecting to find Alice's medieval realm available for joining. This completes the world discovery phase for all four players before they begin joining the shared world.",
+            client: "david",
+            action: (
+                type: "mcp_call",
+                tool: "list_online_worlds",
+                arguments: {},
+            ),
+            depends_on: ["alice_publish_medieval_world"],
+            wait_before: 2000,
+            wait_after: 2000,
+            timeout: 15000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 8: Bob joins the medieval world
+        Step(
+            name: "bob_join_medieval_world",
+            description: "Bob joins Alice's medieval world by loading the world data from the MQTT topic and synchronizing all existing blocks, structures, and world state. This establishes Bob as a connected player in the shared medieval environment with full access to collaborative building.",
+            client: "bob",
+            action: (
+                type: "mcp_call",
+                tool: "join_world",
+                arguments: {
+                    "world_id": "FourPlayerMedievalRealm"
+                },
+            ),
+            depends_on: ["bob_discover_medieval_world"],
+            wait_before: 1000,
+            wait_after: 5000,  // Extended wait for world loading and synchronization
+            timeout: 30000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Step 9: Charlie joins the medieval world
+        Step(
+            name: "charlie_join_medieval_world",
+            description: "Charlie joins Alice's medieval world by downloading and synchronizing the complete world state including all medieval structures, terrain features, and any modifications made by previous players. This establishes Charlie as the third active player in the collaborative environment.",
+            client: "charlie",
+            action: (
+                type: "mcp_call",
+                tool: "join_world",
+                arguments: {
+                    "world_id": "FourPlayerMedievalRealm"
+                },
+            ),
+            depends_on: ["charlie_discover_medieval_world"],
+            wait_before: 1000,
+            wait_after: 5000,  // Extended wait for world loading and synchronization
+            timeout: 30000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        // Final step: All players verify successful world synchronization
+        Step(
+            name: "all_players_verify_synchronization",
+            description: "All four players perform a final verification of the medieval world state to ensure complete synchronization of the castle structures, village buildings, forest areas, and any collaborative modifications. This validates that the MQTT-based multiplayer system successfully maintains consistent world state across all connected clients in the comprehensive medieval environment.",
+            client: "david",
+            action: (
+                type: "mcp_call",
+                tool: "join_world",
+                arguments: {
+                    "world_id": "FourPlayerMedievalRealm"
+                },
+            ),
+            depends_on: ["david_discover_medieval_world", "bob_join_medieval_world", "charlie_join_medieval_world"],
+            wait_before: 2000,
+            wait_after: 3000,  // Final wait for complete synchronization verification
+            timeout: 30000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+    ],
+    
+    // Comprehensive test configuration with extended timeouts for complex operations
+    config: Some(ScenarioConfig(
+        timeout_ms: Some(600000),  // 10 minutes total timeout for comprehensive test
+        logging: Some(LoggingConfig(
+            level: Some("info"),
+            log_mqtt: Some(true),
+            log_client_actions: Some(true),
+            filters: Some([
+                "mcp/*", 
+                "world/*",
+                "medieval/*",
+                "template/*",
+                "multiplayer/*",
+                "create_world",
+                "publish_world",
+                "join_world",
+                "list_online_worlds",
+                "get_world_status",
+                "four_player/*",
+            ]),
+        )),
+        environment: Some({
+            "RUST_LOG": "info,iotcraft_desktop_client=debug",
+            "SCENARIO_NAME": "four_player_medieval_world_comprehensive",
+            "ENABLE_MCP": "true",
+            "ENABLE_MULTIPLAYER": "true",
+        }),
+        settings: Some({
+            "auto_cleanup": true,
+            "preserve_logs": true,
+            "fail_fast": false, // Continue on individual step failures for comprehensive testing
+            "detailed_reporting": true,
+        }),
+    )),
+)

@@ -1,3 +1,14 @@
+/// A simple WASM-compatible client ID generator
+fn generate_unique_client_id(prefix: &str) -> String {
+    let random_suffix = js_sys::Math::random() * 1_000_000_000.0;
+    format!(
+        "{}-{}-{}",
+        prefix,
+        js_sys::Date::now() as u64,
+        random_suffix as u64
+    )
+}
+
 use bevy::prelude::*;
 use js_sys::Uint8Array;
 use std::cell::RefCell;
@@ -14,6 +25,17 @@ use crate::profile::PlayerProfile;
 
 // Import multiplayer types
 use serde::{Deserialize, Serialize};
+
+#[cfg(target_arch = "wasm32")]
+use crate::ui::main_menu::multiplayer_stubs::{
+    OnlineWorlds, PublishWorldEvent, RefreshOnlineWorldsEvent, SharedWorldInfo,
+};
+
+#[cfg(not(target_arch = "wasm32"))]
+use crate::ui::main_menu::{
+    JoinSharedWorldEvent, MultiplayerMode, OnlineWorlds, PublishWorldEvent,
+    RefreshOnlineWorldsEvent, SharedWorldInfo,
+};
 
 /// Multiplayer pose message format (compatible with desktop)
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -37,7 +59,16 @@ impl Plugin for WebMqttPlugin {
 
         app.insert_resource(TemperatureResource::default())
             .add_systems(Startup, spawn_web_mqtt_subscriber)
-            .add_systems(Update, update_temperature);
+            .add_systems(
+                Update,
+                (
+                    update_temperature,
+                    update_world_discovery,
+                    update_world_data_cache,
+                    handle_world_publishing,
+                    handle_refresh_events,
+                ),
+            );
 
         info!("WebMqttPlugin: MQTT plugin setup complete");
         web_sys::console::log_1(&"WebMqttPlugin: MQTT plugin setup complete".into());
@@ -210,8 +241,36 @@ impl SimpleMqttPackets {
     fn publish_packet(topic: &str, payload: &[u8]) -> Vec<u8> {
         let mut packet = Vec::new();
 
-        // Fixed header: PUBLISH (0x30)
+        // Fixed header: PUBLISH (0x30) - no retain flag
         packet.push(0x30);
+
+        let mut variable_header = Vec::new();
+
+        // Topic name
+        let topic_bytes = topic.as_bytes();
+        variable_header.extend_from_slice(&[
+            (topic_bytes.len() >> 8) as u8,
+            (topic_bytes.len() & 0xFF) as u8,
+        ]);
+        variable_header.extend_from_slice(topic_bytes);
+
+        // Payload
+        variable_header.extend_from_slice(payload);
+
+        // Add proper variable length encoding for remaining length
+        let remaining_length_bytes = Self::encode_remaining_length(variable_header.len());
+        packet.extend_from_slice(&remaining_length_bytes);
+
+        packet.extend_from_slice(&variable_header);
+        packet
+    }
+
+    /// Create MQTT PUBLISH packet with retain flag
+    fn publish_packet_retained(topic: &str, payload: &[u8]) -> Vec<u8> {
+        let mut packet = Vec::new();
+
+        // Fixed header: PUBLISH (0x31) - with retain flag set
+        packet.push(0x31);
 
         let mut variable_header = Vec::new();
 
@@ -282,9 +341,21 @@ pub struct DeviceAnnouncementReceiver(pub Mutex<mpsc::Receiver<String>>);
 #[derive(Resource)]
 pub struct PoseReceiver(pub Mutex<mpsc::Receiver<PoseMessage>>);
 
-/// Resource for sending multiplayer pose messages  
+/// Resource for sending multiplayer pose messages
 #[derive(Resource)]
 pub struct PoseSender(pub Mutex<mpsc::Sender<PoseMessage>>);
+
+/// Resource for receiving world discovery messages
+#[derive(Resource)]
+pub struct WorldDiscoveryReceiver(pub Mutex<mpsc::Receiver<SharedWorldInfo>>);
+
+/// Resource for sending world publish messages
+#[derive(Resource)]
+pub struct WorldPublishSender(pub Mutex<mpsc::Sender<PublishWorldEvent>>);
+
+/// Resource for receiving world data messages (complete world save data)
+#[derive(Resource)]
+pub struct WorldDataReceiver(pub Mutex<mpsc::Receiver<(String, crate::world::WorldSaveData)>>);
 
 /// Global WebSocket reference for publishing messages - Not used as Resource for thread safety
 pub struct WebSocketSender(pub Rc<RefCell<Option<WebSocket>>>);
@@ -309,13 +380,19 @@ pub fn spawn_web_mqtt_subscriber(
     let (device_tx, device_rx) = mpsc::channel::<String>();
     let (pose_tx, pose_rx) = mpsc::channel::<PoseMessage>();
     let (outgoing_pose_tx, outgoing_pose_rx) = mpsc::channel::<PoseMessage>();
+    let (world_discovery_tx, world_discovery_rx) = mpsc::channel::<SharedWorldInfo>();
+    let (world_publish_tx, world_publish_rx) = mpsc::channel::<PublishWorldEvent>();
+    let (world_data_tx, world_data_rx) = mpsc::channel::<(String, crate::world::WorldSaveData)>();
 
     commands.insert_resource(TemperatureReceiver(Mutex::new(temp_rx)));
     commands.insert_resource(DeviceAnnouncementReceiver(Mutex::new(device_rx)));
     commands.insert_resource(PoseReceiver(Mutex::new(pose_rx)));
     commands.insert_resource(PoseSender(Mutex::new(outgoing_pose_tx)));
+    commands.insert_resource(WorldDiscoveryReceiver(Mutex::new(world_discovery_rx)));
+    commands.insert_resource(WorldPublishSender(Mutex::new(world_publish_tx)));
+    commands.insert_resource(WorldDataReceiver(Mutex::new(world_data_rx)));
 
-    let client_id = format!("web-{}", profile.player_id);
+    let client_id = generate_unique_client_id("web-mqtt-client");
     let world_id = "default"; // Use default world for web client
     let pose_subscribe_topic = format!("iotcraft/worlds/{}/players/+/pose", world_id);
 
@@ -343,7 +420,7 @@ pub fn spawn_web_mqtt_subscriber(
     websocket.set_binary_type(BinaryType::Arraybuffer);
 
     // Connection and subscription state tracking
-    let subscriptions_confirmed = Rc::new(RefCell::new(0u8)); // Track confirmed subscriptions (0-3)
+    let subscriptions_confirmed = Rc::new(RefCell::new(0u8)); // Track confirmed subscriptions (0-5)
     let pose_subscription_confirmed = Rc::new(RefCell::new(false)); // Track specifically pose subscription
 
     // Wrap channels in Rc<RefCell<>> for sharing between closures
@@ -351,11 +428,16 @@ pub fn spawn_web_mqtt_subscriber(
     let device_tx = Rc::new(RefCell::new(device_tx));
     let pose_tx = Rc::new(RefCell::new(pose_tx));
     let outgoing_pose_rx = Rc::new(RefCell::new(outgoing_pose_rx));
+    let world_discovery_tx = Rc::new(RefCell::new(world_discovery_tx));
+    let world_publish_rx = Rc::new(RefCell::new(world_publish_rx));
+    let world_data_tx = Rc::new(RefCell::new(world_data_tx));
 
     // Clone references for closures
     let temp_tx_clone = temp_tx.clone();
     let device_tx_clone = device_tx.clone();
     let pose_tx_clone = pose_tx.clone();
+    let world_discovery_tx_clone = world_discovery_tx.clone();
+    let world_data_tx_clone = world_data_tx.clone();
     let subscriptions_confirmed_clone = subscriptions_confirmed.clone();
     let pose_subscription_confirmed_clone = pose_subscription_confirmed.clone();
 
@@ -389,10 +471,10 @@ pub fn spawn_web_mqtt_subscriber(
                 if return_codes.iter().all(|&code| code <= 0x01) {
                     if let Ok(mut confirmed) = subscriptions_confirmed_clone.try_borrow_mut() {
                         *confirmed += 1;
-                        info!("MQTT Web: Subscriptions confirmed: {}/3", *confirmed);
+                        info!("MQTT Web: Subscriptions confirmed: {}/5", *confirmed);
 
-                        // Special handling for pose subscription (packet ID 3)
-                        if packet_id == 3 {
+                        // Special handling for specific subscriptions
+                        if packet_id == 5 {
                             if let Ok(mut pose_confirmed) =
                                 pose_subscription_confirmed_clone.try_borrow_mut()
                             {
@@ -404,9 +486,17 @@ pub fn spawn_web_mqtt_subscriber(
                             web_sys::console::log_1(
                                 &"🎉 Pose subscription confirmed! Multiplayer enabled.".into(),
                             );
+                        } else if packet_id == 4 {
+                            info!(
+                                "🌍 MQTT Web: World discovery subscription confirmed! World discovery enabled."
+                            );
+                        } else if packet_id == 3 {
+                            info!(
+                                "🌍 MQTT Web: World data subscription confirmed! World loading enabled."
+                            );
                         }
 
-                        if *confirmed == 3 {
+                        if *confirmed == 5 {
                             info!("🎉 MQTT Web: All subscriptions confirmed!");
                         }
                     }
@@ -423,7 +513,65 @@ pub fn spawn_web_mqtt_subscriber(
             if let Some((topic, payload)) = SimpleMqttPackets::parse_publish_packet(&data) {
                 info!("MQTT Web: Received message on topic: {}", topic);
 
-                if topic.starts_with("iotcraft/worlds/") && topic.contains("/pose") {
+                if topic.starts_with("iotcraft/worlds/") && topic.ends_with("/info") {
+                    // Handle world discovery messages
+                    if let Ok(world_info_str) = String::from_utf8(payload) {
+                        if !world_info_str.is_empty() {
+                            info!("🌍 Web: Received world info on topic: {}", topic);
+                            if let Ok(world_info) =
+                                serde_json::from_str::<SharedWorldInfo>(&world_info_str)
+                            {
+                                info!(
+                                    "🌍 Web: Discovered world: {} ({})",
+                                    world_info.world_name, world_info.world_id
+                                );
+                                if let Ok(tx) = world_discovery_tx_clone.try_borrow() {
+                                    let _ = tx.send(world_info);
+                                }
+                            } else {
+                                error!(
+                                    "🌍 Web: Failed to parse world info JSON: {}",
+                                    world_info_str
+                                );
+                            }
+                        } else {
+                            info!("🌍 Web: Empty world info (world unpublished): {}", topic);
+                        }
+                    }
+                } else if topic.starts_with("iotcraft/worlds/") && topic.ends_with("/data") {
+                    // Handle world data messages (complete world save data)
+                    if let Ok(world_data_str) = String::from_utf8(payload) {
+                        if !world_data_str.is_empty() {
+                            info!("🌍 Web: Received world data on topic: {}", topic);
+                            // Extract world ID from topic (iotcraft/worlds/{world_id}/data)
+                            let topic_parts: Vec<&str> = topic.split('/').collect();
+                            if topic_parts.len() >= 3 {
+                                let world_id = topic_parts[2].to_string();
+                                if let Ok(world_data) =
+                                    serde_json::from_str::<crate::world::WorldSaveData>(
+                                        &world_data_str,
+                                    )
+                                {
+                                    info!(
+                                        "🌍 Web: Parsed world data for: {} ({} blocks)",
+                                        world_id,
+                                        world_data.blocks.len()
+                                    );
+                                    if let Ok(tx) = world_data_tx_clone.try_borrow() {
+                                        let _ = tx.send((world_id, world_data));
+                                    }
+                                } else {
+                                    error!(
+                                        "🌍 Web: Failed to parse world data JSON for: {}",
+                                        world_id
+                                    );
+                                }
+                            }
+                        } else {
+                            info!("🌍 Web: Empty world data (world removed): {}", topic);
+                        }
+                    }
+                } else if topic.starts_with("iotcraft/worlds/") && topic.contains("/pose") {
                     // Handle multiplayer pose messages
                     if let Ok(pose_str) = String::from_utf8(payload) {
                         if let Ok(pose_msg) = serde_json::from_str::<PoseMessage>(&pose_str) {
@@ -469,6 +617,7 @@ pub fn spawn_web_mqtt_subscriber(
     let websocket_clone = websocket.clone();
     let pose_subscribe_topic_clone = pose_subscribe_topic.clone();
     let outgoing_pose_rx_clone = outgoing_pose_rx.clone();
+    let world_publish_rx_clone = world_publish_rx.clone();
     let player_id_clone = profile.player_id.clone();
     let world_id_clone = world_id.to_string();
 
@@ -496,6 +645,7 @@ pub fn spawn_web_mqtt_subscriber(
         let websocket_clone2 = websocket_clone.clone();
         let pose_topic_clone2 = pose_subscribe_topic_clone.clone();
         let outgoing_rx_clone2 = outgoing_pose_rx_clone.clone();
+        let world_publish_rx_clone2 = world_publish_rx_clone.clone();
         let player_id_clone2 = player_id_clone.clone();
         let world_id_clone2 = world_id_clone.clone();
 
@@ -518,7 +668,31 @@ pub fn spawn_web_mqtt_subscriber(
                 error!("MQTT Web: Failed to send device SUBSCRIBE packet: {:?}", e);
             }
 
-            // 3. FIRST: Publish an initial pose to CREATE the topic hierarchy for multiplayer
+            // 3. Subscribe to world discovery topic (iotcraft/worlds/+/info)
+            let sub_world_discovery_packet =
+                SimpleMqttPackets::subscribe_packet("iotcraft/worlds/+/info", 4);
+            if let Err(e) = websocket_clone2.send_with_u8_array(&sub_world_discovery_packet) {
+                error!(
+                    "MQTT Web: Failed to send world discovery SUBSCRIBE packet: {:?}",
+                    e
+                );
+            } else {
+                info!("🌍 Web: Subscribed to world discovery: iotcraft/worlds/+/info");
+            }
+
+            // 3.1. Subscribe to world data topic (iotcraft/worlds/+/data) for world reconstruction
+            let sub_world_data_packet =
+                SimpleMqttPackets::subscribe_packet("iotcraft/worlds/+/data", 3);
+            if let Err(e) = websocket_clone2.send_with_u8_array(&sub_world_data_packet) {
+                error!(
+                    "MQTT Web: Failed to send world data SUBSCRIBE packet: {:?}",
+                    e
+                );
+            } else {
+                info!("🌍 Web: Subscribed to world data: iotcraft/worlds/+/data");
+            }
+
+            // 4. FIRST: Publish an initial pose to CREATE the topic hierarchy for multiplayer
             let publish_topic = format!(
                 "iotcraft/worlds/{}/players/{}/pose",
                 world_id_clone2, player_id_clone2
@@ -550,8 +724,8 @@ pub fn spawn_web_mqtt_subscriber(
             let websocket_delay = websocket_clone2.clone();
             let pose_topic_delay = pose_topic_clone2.clone();
             let delay_callback = Closure::<dyn FnMut()>::new(move || {
-                // 4. NOW subscribe to multiplayer poses topic (after topic exists)
-                let sub_pose_packet = SimpleMqttPackets::subscribe_packet(&pose_topic_delay, 3);
+                // 5. NOW subscribe to multiplayer poses topic (after topic exists)
+                let sub_pose_packet = SimpleMqttPackets::subscribe_packet(&pose_topic_delay, 5);
                 if let Err(e) = websocket_delay.send_with_u8_array(&sub_pose_packet) {
                     error!("MQTT Web: Failed to send pose SUBSCRIBE packet: {:?}", e);
                 } else {
@@ -576,6 +750,7 @@ pub fn spawn_web_mqtt_subscriber(
             // Set up delayed pose publishing - wait for subscriptions to be confirmed
             let websocket_pub = websocket_clone2.clone();
             let outgoing_rx_pub = outgoing_rx_clone2.clone();
+            let world_publish_rx_pub = world_publish_rx_clone2.clone();
             let player_id_pub = player_id_clone2.clone();
             let world_id_pub = world_id_clone2.clone();
             let subs_confirmed_pub = subscriptions_confirmed_clone2.clone();
@@ -588,9 +763,9 @@ pub fn spawn_web_mqtt_subscriber(
                     0
                 };
 
-                // Only start publishing poses after pose subscription is confirmed (packet ID 3)
-                // We need at least 2 confirmations (temperature + pose)
-                if confirmed_count < 2 {
+                // Only start publishing poses after pose subscription is confirmed (packet ID 5)
+                // We need at least 4 confirmations (temperature + device + world discovery + world data)
+                if confirmed_count < 4 {
                     // Periodically log that we're waiting for subscriptions
                     static mut LOG_COUNTER: u32 = 0;
                     unsafe {
@@ -598,12 +773,69 @@ pub fn spawn_web_mqtt_subscriber(
                         if LOG_COUNTER % 100 == 0 {
                             // Log every 5 seconds (50ms * 100)
                             info!(
-                                "⏳ Web: Waiting for pose subscription to be confirmed ({}/3)",
+                                "⏳ Web: Waiting for subscriptions to be confirmed ({}/5)",
                                 confirmed_count
                             );
                         }
                     }
                     return; // Not all subscriptions confirmed yet
+                }
+
+                // Check for world publishing events
+                if let Ok(rx) = world_publish_rx_pub.try_borrow() {
+                    while let Ok(publish_event) = rx.try_recv() {
+                        info!(
+                            "🌍 Web: Processing world publish event: {}",
+                            publish_event.world_name
+                        );
+
+                        // Generate world ID (similar to desktop client)
+                        let world_id =
+                            format!("{}_{}", publish_event.world_name, crate::mqtt::now_ts_web());
+                        let topic = format!("iotcraft/worlds/{}/info", world_id);
+
+                        // Create SharedWorldInfo (similar to desktop client)
+                        let world_info = SharedWorldInfo {
+                            world_id: world_id.clone(),
+                            world_name: publish_event.world_name.clone(),
+                            description: format!(
+                                "World shared from web client: {}",
+                                publish_event.world_name
+                            ),
+                            host_player: player_id_pub.clone(),
+                            host_name: "WebHost".to_string(), // TODO: Get from profile
+                            created_at: chrono::Utc::now().to_rfc3339(),
+                            last_updated: chrono::Utc::now().to_rfc3339(),
+                            player_count: 1,
+                            max_players: publish_event.max_players,
+                            is_public: publish_event.is_public,
+                            version: "1.0.0".to_string(),
+                        };
+
+                        if let Ok(payload) = serde_json::to_string(&world_info) {
+                            // Use retained publish for world info
+                            let publish_packet = SimpleMqttPackets::publish_packet_retained(
+                                &topic,
+                                payload.as_bytes(),
+                            );
+                            info!(
+                                "🌍 Web: Publishing world info to topic '{}' with retain=true",
+                                topic
+                            );
+                            info!("🌍 Web: World payload: {}", payload);
+
+                            if let Err(e) = websocket_pub.send_with_u8_array(&publish_packet) {
+                                error!("🌍 Web: Failed to publish world info: {:?}", e);
+                            } else {
+                                info!(
+                                    "🌍 Web: Successfully published world '{}' with ID: {}",
+                                    world_info.world_name, world_id
+                                );
+                            }
+                        } else {
+                            error!("🌍 Web: Failed to serialize world info to JSON");
+                        }
+                    }
                 }
 
                 // Check for outgoing pose messages
@@ -693,6 +925,119 @@ pub fn update_temperature(
     if let Ok(rx) = receiver.0.lock() {
         if let Ok(val) = rx.try_recv() {
             temp_res.value = Some(val);
+        }
+    }
+}
+
+/// Update OnlineWorlds resource with discovered worlds from MQTT
+pub fn update_world_discovery(
+    mut online_worlds: ResMut<OnlineWorlds>,
+    discovery_receiver: Option<Res<WorldDiscoveryReceiver>>,
+) {
+    if let Some(receiver) = discovery_receiver {
+        if let Ok(rx) = receiver.0.lock() {
+            while let Ok(world_info) = rx.try_recv() {
+                info!(
+                    "🌍 Web: Adding discovered world to OnlineWorlds: {} ({})",
+                    world_info.world_name, world_info.world_id
+                );
+                online_worlds
+                    .worlds
+                    .insert(world_info.world_id.clone(), world_info);
+                // Use JavaScript's Date.now() for WASM-compatible timestamp
+                #[cfg(target_arch = "wasm32")]
+                {
+                    online_worlds.last_updated = Some(js_sys::Date::now());
+                }
+                #[cfg(not(target_arch = "wasm32"))]
+                {
+                    // This should not be called in desktop, but keep for compatibility
+                    online_worlds.last_updated = Some(0.0);
+                }
+            }
+        }
+    }
+}
+
+/// Update OnlineWorlds resource with world data from MQTT for world reconstruction
+pub fn update_world_data_cache(
+    mut online_worlds: ResMut<OnlineWorlds>,
+    world_data_receiver: Option<Res<WorldDataReceiver>>,
+) {
+    if let Some(receiver) = world_data_receiver {
+        if let Ok(rx) = receiver.0.lock() {
+            while let Ok((world_id, world_data)) = rx.try_recv() {
+                info!(
+                    "🌍 Web: Caching world data for world: {} ({} blocks)",
+                    world_id,
+                    world_data.blocks.len()
+                );
+                online_worlds.world_data_cache.insert(world_id, world_data);
+
+                // Update timestamp using JavaScript Date.now() for WASM
+                #[cfg(target_arch = "wasm32")]
+                {
+                    online_worlds.last_updated = Some(js_sys::Date::now());
+                }
+                #[cfg(not(target_arch = "wasm32"))]
+                {
+                    online_worlds.last_updated = Some(0.0);
+                }
+            }
+        }
+    }
+}
+
+/// Handle world publishing events for WASM
+pub fn handle_world_publishing(
+    mut publish_events: EventReader<PublishWorldEvent>,
+    world_publish_sender: Option<Res<WorldPublishSender>>,
+) {
+    for event in publish_events.read() {
+        info!(
+            "🌍 Web: Received PublishWorldEvent: {} (max_players: {}, public: {})",
+            event.world_name, event.max_players, event.is_public
+        );
+
+        if let Some(sender) = &world_publish_sender {
+            if let Ok(tx) = sender.0.lock() {
+                if let Err(e) = tx.send(event.clone()) {
+                    error!("🌍 Web: Failed to send world publish event: {:?}", e);
+                }
+            }
+        }
+    }
+}
+
+/// Handle refresh online worlds events for WASM
+pub fn handle_refresh_events(
+    mut refresh_events: EventReader<RefreshOnlineWorldsEvent>,
+    mut online_worlds: ResMut<OnlineWorlds>,
+) {
+    for _event in refresh_events.read() {
+        info!("🌍 Web: Received RefreshOnlineWorldsEvent - updating timestamp");
+        // Use JavaScript's Date.now() for WASM-compatible timestamp
+        #[cfg(target_arch = "wasm32")]
+        {
+            online_worlds.last_updated = Some(js_sys::Date::now());
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            // This should not be called in desktop, but keep for compatibility
+            online_worlds.last_updated = Some(0.0);
+        }
+
+        info!(
+            "🌍 Web: Current online worlds count: {}",
+            online_worlds.worlds.len()
+        );
+
+        // Log current worlds for debugging
+        for (world_id, world_info) in &online_worlds.worlds {
+            info!(
+                "🌍 Web: Online world: {} ({}) by {}",
+                world_info.world_name, world_id, world_info.host_name
+            );
         }
     }
 }

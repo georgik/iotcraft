@@ -1,0 +1,32 @@
+[package]
+name = "mcplay"
+version = "0.1.0"
+edition = "2021"
+description = "IoTCraft Multi-client Scenario Player"
+authors = ["IoTCraft Team"]
+
+# Enable both library and binary
+[lib]
+name = "mcplay"
+path = "src/lib.rs"
+
+[features]
+default = ["tui"]
+tui = ["dep:ratatui", "dep:crossterm"]
+
+[dependencies]
+iotcraft-mcp-protocol = { path = "../iotcraft-mcp-protocol" }
+anyhow = "1.0"
+clap = { version = "4.5", features = ["derive"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+ron = "0.8"
+tokio = { version = "1.47", features = ["rt-multi-thread", "macros", "fs", "net", "process", "signal", "io-util", "time", "sync"] }
+regex = "1.10"
+
+# TUI dependencies (optional)
+ratatui = { version = "0.29.0", optional = true }
+crossterm = { version = "0.29.0", optional = true }
+
+# Required for log timestamps
+chrono = { version = "0.4" }

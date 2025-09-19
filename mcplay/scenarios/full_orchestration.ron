@@ -1,0 +1,160 @@
+(
+  name: "Full Orchestration with Health Monitoring",
+  description: "Complete IoTCraft orchestration with MQTT server, observer, and MCP-enabled client with health probes",
+  version: "1.0",
+  infrastructure: (
+    mqtt_server: (
+      required: true,
+      port: 1883,
+      config_file: None,
+      options: None,
+    ),
+    mqtt_observer: Some((
+      required: true,
+      topics: Some(["#"]),
+      client_id: Some("orchestrator_observer"),
+    )),
+    mcp_server: Some((
+      required: false,
+      port: 3000,
+    )),
+    services: None,
+  ),
+  clients: [
+    (
+      id: "client_01",
+      player_id: "client_01", 
+      mcp_port: 3001,
+      client_type: "desktop",
+      name: Some("Primary Test Client"),
+      config: Some({
+        "enable_mcp": true,
+        "readiness_probe": {
+          "type": "tcp_port",
+          "port": 3001,
+          "initial_delay_seconds": 5,
+          "timeout_seconds": 10
+        },
+        "liveness_probe": {
+          "type": "mcp_ping",
+          "interval_seconds": 5,
+          "timeout_seconds": 3,
+          "failure_threshold": 2
+        }
+      }),
+    )
+  ],
+  steps: [
+    (
+      name: "initialize_orchestrator",
+      description: "Initialize orchestration environment",
+      client: "orchestrator",
+      action: (
+        type: "delay",
+        duration: 1000
+      ),
+      depends_on: [],
+      wait_before: 0,
+      wait_after: 500,
+      timeout: 0,
+      success_condition: None,
+    ),
+    (
+      name: "verify_infrastructure_ready",
+      description: "Verify MQTT server and observer are operational", 
+      client: "orchestrator",
+      action: (
+        type: "wait_condition",
+        condition: "infrastructure_healthy", 
+        expected_value: Some("true"),
+        timeout: 30000,
+      ),
+      depends_on: ["initialize_orchestrator"],
+      wait_before: 2000,
+      wait_after: 1000,
+      timeout: 0,
+      success_condition: None,
+    ),
+    (
+      name: "client_readiness_check",
+      description: "Wait for client to pass readiness probe",
+      client: "client_01",
+      action: (
+        type: "mcp_call",
+        tool: "health_check",
+        arguments: {},
+      ),
+      depends_on: ["verify_infrastructure_ready"],
+      wait_before: 3000,
+      wait_after: 2000,
+      timeout: 0,
+      success_condition: None,
+    ),
+    (
+      name: "test_client_connectivity",
+      description: "Test MCP connectivity with client",
+      client: "client_01", 
+      action: (
+        type: "mcp_call", 
+        tool: "get_client_info",
+        arguments: {},
+      ),
+      depends_on: ["client_readiness_check"],
+      wait_before: 1000,
+      wait_after: 1000,
+      timeout: 0,
+      success_condition: None,
+    ),
+    (
+      name: "run_basic_commands",
+      description: "Execute basic MCP commands to verify functionality",
+      client: "client_01",
+      action: (
+        type: "mcp_call",
+        tool: "get_system_info",
+        arguments: {},
+      ),
+      depends_on: ["test_client_connectivity"],
+      wait_before: 500,
+      wait_after: 1000,
+      timeout: 0,
+      success_condition: None,
+    ),
+    (
+      name: "continuous_monitoring",
+      description: "Monitor client health for 30 seconds",
+      client: "orchestrator",
+      action: (
+        type: "wait_condition",
+        condition: "client_healthy_duration",
+        expected_value: Some("30000"),
+        timeout: 35000,
+      ),
+      depends_on: ["run_basic_commands"],
+      wait_before: 1000,
+      wait_after: 2000,
+      timeout: 0,
+      success_condition: None,
+    ),
+    (
+      name: "validate_orchestration", 
+      description: "Final validation of complete orchestration",
+      client: "orchestrator",
+      action: (
+        type: "validate_scenario",
+        checks: [
+          "mqtt_server_running",
+          "mqtt_observer_running", 
+          "client_responsive",
+          "mcp_connectivity_stable"
+        ],
+      ),
+      depends_on: ["continuous_monitoring"],
+      wait_before: 1000,
+      wait_after: 1000,
+      timeout: 0,
+      success_condition: None,
+    ),
+  ],
+  config: None,
+)

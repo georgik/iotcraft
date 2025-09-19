@@ -62,25 +62,24 @@ jobs:
       with:
         workspaces: |
           desktop-client
-          desktop-client/xtask
+          desktop-client/ctask
 
-    - name: Build web version
+    - name: Build web version (using xtask)
       run: |
-        cd desktop-client
         cargo xtask web-build --release
 
     - name: List build outputs (for debugging)
       run: |
         cd desktop-client
-        ls -la dist/
+        ls -la web/
         echo "--- index.html preview ---"
-        head -20 dist/index.html || true
+        head -20 web/index.html || true
 
     - name: Upload web build artifacts
       uses: actions/upload-artifact@v4
       with:
         name: iotcraft-web-build
-        path: desktop-client/dist/
+        path: desktop-client/web/
         retention-days: 30
 
   deploy-pages:

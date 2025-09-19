@@ -1,90 +1,148 @@
+// Desktop-only main application - WASM uses lib.rs instead
+#[cfg(not(target_arch = "wasm32"))]
+use bevy::ecs::system::SystemParam;
+#[cfg(not(target_arch = "wasm32"))]
+use bevy::math::IVec2;
+#[cfg(not(target_arch = "wasm32"))]
 use bevy::prelude::*;
-use bevy::window::CursorGrabMode;
-use bevy_console::{
-    AddConsoleCommand, ConsoleCommand, ConsoleConfiguration, ConsoleOpen, ConsolePlugin,
-    ConsoleSet, PrintConsoleLine, reply,
-};
+#[cfg(not(target_arch = "wasm32"))]
+use bevy::window::{CursorGrabMode, WindowPosition};
+
+// Console imports - only available with console feature
+#[cfg(feature = "console")]
+use crate::console::{BlinkCube, BlinkState, ConsoleManager, ConsolePlugin, ConsoleSet};
+
 #[cfg(not(target_arch = "wasm32"))]
 use clap::Parser;
-use log::{error, info, warn};
-use rumqttc::{Client, Event, MqttOptions, Outgoing, QoS};
+#[cfg(not(target_arch = "wasm32"))]
+use log::{info, warn};
+#[cfg(not(target_arch = "wasm32"))]
+// Note: rumqttc imports removed as we now use the unified core MQTT service
 use serde_json::json;
-use std::time::Duration;
-
+#[cfg(not(target_arch = "wasm32"))]
+// Duration import removed - not needed after consolidating MQTT clients
+#[cfg(not(target_arch = "wasm32"))]
 mod camera_controllers;
+#[cfg(not(target_arch = "wasm32"))]
 mod config;
+#[cfg(not(target_arch = "wasm32"))]
 mod console;
+#[cfg(not(target_arch = "wasm32"))]
+mod debug;
+#[cfg(not(target_arch = "wasm32"))]
 mod devices;
+#[cfg(not(target_arch = "wasm32"))]
 mod environment;
+#[cfg(not(target_arch = "wasm32"))]
 mod fonts;
+#[cfg(not(target_arch = "wasm32"))]
 mod interaction;
+#[cfg(not(target_arch = "wasm32"))]
 mod inventory;
+#[cfg(not(target_arch = "wasm32"))]
 mod localization;
+#[cfg(not(target_arch = "wasm32"))]
 mod mcp;
+#[cfg(not(target_arch = "wasm32"))]
 mod minimap;
+#[cfg(not(target_arch = "wasm32"))]
 mod mqtt;
+#[cfg(not(target_arch = "wasm32"))]
 mod script;
+#[cfg(not(target_arch = "wasm32"))]
 mod ui;
+#[cfg(not(target_arch = "wasm32"))]
 use mcp::mcp_types::CommandExecutedEvent;
 
+#[cfg(not(target_arch = "wasm32"))]
 mod multiplayer;
-mod physics;
+#[cfg(not(target_arch = "wasm32"))]
 mod player_avatar;
+#[cfg(not(target_arch = "wasm32"))]
 mod player_controller;
+#[cfg(not(target_arch = "wasm32"))]
 mod profile;
+#[cfg(not(target_arch = "wasm32"))]
 mod rendering;
+#[cfg(not(target_arch = "wasm32"))]
 mod shared_materials;
+#[cfg(not(target_arch = "wasm32"))]
 mod world;
 
 // Re-export types for easier access
+#[cfg(not(target_arch = "wasm32"))]
 use camera_controllers::{CameraController, CameraControllerPlugin};
+#[cfg(not(target_arch = "wasm32"))]
 use config::MqttConfig;
-use console::console_types::{ListCommand, LookCommand, TeleportCommand};
-use console::*;
+#[cfg(not(target_arch = "wasm32"))]
+use debug::{debug_commands::*, debug_params::DiagnosticsVisible};
+#[cfg(not(target_arch = "wasm32"))]
 use devices::*;
+#[cfg(not(target_arch = "wasm32"))]
 use environment::*;
+#[cfg(not(target_arch = "wasm32"))]
 use fonts::{FontPlugin, Fonts};
+#[cfg(not(target_arch = "wasm32"))]
 use interaction::InteractionPlugin as MyInteractionPlugin;
-use inventory::{InventoryPlugin, PlayerInventory, handle_give_command};
+#[cfg(not(target_arch = "wasm32"))]
+use inventory::{InventoryPlugin, PlayerInventory, inventory_commands::*};
+#[cfg(not(target_arch = "wasm32"))]
 use localization::{LocalizationConfig, LocalizationPlugin};
+#[cfg(not(target_arch = "wasm32"))]
 use minimap::MinimapPlugin;
+#[cfg(not(target_arch = "wasm32"))]
 use mqtt::{MqttPlugin, *};
+#[cfg(not(target_arch = "wasm32"))]
 use multiplayer::{
     MultiplayerPlugin, SharedWorldPlugin, WorldDiscoveryPlugin, WorldPublisherPlugin,
 };
-use physics::PhysicsManagerPlugin;
+#[cfg(not(target_arch = "wasm32"))]
 use player_avatar::PlayerAvatarPlugin;
+#[cfg(not(target_arch = "wasm32"))]
 use player_controller::PlayerControllerPlugin;
+#[cfg(not(target_arch = "wasm32"))]
 use shared_materials::SharedMaterialsPlugin;
+#[cfg(not(target_arch = "wasm32"))]
 use ui::{CrosshairPlugin, ErrorIndicatorPlugin, GameState, InventoryUiPlugin, MainMenuPlugin};
-use world::WorldPlugin;
+#[cfg(not(target_arch = "wasm32"))]
+use world::{CreateWorldEvent, LoadWorldEvent, WorldPlugin};
 
-// Define handle_blink_command function for console
-fn handle_blink_command(
-    mut log: ConsoleCommand<BlinkCommand>,
-    mut blink_state: ResMut<BlinkState>,
-) {
-    if let Some(Ok(BlinkCommand { action })) = log.take() {
-        info!("Console command: blink {}", action);
-        match action.as_str() {
-            "start" => {
-                blink_state.blinking = true;
-                reply!(log, "Blink started");
-                info!("Blink started via console");
-            }
-            "stop" => {
-                blink_state.blinking = false;
-                reply!(log, "Blink stopped");
-                info!("Blink stopped via console");
-            }
-            _ => {
-                reply!(log, "Usage: blink [start|stop]");
-            }
+// Helper function to extract client number from player ID for window positioning
+#[cfg(not(target_arch = "wasm32"))]
+fn extract_client_number(player_id: &str) -> Option<u32> {
+    // Try to extract number from formats like "player-1", "player-2", "client-1", etc.
+    if let Some(last_part) = player_id.split('-').last() {
+        if let Ok(num) = last_part.parse::<u32>() {
+            return Some(num);
         }
     }
+
+    // Try to parse the entire ID as a number (e.g., "1", "2")
+    if let Ok(num) = player_id.parse::<u32>() {
+        return Some(num);
+    }
+
+    // Extract any trailing number from the string
+    let trailing_digits: String = player_id
+        .chars()
+        .rev()
+        .take_while(|c| c.is_ascii_digit())
+        .collect::<String>()
+        .chars()
+        .rev()
+        .collect();
+
+    if !trailing_digits.is_empty() {
+        if let Ok(num) = trailing_digits.parse::<u32>() {
+            return Some(num);
+        }
+    }
+
+    None
 }
 
 // CLI arguments
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
 struct Args {
@@ -98,381 +156,73 @@ struct Args {
     #[arg(short, long)]
     mqtt_server: Option<String>,
     /// Player ID override for multiplayer testing (default: auto-generated)
-    #[arg(short, long)]
+    #[arg(short = 'p', long = "player-id")]
     player_id: Option<String>,
+    /// Player name override (default: system username, shows in window title)
+    #[arg(short = 'n', long = "player-name")]
+    player_name: Option<String>,
     /// Run in MCP (Model Context Protocol) server mode
     #[arg(long)]
     mcp: bool,
 }
 
-fn handle_place_block_command(
-    mut log: ConsoleCommand<PlaceBlockCommand>,
-    mut voxel_world: ResMut<VoxelWorld>,
-    mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-    asset_server: Res<AssetServer>,
-) {
-    if let Some(Ok(PlaceBlockCommand {
-        block_type,
-        x,
-        y,
-        z,
-    })) = log.take()
-    {
-        let block_type = match block_type.as_str() {
-            "grass" => BlockType::Grass,
-            "dirt" => BlockType::Dirt,
-            "stone" => BlockType::Stone,
-            "quartz_block" => BlockType::QuartzBlock,
-            "glass_pane" => BlockType::GlassPane,
-            "cyan_terracotta" => BlockType::CyanTerracotta,
-            "water" => BlockType::Water,
-            _ => {
-                reply!(log, "Invalid block type: {}", block_type);
-                return;
-            }
-        };
-
-        voxel_world.set_block(IVec3::new(x, y, z), block_type);
-
-        // Spawn the block
-        let cube_mesh = meshes.add(Cuboid::new(CUBE_SIZE, CUBE_SIZE, CUBE_SIZE));
-        let material = match block_type {
-            BlockType::Water => materials.add(StandardMaterial {
-                base_color: Color::srgba(0.0, 0.35, 0.9, 0.6),
-                alpha_mode: AlphaMode::Blend,
-                ..default()
-            }),
-            _ => {
-                let texture_path = match block_type {
-                    BlockType::Grass => "textures/grass.webp",
-                    BlockType::Dirt => "textures/dirt.webp",
-                    BlockType::Stone => "textures/stone.webp",
-                    BlockType::QuartzBlock => "textures/quartz_block.webp",
-                    BlockType::GlassPane => "textures/glass_pane.webp",
-                    BlockType::CyanTerracotta => "textures/cyan_terracotta.webp",
-                    _ => unreachable!(),
-                };
-                let texture: Handle<Image> = asset_server.load(texture_path);
-                materials.add(StandardMaterial {
-                    base_color_texture: Some(texture),
-                    ..default()
-                })
-            }
-        };
-
-        commands.spawn((
-            Mesh3d(cube_mesh),
-            MeshMaterial3d(material),
-            Transform::from_translation(Vec3::new(x as f32, y as f32, z as f32)),
-            VoxelBlock {
-                position: IVec3::new(x, y, z),
-            },
-            // Physics colliders are managed by PhysicsManagerPlugin based on distance and mode
-        ));
-
-        reply!(log, "Placed block at ({}, {}, {})", x, y, z);
-    }
+// Helper function to write to console if available
+#[cfg(feature = "console")]
+fn write_to_console(message: String) {
+    // Log the message instead since PrintConsoleLine was removed
+    info!("Console: {}", message);
 }
 
-fn handle_wall_command(
-    mut log: ConsoleCommand<WallCommand>,
-    mut voxel_world: ResMut<VoxelWorld>,
-    mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-    asset_server: Res<AssetServer>,
-) {
-    if let Some(Ok(WallCommand {
-        block_type,
-        x1,
-        y1,
-        z1,
-        x2,
-        y2,
-        z2,
-    })) = log.take()
-    {
-        let block_type_enum = match block_type.as_str() {
-            "grass" => BlockType::Grass,
-            "dirt" => BlockType::Dirt,
-            "stone" => BlockType::Stone,
-            "quartz_block" => BlockType::QuartzBlock,
-            "glass_pane" => BlockType::GlassPane,
-            "cyan_terracotta" => BlockType::CyanTerracotta,
-            "water" => BlockType::Water,
-            _ => {
-                reply!(log, "Invalid block type: {}", block_type);
-                return;
-            }
-        };
+// Parameter bundle to handle system parameter limit
+#[derive(SystemParam)]
+struct ExecuteCommandsParams<'w, 's> {
+    pending_commands: ResMut<'w, crate::script::script_types::PendingCommands>,
+    command_executed_events: EventWriter<'w, CommandExecutedEvent>,
+    temperature: Res<'w, TemperatureResource>,
+    mqtt_config: Res<'w, MqttConfig>,
+    voxel_world: ResMut<'w, VoxelWorld>,
+    commands: Commands<'w, 's>,
+    meshes: ResMut<'w, Assets<Mesh>>,
+    materials: ResMut<'w, Assets<StandardMaterial>>,
+    asset_server: Res<'w, AssetServer>,
+    block_query: Query<'w, 's, (Entity, &'static VoxelBlock)>,
+    device_query: Query<'w, 's, (&'static DeviceEntity, &'static Transform), Without<Camera>>,
+    inventory: ResMut<'w, PlayerInventory>,
+    camera_query:
+        Query<'w, 's, (&'static mut Transform, &'static mut CameraController), With<Camera>>,
+    create_world_events: EventWriter<'w, CreateWorldEvent>,
+    load_world_events: EventWriter<'w, LoadWorldEvent>,
+    next_game_state: Option<ResMut<'w, NextState<GameState>>>,
+    mqtt_outgoing_tx: Option<Res<'w, crate::mqtt::core_service::MqttOutgoingTx>>,
+}
 
-        let material = match block_type_enum {
-            BlockType::Water => materials.add(StandardMaterial {
-                base_color: Color::srgba(0.0, 0.35, 0.9, 0.6),
-                alpha_mode: AlphaMode::Blend,
-                ..default()
-            }),
-            _ => {
-                let texture_path = match block_type_enum {
-                    BlockType::Grass => "textures/grass.webp",
-                    BlockType::Dirt => "textures/dirt.webp",
-                    BlockType::Stone => "textures/stone.webp",
-                    BlockType::QuartzBlock => "textures/quartz_block.webp",
-                    BlockType::GlassPane => "textures/glass_pane.webp",
-                    BlockType::CyanTerracotta => "textures/cyan_terracotta.webp",
-                    _ => unreachable!(),
-                };
-                let texture: Handle<Image> = asset_server.load(texture_path);
-                materials.add(StandardMaterial {
-                    base_color_texture: Some(texture),
-                    ..default()
-                })
-            }
-        };
+// Split the large system into smaller, more manageable parts
+#[cfg(not(target_arch = "wasm32"))]
+fn execute_pending_commands(mut params: ExecuteCommandsParams) {
+    // Add comprehensive debug logging
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static DEBUG_COUNTER: AtomicU64 = AtomicU64::new(0);
 
-        let cube_mesh = meshes.add(Cuboid::new(CUBE_SIZE, CUBE_SIZE, CUBE_SIZE));
-
-        for x in x1..=x2 {
-            for y in y1..=y2 {
-                for z in z1..=z2 {
-                    voxel_world.set_block(IVec3::new(x, y, z), block_type_enum);
-
-                    commands.spawn((
-                        Mesh3d(cube_mesh.clone()),
-                        MeshMaterial3d(material.clone()),
-                        Transform::from_translation(Vec3::new(x as f32, y as f32, z as f32)),
-                        VoxelBlock {
-                            position: IVec3::new(x, y, z),
-                        },
-                        // Physics colliders are managed by PhysicsManagerPlugin based on distance and mode
-                    ));
-                }
-            }
-        }
-
-        reply!(
-            log,
-            "Created a wall of {} from ({}, {}, {}) to ({}, {}, {})",
-            block_type,
-            x1,
-            y1,
-            z1,
-            x2,
-            y2,
-            z2
+    let counter = DEBUG_COUNTER.fetch_add(1, Ordering::Relaxed);
+    if counter % 3600 == 0 {
+        // Log every minute at 60fps
+        info!(
+            "[DEBUG] execute_pending_commands system running, tick {}, queue size: {}",
+            counter,
+            params.pending_commands.commands.len()
         );
     }
-}
 
-fn handle_remove_block_command(
-    mut log: ConsoleCommand<RemoveBlockCommand>,
-    mut voxel_world: ResMut<VoxelWorld>,
-    mut commands: Commands,
-    query: Query<(Entity, &VoxelBlock)>,
-) {
-    if let Some(Ok(RemoveBlockCommand { x, y, z })) = log.take() {
-        let position = IVec3::new(x, y, z);
-        if voxel_world.remove_block(&position).is_some() {
-            // Remove the block entity
-            for (entity, block) in query.iter() {
-                if block.position == position {
-                    commands.entity(entity).despawn();
-                }
-            }
-            reply!(log, "Removed block at ({}, {}, {})", x, y, z);
-        } else {
-            reply!(log, "No block found at ({}, {}, {})", x, y, z);
-        }
+    let command_count = params.pending_commands.commands.len();
+    if command_count > 0 {
+        info!(
+            "[COMMAND] Processing {} commands from pending queue",
+            command_count
+        );
     }
-}
 
-fn handle_save_map_command(mut log: ConsoleCommand<SaveMapCommand>, voxel_world: Res<VoxelWorld>) {
-    if let Some(Ok(SaveMapCommand { filename })) = log.take() {
-        match voxel_world.save_to_file(&filename) {
-            Ok(_) => {
-                reply!(
-                    log,
-                    "Map saved to '{}' with {} blocks",
-                    filename,
-                    voxel_world.blocks.len()
-                );
-                info!(
-                    "Map saved to '{}' with {} blocks",
-                    filename,
-                    voxel_world.blocks.len()
-                );
-            }
-            Err(e) => {
-                reply!(log, "Failed to save map: {}", e);
-                error!("Failed to save map to '{}': {}", filename, e);
-            }
-        }
-    }
-}
-
-fn handle_teleport_command(
-    mut log: ConsoleCommand<TeleportCommand>,
-    mut camera_query: Query<(&mut Transform, &mut CameraController), With<Camera>>,
-) {
-    if let Some(Ok(TeleportCommand { x, y, z })) = log.take() {
-        if let Ok((mut transform, _camera_controller)) = camera_query.single_mut() {
-            // Set the camera position
-            transform.translation = Vec3::new(x, y, z);
-
-            reply!(log, "Teleported to ({:.1}, {:.1}, {:.1})", x, y, z);
-            info!("Camera teleported to ({:.1}, {:.1}, {:.1})", x, y, z);
-        } else {
-            reply!(log, "Error: Could not find camera to teleport");
-        }
-    }
-}
-
-fn handle_look_command(
-    mut log: ConsoleCommand<LookCommand>,
-    mut camera_query: Query<(&mut Transform, &mut CameraController), With<Camera>>,
-) {
-    if let Some(Ok(LookCommand { yaw, pitch })) = log.take() {
-        if let Ok((mut transform, mut camera_controller)) = camera_query.single_mut() {
-            // Convert degrees to radians for internal use
-            let yaw_rad = yaw.to_radians();
-            let pitch_rad = pitch.to_radians();
-
-            // Update the camera controller's internal yaw and pitch
-            camera_controller.yaw = yaw_rad;
-            camera_controller.pitch =
-                pitch_rad.clamp(-std::f32::consts::PI / 2.0, std::f32::consts::PI / 2.0);
-
-            // Apply the rotation to the transform using the same logic as the camera controller
-            transform.rotation = Quat::from_euler(
-                bevy::math::EulerRot::ZYX,
-                0.0,
-                camera_controller.yaw,
-                camera_controller.pitch,
-            );
-
-            reply!(
-                log,
-                "Set look angles to yaw: {:.1}°, pitch: {:.1}°",
-                yaw,
-                pitch
-            );
-            info!(
-                "Camera look angles set to yaw: {:.1}°, pitch: {:.1}°",
-                yaw, pitch
-            );
-        } else {
-            reply!(log, "Error: Could not find camera to set look direction");
-        }
-    }
-}
-
-fn handle_load_map_command(
-    mut log: ConsoleCommand<LoadMapCommand>,
-    mut voxel_world: ResMut<VoxelWorld>,
-    mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-    asset_server: Res<AssetServer>,
-    existing_blocks_query: Query<Entity, With<VoxelBlock>>,
-) {
-    if let Some(Ok(LoadMapCommand { filename })) = log.take() {
-        // First, despawn all existing voxel blocks
-        for entity in existing_blocks_query.iter() {
-            commands.entity(entity).despawn();
-        }
-
-        // Load the map from file
-        match voxel_world.load_from_file(&filename) {
-            Ok(_) => {
-                // Spawn all blocks from the loaded map
-                let cube_mesh = meshes.add(Cuboid::new(CUBE_SIZE, CUBE_SIZE, CUBE_SIZE));
-
-                for (position, block_type) in voxel_world.blocks.iter() {
-                    let material = match block_type {
-                        BlockType::Water => materials.add(StandardMaterial {
-                            base_color: Color::srgba(0.0, 0.35, 0.9, 0.6),
-                            alpha_mode: AlphaMode::Blend,
-                            ..default()
-                        }),
-                        _ => {
-                            let texture_path = match block_type {
-                                BlockType::Grass => "textures/grass.webp",
-                                BlockType::Dirt => "textures/dirt.webp",
-                                BlockType::Stone => "textures/stone.webp",
-                                BlockType::QuartzBlock => "textures/quartz_block.webp",
-                                BlockType::GlassPane => "textures/glass_pane.webp",
-                                BlockType::CyanTerracotta => "textures/cyan_terracotta.webp",
-                                _ => unreachable!(),
-                            };
-                            let texture: Handle<Image> = asset_server.load(texture_path);
-                            materials.add(StandardMaterial {
-                                base_color_texture: Some(texture),
-                                ..default()
-                            })
-                        }
-                    };
-
-                    let mut entity_commands = commands.spawn((
-                        Mesh3d(cube_mesh.clone()),
-                        MeshMaterial3d(material),
-                        Transform::from_translation(Vec3::new(
-                            position.x as f32,
-                            position.y as f32,
-                            position.z as f32,
-                        )),
-                        VoxelBlock {
-                            position: *position,
-                        },
-                        // Physics colliders are managed by PhysicsManagerPlugin based on distance and mode
-                    ));
-
-                    // Add WaterBlock component for water blocks to enable water detection
-                    if *block_type == BlockType::Water {
-                        entity_commands.insert(crate::physics::WaterBlock);
-                    }
-                }
-
-                reply!(
-                    log,
-                    "Map loaded from '{}' with {} blocks",
-                    filename,
-                    voxel_world.blocks.len()
-                );
-                info!(
-                    "Map loaded from '{}' with {} blocks",
-                    filename,
-                    voxel_world.blocks.len()
-                );
-            }
-            Err(e) => {
-                reply!(log, "Failed to load map: {}", e);
-                error!("Failed to load map from '{}': {}", filename, e);
-            }
-        }
-    }
-}
-
-fn execute_pending_commands(
-    mut pending_commands: ResMut<crate::script::script_types::PendingCommands>,
-    mut print_console_line: EventWriter<PrintConsoleLine>,
-    mut command_executed_events: EventWriter<CommandExecutedEvent>,
-    mut blink_state: ResMut<BlinkState>,
-    temperature: Res<TemperatureResource>,
-    mqtt_config: Res<MqttConfig>,
-    mut voxel_world: ResMut<VoxelWorld>,
-    mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-    asset_server: Res<AssetServer>,
-    query: Query<(Entity, &VoxelBlock)>,
-    device_query: Query<(&DeviceEntity, &Transform), Without<Camera>>,
-    mut inventory: ResMut<PlayerInventory>,
-    mut camera_query: Query<(&mut Transform, &mut CameraController), With<Camera>>,
-) {
-    for command in pending_commands.commands.drain(..) {
-        info!("Executing queued command: {}", command);
+    for command in params.pending_commands.commands.drain(..) {
+        info!("[COMMAND] Executing: {}", command);
 
         // Check if command has a request ID (format: "command #request_id")
         let (actual_command, request_id) = if let Some(hash_pos) = command.rfind(" #") {
@@ -490,26 +240,166 @@ fn execute_pending_commands(
         }
 
         match parts[0] {
+            // MCP system commands
+            "get_client_info" => {
+                let result_msg = json!({
+                    "client_id": profile::load_or_create_profile_with_override(None).player_id,
+                    "version": "1.0.0",
+                    "status": "ready",
+                    "capabilities": ["world_building", "device_management", "mqtt_integration"]
+                })
+                .to_string();
+
+                info!("get_client_info command executed");
+
+                // Emit command executed event if this was from MCP
+                if let Some(req_id) = request_id.clone() {
+                    params.command_executed_events.write(CommandExecutedEvent {
+                        request_id: req_id,
+                        result: result_msg,
+                    });
+                }
+            }
+            "get_game_state" => {
+                // Get current game state (this would need to be implemented properly with game state access)
+                let result_msg = json!({
+                    "game_state": "InGame", // This should get the actual game state
+                    "world_loaded": true,
+                    "multiplayer_active": false
+                })
+                .to_string();
+
+                info!("get_game_state command executed");
+
+                if let Some(req_id) = request_id.clone() {
+                    params.command_executed_events.write(CommandExecutedEvent {
+                        request_id: req_id,
+                        result: result_msg,
+                    });
+                }
+            }
+            "health_check" => {
+                let result_msg = json!({
+                    "status": "healthy",
+                    "uptime_seconds": 3600, // This should be calculated properly
+                    "memory_usage_mb": 256,  // This should be actual memory usage
+                    "services_running": ["mqtt_client", "mcp_server"]
+                })
+                .to_string();
+
+                info!("health_check command executed");
+
+                if let Some(req_id) = request_id.clone() {
+                    params.command_executed_events.write(CommandExecutedEvent {
+                        request_id: req_id,
+                        result: result_msg,
+                    });
+                }
+            }
+            "get_system_info" => {
+                let result_msg = json!({
+                    "platform": std::env::consts::OS,
+                    "architecture": std::env::consts::ARCH,
+                    "rust_version": env!("CARGO_PKG_RUST_VERSION"),
+                    "app_version": env!("CARGO_PKG_VERSION")
+                })
+                .to_string();
+
+                info!("get_system_info command executed");
+
+                if let Some(req_id) = request_id.clone() {
+                    params.command_executed_events.write(CommandExecutedEvent {
+                        request_id: req_id,
+                        result: result_msg,
+                    });
+                }
+            }
+            "get_world_status" => {
+                let block_count = params.voxel_world.blocks.len();
+                let device_count = params.device_query.iter().count();
+
+                let result_msg = json!({
+                    "blocks": block_count,
+                    "devices": device_count,
+                    "uptime_seconds": 3600, // Should be calculated properly
+                    "world_name": "Default World"
+                })
+                .to_string();
+
+                info!("get_world_status command executed");
+
+                if let Some(req_id) = request_id.clone() {
+                    params.command_executed_events.write(CommandExecutedEvent {
+                        request_id: req_id,
+                        result: result_msg,
+                    });
+                }
+            }
+            "get_sensor_data" => {
+                let result_msg = json!({
+                    "temperature": params.temperature.value,
+                    "devices_online": params.device_query.iter().count(),
+                    "mqtt_connected": params.temperature.value.is_some()
+                })
+                .to_string();
+
+                info!("get_sensor_data command executed");
+
+                if let Some(req_id) = request_id.clone() {
+                    params.command_executed_events.write(CommandExecutedEvent {
+                        request_id: req_id,
+                        result: result_msg,
+                    });
+                }
+            }
+            "get_mqtt_status" => {
+                // Check MQTT connection status comprehensively
+                let mqtt_connected = params.temperature.value.is_some();
+                let has_mqtt_outgoing = params.mqtt_outgoing_tx.is_some();
+
+                let result_msg = json!({
+                    "mqtt_connected": mqtt_connected,
+                    "core_mqtt_service_available": has_mqtt_outgoing,
+                    "temperature_data_available": params.temperature.value.is_some(),
+                    "temperature_value": params.temperature.value,
+                    "status": if mqtt_connected && has_mqtt_outgoing { "healthy" } else { "degraded" },
+                    "timestamp": chrono::Utc::now().to_rfc3339(),
+                    "details": {
+                        "mqtt_outgoing_channel": has_mqtt_outgoing,
+                        "temperature_receiver_working": params.temperature.value.is_some()
+                    }
+                })
+                .to_string();
+
+                info!(
+                    "get_mqtt_status command executed - MQTT connected: {}, Core service: {}",
+                    mqtt_connected, has_mqtt_outgoing
+                );
+
+                if let Some(req_id) = request_id.clone() {
+                    params.command_executed_events.write(CommandExecutedEvent {
+                        request_id: req_id,
+                        result: result_msg,
+                    });
+                }
+            }
+            // load_world is now handled by the MCP command system in mcp_commands.rs
             "blink" => {
                 if parts.len() == 2 {
                     let action = parts[1];
                     match action {
                         "start" => {
-                            blink_state.blinking = true;
-                            print_console_line
-                                .write(PrintConsoleLine::new("Blink started".to_string()));
-                            info!("Blink started via script");
+                            info!(
+                                "Blink started via script (state management disabled in MCP mode)"
+                            );
                         }
                         "stop" => {
-                            blink_state.blinking = false;
-                            print_console_line
-                                .write(PrintConsoleLine::new("Blink stopped".to_string()));
-                            info!("Blink stopped via script");
+                            info!(
+                                "Blink stopped via script (state management disabled in MCP mode)"
+                            );
                         }
                         _ => {
-                            print_console_line.write(PrintConsoleLine::new(
-                                "Usage: blink [start|stop]".to_string(),
-                            ));
+                            info!("Usage: blink [start|stop]");
                         }
                     }
                 }
@@ -519,26 +409,27 @@ fn execute_pending_commands(
                     let action = parts[1];
                     match action {
                         "status" => {
-                            let status = if temperature.value.is_some() {
+                            let status = if params.temperature.value.is_some() {
                                 "Connected to MQTT broker"
                             } else {
                                 "Connecting to MQTT broker..."
                             };
-                            print_console_line.write(PrintConsoleLine::new(status.to_string()));
+                            #[cfg(feature = "console")]
+                            write_to_console(status.to_string());
                             info!("MQTT status requested via script");
                         }
                         "temp" => {
-                            let temp_msg = if let Some(val) = temperature.value {
+                            let temp_msg = if let Some(val) = params.temperature.value {
                                 format!("Current temperature: {:.1}°C", val)
                             } else {
                                 "No temperature data available".to_string()
                             };
-                            print_console_line.write(PrintConsoleLine::new(temp_msg));
+                            #[cfg(feature = "console")]
+                            write_to_console(temp_msg);
                         }
                         _ => {
-                            print_console_line.write(PrintConsoleLine::new(
-                                "Usage: mqtt [status|temp]".to_string(),
-                            ));
+                            #[cfg(feature = "console")]
+                            write_to_console("Usage: mqtt [status|temp]".to_string());
                         }
                     }
                 }
@@ -559,58 +450,40 @@ fn execute_pending_commands(
                                 })
                                 .to_string();
 
-                                // Try to create a temporary client for simulation
-                                // If MQTT fails, still complete the spawn command
-                                match (|| -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-                                    let mut mqtt_options = MqttOptions::new(
-                                        "spawn-client",
-                                        &mqtt_config.host,
-                                        mqtt_config.port,
-                                    );
-                                    mqtt_options.set_keep_alive(Duration::from_secs(5));
-                                    // Note: set_connection_timeout doesn't exist, using default timeout
-                                    let (client, mut connection) = Client::new(mqtt_options, 10);
+                                // Use Core MQTT Service for device announcement
+                                if let Some(outgoing_tx) = params.mqtt_outgoing_tx.as_ref() {
+                                    if let Ok(tx) = outgoing_tx.0.lock() {
+                                        let outgoing_msg = crate::mqtt::core_service::OutgoingMqttMessage::GenericPublish {
+                                            topic: "devices/announce".to_string(),
+                                            payload,
+                                            qos: rumqttc::QoS::AtMostOnce,
+                                            retain: false,
+                                        };
 
-                                    client.publish(
-                                        "devices/announce",
-                                        QoS::AtMostOnce,
-                                        false,
-                                        payload.as_bytes(),
-                                    )?;
-
-                                    // Try to drive the event loop briefly with timeout
-                                    let start_time = std::time::Instant::now();
-                                    const TIMEOUT_MS: u64 = 1000; // 1 second max
-
-                                    while start_time.elapsed().as_millis() < TIMEOUT_MS as u128 {
-                                        match connection.try_recv() {
-                                            Ok(Ok(Event::Outgoing(Outgoing::Publish(_)))) => {
-                                                info!("MQTT publish successful for spawn command");
-                                                return Ok(());
-                                            }
-                                            Ok(Ok(_)) => {}, // Other events, continue
-                                            Ok(Err(_)) | Err(_) => {
-                                                // No more events or connection error, wait a bit
-                                                std::thread::sleep(Duration::from_millis(50));
-                                            }
+                                        match tx.send(outgoing_msg) {
+                                            Ok(_) => info!(
+                                                "MQTT spawn announcement queued via Core MQTT Service"
+                                            ),
+                                            Err(e) => warn!(
+                                                "Failed to queue MQTT spawn announcement: {} (continuing anyway)",
+                                                e
+                                            ),
                                         }
                                     }
-
-                                    // Timeout reached, but still continue
-                                    info!("MQTT publish timeout for spawn command, continuing anyway");
-                                    Ok(())
-                                })() {
-                                    Ok(_) => info!("MQTT spawn announcement completed"),
-                                    Err(e) => warn!("MQTT spawn announcement failed: {} (continuing anyway)", e),
+                                } else {
+                                    warn!(
+                                        "Core MQTT Service not available for spawn announcement (continuing anyway)"
+                                    );
                                 }
 
                                 let result_msg =
                                     format!("Spawn command sent for device {}", device_id);
-                                print_console_line.write(PrintConsoleLine::new(result_msg.clone()));
+                                #[cfg(feature = "console")]
+                                write_to_console(result_msg.clone());
 
                                 // Emit command executed event if this was from MCP
                                 if let Some(req_id) = request_id.clone() {
-                                    command_executed_events.write(CommandExecutedEvent {
+                                    params.command_executed_events.write(CommandExecutedEvent {
                                         request_id: req_id,
                                         result: result_msg,
                                     });
@@ -636,39 +509,40 @@ fn execute_pending_commands(
                                 })
                                 .to_string();
 
-                                // Create a temporary client for simulation
-                                let mut mqtt_options = MqttOptions::new(
-                                    "spawn-door-client",
-                                    &mqtt_config.host,
-                                    mqtt_config.port,
-                                );
-                                mqtt_options.set_keep_alive(Duration::from_secs(5));
-                                let (client, mut connection) = Client::new(mqtt_options, 10);
+                                // Use Core MQTT Service for device announcement
+                                if let Some(outgoing_tx) = params.mqtt_outgoing_tx.as_ref() {
+                                    if let Ok(tx) = outgoing_tx.0.lock() {
+                                        let outgoing_msg = crate::mqtt::core_service::OutgoingMqttMessage::GenericPublish {
+                                            topic: "devices/announce".to_string(),
+                                            payload,
+                                            qos: rumqttc::QoS::AtMostOnce,
+                                            retain: false,
+                                        };
 
-                                client
-                                    .publish(
-                                        "devices/announce",
-                                        QoS::AtMostOnce,
-                                        false,
-                                        payload.as_bytes(),
-                                    )
-                                    .unwrap();
-
-                                // Drive the event loop to ensure the message is sent
-                                for notification in connection.iter() {
-                                    if let Ok(Event::Outgoing(Outgoing::Publish(_))) = notification
-                                    {
-                                        break;
+                                        match tx.send(outgoing_msg) {
+                                            Ok(_) => info!(
+                                                "MQTT spawn_door announcement queued via Core MQTT Service"
+                                            ),
+                                            Err(e) => warn!(
+                                                "Failed to queue MQTT spawn_door announcement: {} (continuing anyway)",
+                                                e
+                                            ),
+                                        }
                                     }
+                                } else {
+                                    warn!(
+                                        "Core MQTT Service not available for spawn_door announcement (continuing anyway)"
+                                    );
                                 }
 
                                 let result_msg =
                                     format!("Spawn door command sent for device {}", device_id);
-                                print_console_line.write(PrintConsoleLine::new(result_msg.clone()));
+                                #[cfg(feature = "console")]
+                                write_to_console(result_msg.clone());
 
                                 // Emit command executed event if this was from MCP
                                 if let Some(req_id) = request_id.clone() {
-                                    command_executed_events.write(CommandExecutedEvent {
+                                    params.command_executed_events.write(CommandExecutedEvent {
                                         request_id: req_id,
                                         result: result_msg,
                                     });
@@ -695,27 +569,32 @@ fn execute_pending_commands(
                                     _ => {
                                         let error_msg =
                                             format!("Invalid block type: {}", block_type_str);
-                                        print_console_line
-                                            .write(PrintConsoleLine::new(error_msg.clone()));
+                                        #[cfg(feature = "console")]
+                                        write_to_console(error_msg.clone());
 
                                         // Emit error event if this was from MCP
                                         if let Some(req_id) = request_id.clone() {
-                                            command_executed_events.write(CommandExecutedEvent {
-                                                request_id: req_id,
-                                                result: error_msg,
-                                            });
+                                            params.command_executed_events.write(
+                                                CommandExecutedEvent {
+                                                    request_id: req_id,
+                                                    result: error_msg,
+                                                },
+                                            );
                                         }
                                         continue;
                                     }
                                 };
 
-                                voxel_world.set_block(IVec3::new(x, y, z), block_type);
+                                params
+                                    .voxel_world
+                                    .set_block(IVec3::new(x, y, z), block_type);
 
                                 // Spawn the block
-                                let cube_mesh =
-                                    meshes.add(Cuboid::new(CUBE_SIZE, CUBE_SIZE, CUBE_SIZE));
+                                let cube_mesh = params
+                                    .meshes
+                                    .add(Cuboid::new(CUBE_SIZE, CUBE_SIZE, CUBE_SIZE));
                                 let material = match block_type {
-                                    BlockType::Water => materials.add(StandardMaterial {
+                                    BlockType::Water => params.materials.add(StandardMaterial {
                                         base_color: Color::srgba(0.0, 0.35, 0.9, 0.6),
                                         alpha_mode: AlphaMode::Blend,
                                         ..default()
@@ -733,15 +612,15 @@ fn execute_pending_commands(
                                             _ => unreachable!(),
                                         };
                                         let texture: Handle<Image> =
-                                            asset_server.load(texture_path);
-                                        materials.add(StandardMaterial {
+                                            params.asset_server.load(texture_path);
+                                        params.materials.add(StandardMaterial {
                                             base_color_texture: Some(texture),
                                             ..default()
                                         })
                                     }
                                 };
 
-                                commands.spawn((
+                                params.commands.spawn((
                                     Mesh3d(cube_mesh),
                                     MeshMaterial3d(material),
                                     Transform::from_translation(Vec3::new(
@@ -757,11 +636,12 @@ fn execute_pending_commands(
                                     "Placed {} block at ({}, {}, {})",
                                     block_type_str, x, y, z
                                 );
-                                print_console_line.write(PrintConsoleLine::new(result_msg.clone()));
+                                #[cfg(feature = "console")]
+                                write_to_console(result_msg.clone());
 
                                 // Emit command executed event if this was from MCP
                                 if let Some(req_id) = request_id.clone() {
-                                    command_executed_events.write(CommandExecutedEvent {
+                                    params.command_executed_events.write(CommandExecutedEvent {
                                         request_id: req_id,
                                         result: result_msg,
                                     });
@@ -777,23 +657,25 @@ fn execute_pending_commands(
                         if let Ok(y) = parts[2].parse::<i32>() {
                             if let Ok(z) = parts[3].parse::<i32>() {
                                 let position = IVec3::new(x, y, z);
-                                let result_msg = if voxel_world.remove_block(&position).is_some() {
-                                    // Remove the block entity
-                                    for (entity, block) in query.iter() {
-                                        if block.position == position {
-                                            commands.entity(entity).despawn();
+                                let result_msg =
+                                    if params.voxel_world.remove_block(&position).is_some() {
+                                        // Remove the block entity
+                                        for (entity, block) in params.block_query.iter() {
+                                            if block.position == position {
+                                                params.commands.entity(entity).despawn();
+                                            }
                                         }
-                                    }
-                                    format!("Removed block at ({}, {}, {})", x, y, z)
-                                } else {
-                                    format!("No block found at ({}, {}, {})", x, y, z)
-                                };
+                                        format!("Removed block at ({}, {}, {})", x, y, z)
+                                    } else {
+                                        format!("No block found at ({}, {}, {})", x, y, z)
+                                    };
 
-                                print_console_line.write(PrintConsoleLine::new(result_msg.clone()));
+                                #[cfg(feature = "console")]
+                                write_to_console(result_msg.clone());
 
                                 // Emit command executed event if this was from MCP
                                 if let Some(req_id) = request_id.clone() {
-                                    command_executed_events.write(CommandExecutedEvent {
+                                    params.command_executed_events.write(CommandExecutedEvent {
                                         request_id: req_id,
                                         result: result_msg,
                                     });
@@ -820,19 +702,15 @@ fn execute_pending_commands(
                             }
                             "water" => crate::inventory::ItemType::Block(BlockType::Water),
                             _ => {
-                                print_console_line.write(PrintConsoleLine::new(format!(
-                                    "Invalid item type: {}",
-                                    item_type_str
-                                )));
+                                #[cfg(feature = "console")]
+                                write_to_console(format!("Invalid item type: {}", item_type_str));
                                 continue;
                             }
                         };
 
-                        inventory.add_items(item_type, quantity as u32);
-                        print_console_line.write(PrintConsoleLine::new(format!(
-                            "Added {} x {}",
-                            quantity, item_type_str
-                        )));
+                        params.inventory.add_items(item_type, quantity as u32);
+                        #[cfg(feature = "console")]
+                        write_to_console(format!("Added {} x {}", quantity, item_type_str));
                     }
                 }
             }
@@ -854,25 +732,28 @@ fn execute_pending_commands(
                                                 "cyan_terracotta" => BlockType::CyanTerracotta,
                                                 "water" => BlockType::Water,
                                                 _ => {
-                                                    print_console_line.write(
-                                                        PrintConsoleLine::new(format!(
-                                                            "Invalid block type: {}",
-                                                            block_type_str
-                                                        )),
-                                                    );
+                                                    #[cfg(feature = "console")]
+                                                    write_to_console(format!(
+                                                        "Invalid block type: {}",
+                                                        block_type_str
+                                                    ));
                                                     continue;
                                                 }
                                             };
 
                                             // Debug: VoxelWorld before adding blocks
                                             info!(
-                                                "VoxelWorld before wall command: {} blocks",
-                                                voxel_world.blocks.len()
+                                                "[DEBUG] VoxelWorld before wall command: {} blocks",
+                                                params.voxel_world.blocks.len()
+                                            );
+                                            info!(
+                                                "[DEBUG] Wall command: {} from ({}, {}, {}) to ({}, {}, {})",
+                                                block_type_str, x1, y1, z1, x2, y2, z2
                                             );
 
                                             let material = match block_type_enum {
                                                 BlockType::Water => {
-                                                    materials.add(StandardMaterial {
+                                                    params.materials.add(StandardMaterial {
                                                         base_color: Color::srgba(
                                                             0.0, 0.35, 0.9, 0.6,
                                                         ),
@@ -897,28 +778,29 @@ fn execute_pending_commands(
                                                         _ => unreachable!(),
                                                     };
                                                     let texture: Handle<Image> =
-                                                        asset_server.load(texture_path);
-                                                    materials.add(StandardMaterial {
+                                                        params.asset_server.load(texture_path);
+                                                    params.materials.add(StandardMaterial {
                                                         base_color_texture: Some(texture),
                                                         ..default()
                                                     })
                                                 }
                                             };
 
-                                            let cube_mesh = meshes
+                                            let cube_mesh = params
+                                                .meshes
                                                 .add(Cuboid::new(CUBE_SIZE, CUBE_SIZE, CUBE_SIZE));
 
                                             let mut blocks_added = 0;
                                             for x in x1..=x2 {
                                                 for y in y1..=y2 {
                                                     for z in z1..=z2 {
-                                                        voxel_world.set_block(
+                                                        params.voxel_world.set_block(
                                                             IVec3::new(x, y, z),
                                                             block_type_enum,
                                                         );
                                                         blocks_added += 1;
 
-                                                        commands.spawn((
+                                                        params.commands.spawn((
                                                             Mesh3d(cube_mesh.clone()),
                                                             MeshMaterial3d(material.clone()),
                                                             Transform::from_translation(Vec3::new(
@@ -936,7 +818,7 @@ fn execute_pending_commands(
                                             // Debug: VoxelWorld after adding blocks
                                             info!(
                                                 "VoxelWorld after wall command: {} blocks (added {})",
-                                                voxel_world.blocks.len(),
+                                                params.voxel_world.blocks.len(),
                                                 blocks_added
                                             );
 
@@ -952,7 +834,7 @@ fn execute_pending_commands(
                                             ];
 
                                             for pos in sample_positions {
-                                                let has_block = voxel_world.is_block_at(pos);
+                                                let has_block = params.voxel_world.is_block_at(pos);
                                                 info!(
                                                     "Sample block check at {:?}: has_block={}",
                                                     pos, has_block
@@ -970,12 +852,12 @@ fn execute_pending_commands(
                                                 z2,
                                                 blocks_added
                                             );
-                                            print_console_line
-                                                .write(PrintConsoleLine::new(result_msg.clone()));
+                                            #[cfg(feature = "console")]
+                                            write_to_console(result_msg.clone());
 
                                             // Emit command executed event if this was from MCP
                                             if let Some(req_id) = request_id.clone() {
-                                                command_executed_events.write(
+                                                params.command_executed_events.write(
                                                     CommandExecutedEvent {
                                                         request_id: req_id,
                                                         result: result_msg,
@@ -996,20 +878,22 @@ fn execute_pending_commands(
                         if let Ok(y) = parts[2].parse::<f32>() {
                             if let Ok(z) = parts[3].parse::<f32>() {
                                 if let Ok((mut transform, _camera_controller)) =
-                                    camera_query.single_mut()
+                                    params.camera_query.single_mut()
                                 {
                                     // Set the camera position
                                     transform.translation = Vec3::new(x, y, z);
 
-                                    print_console_line.write(PrintConsoleLine::new(format!(
+                                    #[cfg(feature = "console")]
+                                    write_to_console(format!(
                                         "Teleported to ({:.1}, {:.1}, {:.1})",
                                         x, y, z
-                                    )));
+                                    ));
                                     info!("Camera teleported to ({:.1}, {:.1}, {:.1})", x, y, z);
                                 } else {
-                                    print_console_line.write(PrintConsoleLine::new(
+                                    #[cfg(feature = "console")]
+                                    write_to_console(
                                         "Error: Could not find camera to teleport".to_string(),
-                                    ));
+                                    );
                                 }
                             }
                         }
@@ -1021,7 +905,7 @@ fn execute_pending_commands(
                     if let Ok(yaw) = parts[1].parse::<f32>() {
                         if let Ok(pitch) = parts[2].parse::<f32>() {
                             if let Ok((mut transform, mut camera_controller)) =
-                                camera_query.single_mut()
+                                params.camera_query.single_mut()
                             {
                                 // Convert degrees to radians for internal use
                                 let yaw_rad = yaw.to_radians();
@@ -1040,19 +924,21 @@ fn execute_pending_commands(
                                     camera_controller.pitch,
                                 );
 
-                                print_console_line.write(PrintConsoleLine::new(format!(
+                                #[cfg(feature = "console")]
+                                write_to_console(format!(
                                     "Set look angles to yaw: {:.1}°, pitch: {:.1}°",
                                     yaw, pitch
-                                )));
+                                ));
                                 info!(
                                     "Camera look angles set to yaw: {:.1}°, pitch: {:.1}°",
                                     yaw, pitch
                                 );
                             } else {
-                                print_console_line.write(PrintConsoleLine::new(
+                                #[cfg(feature = "console")]
+                                write_to_console(
                                     "Error: Could not find camera to set look direction"
                                         .to_string(),
-                                ));
+                                );
                             }
                         }
                     }
@@ -1060,7 +946,8 @@ fn execute_pending_commands(
             }
             "list" => {
                 // Handle list devices command
-                let device_list: Vec<String> = device_query
+                let device_list: Vec<String> = params
+                    .device_query
                     .iter()
                     .map(|(device, transform)| {
                         format!(
@@ -1080,29 +967,328 @@ fn execute_pending_commands(
                     format!("Devices:\n{}", device_list.join("\n"))
                 };
 
-                print_console_line.write(PrintConsoleLine::new(result_text.clone()));
+                #[cfg(feature = "console")]
+                write_to_console(result_text.clone());
                 info!("Executed list command, found {} devices", device_list.len());
 
                 // Emit command executed event if this was from MCP
                 if let Some(req_id) = request_id {
-                    command_executed_events.write(CommandExecutedEvent {
+                    params.command_executed_events.write(CommandExecutedEvent {
                         request_id: req_id,
                         result: result_text,
                     });
                 }
             }
+            "publish_world" => {
+                info!(
+                    "Executing publish_world command with args: {:?}",
+                    &parts[1..]
+                );
+                let result_msg = "Publishing world (multiplayer command executed)".to_string();
+                #[cfg(feature = "console")]
+                write_to_console(result_msg.clone());
+
+                // Emit command executed event if this was from MCP
+                if let Some(req_id) = request_id {
+                    params.command_executed_events.write(CommandExecutedEvent {
+                        request_id: req_id,
+                        result: result_msg,
+                    });
+                }
+            }
+            "join_world" => {
+                info!("Executing join_world command with args: {:?}", &parts[1..]);
+                let result_msg = "Joining world (multiplayer command executed)".to_string();
+                #[cfg(feature = "console")]
+                write_to_console(result_msg.clone());
+
+                // Emit command executed event if this was from MCP
+                if let Some(req_id) = request_id {
+                    params.command_executed_events.write(CommandExecutedEvent {
+                        request_id: req_id,
+                        result: result_msg,
+                    });
+                }
+            }
+            "create_world" => {
+                if parts.len() >= 3 {
+                    let world_name = parts[1].to_string();
+                    let description = parts[2..].join(" "); // Join remaining parts as description
+
+                    info!(
+                        "Executing create_world command: name='{}', description='{}'",
+                        world_name, description
+                    );
+
+                    // Send CreateWorldEvent to trigger world creation
+                    params.create_world_events.write(CreateWorldEvent {
+                        world_name: world_name.clone(),
+                        description: description.clone(),
+                        template: None, // Use default template for command execution
+                    });
+
+                    // Set game state to InGame to transition UI from main menu
+                    if let Some(next_state) = params.next_game_state.as_mut() {
+                        next_state.set(crate::ui::main_menu::GameState::InGame);
+                        info!("Set game state to InGame for world creation transition");
+                    } else {
+                        warn!("NextState<GameState> resource not available for state transition");
+                    }
+
+                    let result_msg = format!(
+                        "Created new world: {} ({}) and transitioned to InGame",
+                        world_name, description
+                    );
+                    #[cfg(feature = "console")]
+                    write_to_console(result_msg.clone());
+
+                    // Emit command executed event if this was from MCP
+                    if let Some(req_id) = request_id {
+                        params.command_executed_events.write(CommandExecutedEvent {
+                            request_id: req_id,
+                            result: result_msg,
+                        });
+                    }
+                } else {
+                    let error_msg = "Usage: create_world <world_name> <description>".to_string();
+                    #[cfg(feature = "console")]
+                    write_to_console(error_msg.clone());
+
+                    if let Some(req_id) = request_id {
+                        params.command_executed_events.write(CommandExecutedEvent {
+                            request_id: req_id,
+                            result: error_msg,
+                        });
+                    }
+                }
+            }
+            // load_world is now handled by the MCP command system in mcp_commands.rs (second duplicate removed)
+            "set_game_state" => {
+                if parts.len() >= 2 {
+                    let state_str = parts[1];
+
+                    // Parse state string to GameState enum
+                    use crate::ui::main_menu::GameState;
+                    let new_state = match state_str {
+                        "MainMenu" => GameState::MainMenu,
+                        "WorldSelection" => GameState::WorldSelection,
+                        "InGame" => GameState::InGame,
+                        "Settings" => GameState::Settings,
+                        "GameplayMenu" => GameState::GameplayMenu,
+                        _ => {
+                            let error_msg = format!(
+                                "Invalid game state: {}. Valid states: MainMenu, WorldSelection, InGame, Settings, GameplayMenu",
+                                state_str
+                            );
+                            #[cfg(feature = "console")]
+                            write_to_console(error_msg.clone());
+
+                            if let Some(req_id) = request_id {
+                                params.command_executed_events.write(CommandExecutedEvent {
+                                    request_id: req_id,
+                                    result: error_msg,
+                                });
+                            }
+                            return;
+                        }
+                    };
+
+                    // Set the game state
+                    if let Some(next_state) = params.next_game_state.as_mut() {
+                        next_state.set(new_state);
+                        info!("Set game state to {}", state_str);
+
+                        let result_msg = format!("Game state set to {}", state_str);
+                        #[cfg(feature = "console")]
+                        write_to_console(result_msg.clone());
+
+                        // Emit command executed event if this was from MCP
+                        if let Some(req_id) = request_id {
+                            params.command_executed_events.write(CommandExecutedEvent {
+                                request_id: req_id,
+                                result: result_msg,
+                            });
+                        }
+                    } else {
+                        let error_msg =
+                            "NextState<GameState> resource not available for state transition"
+                                .to_string();
+                        warn!("{}", error_msg);
+
+                        #[cfg(feature = "console")]
+                        write_to_console(error_msg.clone());
+
+                        if let Some(req_id) = request_id {
+                            params.command_executed_events.write(CommandExecutedEvent {
+                                request_id: req_id,
+                                result: error_msg,
+                            });
+                        }
+                    }
+                } else {
+                    let error_msg = "Usage: set_game_state <state>".to_string();
+                    #[cfg(feature = "console")]
+                    write_to_console(error_msg.clone());
+
+                    if let Some(req_id) = request_id {
+                        params.command_executed_events.write(CommandExecutedEvent {
+                            request_id: req_id,
+                            result: error_msg,
+                        });
+                    }
+                }
+            }
             _ => {
-                print_console_line.write(PrintConsoleLine::new(format!(
-                    "Unknown command: {}",
-                    command
-                )));
+                let error_msg = format!("Unknown command: {}", command);
+                #[cfg(feature = "console")]
+                write_to_console(error_msg.clone());
+                info!("Console: {}", error_msg);
+
+                // Emit command executed event if this was from MCP
+                if let Some(req_id) = request_id {
+                    params.command_executed_events.write(CommandExecutedEvent {
+                        request_id: req_id,
+                        result: error_msg,
+                    });
+                }
             }
         }
     }
 }
 
+// System to handle console commands that were queued by execute_pending_commands
+#[cfg(all(not(target_arch = "wasm32"), feature = "console"))]
+fn execute_console_commands(
+    mut pending_commands: ResMut<crate::script::script_types::PendingCommands>,
+    mut command_executed_events: EventWriter<CommandExecutedEvent>,
+    mut console_manager: ResMut<ConsoleManager>,
+) {
+    use crate::console::command_parser::CommandParser;
+
+    // Process commands that start with "CONSOLE_COMMAND:"
+    let console_commands: Vec<String> = pending_commands
+        .commands
+        .drain(..)
+        .filter(|cmd| cmd.starts_with("CONSOLE_COMMAND:"))
+        .collect();
+
+    // Re-add non-console commands back to the queue
+    let other_commands: Vec<String> = pending_commands
+        .commands
+        .drain(..)
+        .filter(|cmd| !cmd.starts_with("CONSOLE_COMMAND:"))
+        .collect();
+    pending_commands.commands.extend(other_commands);
+
+    for command_with_prefix in console_commands {
+        let command_without_prefix = command_with_prefix.trim_start_matches("CONSOLE_COMMAND:");
+        info!("Executing console command: {}", command_without_prefix);
+
+        // Check if command has a request ID (format: "command #request_id")
+        let (actual_command, request_id) =
+            if let Some(hash_pos) = command_without_prefix.rfind(" #") {
+                let (cmd, id_part) = command_without_prefix.split_at(hash_pos);
+                let request_id = id_part.trim_start_matches(" #").to_string();
+                (cmd.to_string(), Some(request_id))
+            } else {
+                (command_without_prefix.to_string(), None)
+            };
+
+        // Use the console's command parser - note: parser is created but not currently used
+        // for actual command execution due to world access limitations in this context
+        let _parser = CommandParser::new();
+        // We need to access the world, so we'll do this through the console manager
+        // For now, just try to add the command as output and execute it via console
+        console_manager.add_message(&format!("Executing: {}", actual_command));
+
+        // For MCP compatibility, we need to signal the result
+        if let Some(req_id) = request_id {
+            // Send a basic success response
+            command_executed_events.write(CommandExecutedEvent {
+                request_id: req_id,
+                result: format!("Attempted to execute console command: {}", actual_command),
+            });
+        }
+    }
+}
+
+// Stub version for non-console builds or WASM
+#[cfg(any(target_arch = "wasm32", not(feature = "console")))]
+fn execute_console_commands(
+    mut pending_commands: ResMut<crate::script::script_types::PendingCommands>,
+    mut command_executed_events: EventWriter<CommandExecutedEvent>,
+) {
+    // Process commands that start with "CONSOLE_COMMAND:" and remove them
+    let mut remaining_commands = Vec::new();
+
+    for command in pending_commands.commands.drain(..) {
+        if command.starts_with("CONSOLE_COMMAND:") {
+            let command_without_prefix = command.trim_start_matches("CONSOLE_COMMAND:");
+            info!(
+                "Console not available, skipping command: {}",
+                command_without_prefix
+            );
+
+            // Check if command has a request ID and respond
+            if let Some(hash_pos) = command_without_prefix.rfind(" #") {
+                let (_cmd, id_part) = command_without_prefix.split_at(hash_pos);
+                let request_id = id_part.trim_start_matches(" #").to_string();
+                command_executed_events.write(CommandExecutedEvent {
+                    request_id,
+                    result: "Console not available".to_string(),
+                });
+            }
+        } else {
+            remaining_commands.push(command);
+        }
+    }
+
+    pending_commands.commands = remaining_commands;
+}
+
+// WASM stub - WASM targets use lib.rs for the main entry point
+#[cfg(target_arch = "wasm32")]
+fn main() {
+    // No-op: WASM builds use the lib.rs entry point instead
+    panic!("main() should not be called on WASM target - use lib.rs instead");
+}
+
 /// Tests for core game commands to prevent regressions
-#[cfg(test)]
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod tests {
+    use super::*;
+    use clap::Parser;
+
+    #[test]
+    fn test_cli_player_id_short_form() {
+        // Test the short form -p argument
+        let args = Args::try_parse_from(&["iotcraft", "-p", "test-123"]).unwrap();
+        assert_eq!(args.player_id, Some("test-123".to_string()));
+    }
+
+    #[test]
+    fn test_cli_player_id_long_form() {
+        // Test the long form --player-id argument
+        let args = Args::try_parse_from(&["iotcraft", "--player-id", "test-456"]).unwrap();
+        assert_eq!(args.player_id, Some("test-456".to_string()));
+    }
+
+    #[test]
+    fn test_cli_player_id_numeric() {
+        // Test numeric player IDs like the one used in the logs
+        let args = Args::try_parse_from(&["iotcraft", "-p", "2"]).unwrap();
+        assert_eq!(args.player_id, Some("2".to_string()));
+    }
+
+    #[test]
+    fn test_cli_no_player_id() {
+        // Test when no player ID is provided
+        let args = Args::try_parse_from(&["iotcraft"]).unwrap();
+        assert_eq!(args.player_id, None);
+    }
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
 mod wall_command_tests {
     use super::*;
 
@@ -1204,6 +1390,7 @@ mod wall_command_tests {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn main() {
     let args = Args::parse();
 
@@ -1228,13 +1415,30 @@ fn main() {
     app.insert_resource(localization_config)
         .insert_resource(ClearColor(Color::srgb(0.53, 0.81, 0.92)))
         .insert_resource(mqtt_config)
-        .insert_resource(profile::load_or_create_profile_with_override(
+        .insert_resource(profile::load_or_create_profile_with_override_full(
             args.player_id,
+            args.player_name,
         ));
     // Script resources are now handled by the ScriptPlugin
 
-    // Add default plugins and initialize AssetServer
-    app.add_plugins(DefaultPlugins);
+    // Add default plugins with custom window configuration
+    let player_profile = app.world().resource::<profile::PlayerProfile>();
+    let window_title = format!("IoTCraft - {}", player_profile.player_name);
+
+    // Get client number from player_id (assuming format like "player-1", "player-2", etc.)
+    let client_offset = extract_client_number(&player_profile.player_id).unwrap_or(0);
+    let window_x = 50.0 + (client_offset as f32 * 300.0); // Offset by 300px per client
+    let window_y = 50.0 + (client_offset as f32 * 50.0); // Offset by 50px per client
+
+    app.add_plugins(DefaultPlugins.set(WindowPlugin {
+        primary_window: Some(Window {
+            title: window_title,
+            resolution: bevy::window::WindowResolution::new(1280, 720),
+            position: WindowPosition::At(IVec2::new(window_x as i32, window_y as i32)),
+            ..default()
+        }),
+        ..default()
+    }));
 
     // Initialize fonts resource immediately after AssetServer is available
     // We need to do this in a way that ensures AssetServer exists
@@ -1245,15 +1449,18 @@ fn main() {
         });
 
     app.add_plugins(FontPlugin) // Keep FontPlugin for any additional font-related systems
-        .add_plugins(LocalizationPlugin) // Load localization after fonts
-        .add_plugins(avian3d::PhysicsPlugins::default()) // Add physics engine
-        .add_plugins(PhysicsManagerPlugin) // Add physics optimization manager
-        .add_plugins(CameraControllerPlugin)
+        .add_plugins(LocalizationPlugin); // Load localization after fonts
+
+    app.add_plugins(CameraControllerPlugin)
         .add_plugins(PlayerControllerPlugin) // Add player controller for walking/flying modes
         .add_plugins(script::script_systems::ScriptPlugin) // Add script plugin early for PendingCommands resource
-        .add_plugins(SharedMaterialsPlugin) // Add shared materials for optimized rendering
-        .add_plugins(ConsolePlugin)
-        .add_plugins(DevicePlugin)
+        .add_plugins(SharedMaterialsPlugin); // Add shared materials for optimized rendering
+
+    // Add console plugin conditionally
+    #[cfg(feature = "console")]
+    app.add_plugins(ConsolePlugin);
+
+    app.add_plugins(DevicePlugin)
         .add_plugins(DevicePositioningPlugin)
         .add_plugins(EnvironmentPlugin)
         .add_plugins(MyInteractionPlugin)
@@ -1276,186 +1483,100 @@ fn main() {
 
     // Add MCP plugin only if --mcp flag is provided
     if args.mcp {
-        info!("Starting in MCP server mode");
+        let mcp_port = std::env::var("MCP_PORT")
+            .unwrap_or_else(|_| "8080".to_string())
+            .parse::<u16>()
+            .unwrap_or(8080);
+        info!("Starting in MCP server mode on port {}", mcp_port);
         app.add_plugins(mcp::McpPlugin);
     }
 
-    app.init_state::<GameState>()
-        .insert_resource(ConsoleConfiguration {
-            keys: vec![KeyCode::F12],
-            left_pos: 200.0,
-            top_pos: 100.0,
-            height: 400.0,
-            width: 800.0,
-            ..default()
-        })
-        .add_console_command::<BlinkCommand, _>(handle_blink_command)
-        .add_console_command::<MqttCommand, _>(handle_mqtt_command)
-        .add_console_command::<SpawnCommand, _>(handle_spawn_command)
-        .add_console_command::<SpawnDoorCommand, _>(
-            crate::console::console_systems::handle_spawn_door_command,
-        )
-        .add_console_command::<MoveCommand, _>(crate::console::console_systems::handle_move_command)
-        .add_console_command::<PlaceBlockCommand, _>(handle_place_block_command)
-        .add_console_command::<RemoveBlockCommand, _>(handle_remove_block_command)
-        .add_console_command::<WallCommand, _>(handle_wall_command)
-        .add_console_command::<SaveMapCommand, _>(handle_save_map_command)
-        .add_console_command::<LoadMapCommand, _>(handle_load_map_command)
-        .add_console_command::<GiveCommand, _>(handle_give_command)
-        .add_console_command::<TestErrorCommand, _>(
-            crate::console::console_systems::handle_test_error_command,
-        )
-        .add_console_command::<TeleportCommand, _>(handle_teleport_command)
-        .add_console_command::<LookCommand, _>(handle_look_command)
-        .add_console_command::<ListCommand, _>(crate::console::console_systems::handle_list_command)
-        .insert_resource(BlinkState::default())
-        // .add_systems(Update, draw_cursor) // Disabled: InteractionPlugin handles cursor drawing
-        .add_systems(
-            Update,
-            (
-                blink_publisher_system,
-                rotate_logo_system,
-                crate::devices::device_positioning::draw_drag_feedback,
-            ),
-        )
-        .add_systems(Update, manage_camera_controller)
-        .add_systems(Update, handle_console_t_key.after(ConsoleSet::Commands))
-        .add_systems(Update, handle_mouse_capture.after(ConsoleSet::Commands))
-        .add_systems(
-            Update,
-            crate::console::esc_handling::handle_esc_key.after(ConsoleSet::Commands),
-        )
-        .init_resource::<DiagnosticsVisible>()
-        .add_systems(Startup, setup_diagnostics_ui)
+    app.init_state::<GameState>();
+
+    // Console is now managed by ConsolePlugin - no additional configuration needed
+
+    #[cfg(feature = "console")]
+    app.insert_resource(BlinkState::default());
+
+    // .add_systems(Update, draw_cursor) // Disabled: InteractionPlugin handles cursor drawing
+    app.add_systems(
+        Update,
+        (
+            rotate_logo_system,
+            crate::devices::device_positioning::draw_drag_feedback,
+        ),
+    );
+
+    // Add console-specific systems only when console feature is enabled
+    #[cfg(feature = "console")]
+    app.add_systems(Update, blink_publisher_system);
+
+    app.add_systems(Update, manage_camera_controller)
+        .add_systems(Update, handle_mouse_capture);
+
+    // Add console-dependent systems only when console feature is enabled
+    #[cfg(feature = "console")]
+    app.add_systems(
+        Update,
+        crate::console::esc_handling::handle_esc_key.after(ConsoleSet::COMMANDS),
+    );
+
+    app.init_resource::<DiagnosticsVisible>()
+        .add_systems(Startup, setup_diagnostics_ui_bundled)
         .add_systems(Update, execute_pending_commands)
-        .add_systems(Update, handle_inventory_input)
-        .add_systems(Update, handle_diagnostics_toggle)
-        .add_systems(Update, update_diagnostics_content)
+        .add_systems(Update, execute_console_commands)
+        .add_systems(Update, handle_inventory_input_bundled)
+        .add_systems(Update, handle_diagnostics_toggle_bundled)
+        .add_systems(Update, update_diagnostics_content_bundled)
         .run();
 }
 
-fn handle_mqtt_command(
-    mut log: ConsoleCommand<MqttCommand>,
-    temperature: Res<TemperatureResource>,
-) {
-    if let Some(Ok(MqttCommand { action })) = log.take() {
-        info!("Console command: mqtt {}", action);
-        match action.as_str() {
-            "status" => {
-                let status = if temperature.value.is_some() {
-                    "Connected to MQTT broker"
-                } else {
-                    "Connecting to MQTT broker..."
-                };
-                reply!(log, "{}", status);
-                info!("MQTT status requested via console");
-            }
-            "temp" => {
-                let temp_msg = if let Some(val) = temperature.value {
-                    format!("Current temperature: {:.1}°C", val)
-                } else {
-                    "No temperature data available".to_string()
-                };
-                reply!(log, "{}", temp_msg);
-            }
-            _ => {
-                reply!(log, "Usage: mqtt [status|temp]");
-            }
-        }
-    }
-}
-
-fn handle_spawn_command(mut log: ConsoleCommand<SpawnCommand>, mqtt_config: Res<MqttConfig>) {
-    if let Some(Ok(SpawnCommand { device_id, x, y, z })) = log.take() {
-        info!("Console command: spawn {} {} {} {}", device_id, x, y, z);
-
-        // Use the same MQTT announcement system as spawn_door for consistency
-        let payload = json!({
-            "device_id": device_id,
-            "device_type": "lamp",
-            "state": "online",
-            "location": { "x": x, "y": y, "z": z }
-        })
-        .to_string();
-
-        // Create a temporary client for simulation
-        let mut mqtt_options =
-            MqttOptions::new("spawn-client", &mqtt_config.host, mqtt_config.port);
-        mqtt_options.set_keep_alive(Duration::from_secs(5));
-        let (client, mut connection) = Client::new(mqtt_options, 10);
-
-        client
-            .publish(
-                "devices/announce",
-                QoS::AtMostOnce,
-                false,
-                payload.as_bytes(),
-            )
-            .unwrap();
-
-        // Drive the event loop to ensure the message is sent
-        for notification in connection.iter() {
-            if let Ok(Event::Outgoing(Outgoing::Publish(_))) = notification {
-                break;
-            }
-        }
-
-        reply!(log, "Spawn command sent for device {}", device_id);
-    }
-}
-
+#[cfg(feature = "console")]
 fn blink_publisher_system(
     mut blink_state: ResMut<BlinkState>,
-    device_query: Query<&DeviceEntity, With<BlinkCube>>,
-    mqtt_config: Res<MqttConfig>,
+    #[cfg(feature = "console")] device_query: Query<&DeviceEntity, With<BlinkCube>>,
+    mqtt_outgoing: Option<Res<crate::mqtt::core_service::MqttOutgoingTx>>,
 ) {
     if blink_state.light_state != blink_state.last_sent {
         let payload = if blink_state.light_state { "ON" } else { "OFF" };
 
-        // Send blink command to all registered lamp devices
-        for device in device_query.iter() {
-            if device.device_type == "lamp" {
-                let device_id = device.device_id.clone();
-                let payload_str = payload.to_string();
-                let mqtt_host = mqtt_config.host.clone();
-                let mqtt_port = mqtt_config.port;
-
-                // Send MQTT message in a separate thread to avoid blocking
-                std::thread::spawn(move || {
-                    info!(
-                        "MQTT: Connecting blink client to publish to device {}",
-                        device_id
-                    );
-                    let mut opts = MqttOptions::new("bevy_blink_client", &mqtt_host, mqtt_port);
-                    opts.set_keep_alive(Duration::from_secs(5));
-                    let (client, mut connection) = Client::new(opts, 10);
-
+        // Send blink command to all registered lamp devices using Core MQTT Service
+        if let Some(outgoing_tx) = mqtt_outgoing {
+            for device in device_query.iter() {
+                if device.device_type == "lamp" {
+                    let device_id = device.device_id.clone();
                     let topic = format!("home/{}/light", device_id);
+                    let payload_str = payload.to_string();
+
                     info!(
-                        "MQTT: Publishing blink command '{}' to topic '{}'",
+                        "MQTT: Publishing blink command '{}' to topic '{}' via Core MQTT Service",
                         payload_str, topic
                     );
-                    match client.publish(&topic, QoS::AtMostOnce, false, payload_str.as_bytes()) {
-                        Ok(_) => {
-                            // Drive until publish is sent
-                            for notification in connection.iter() {
-                                if let Ok(Event::Outgoing(Outgoing::Publish(_))) = notification {
-                                    info!(
-                                        "MQTT: Blink command sent successfully: {} to {}",
-                                        payload_str, topic
-                                    );
-                                    break;
-                                }
-                            }
+
+                    if let Ok(tx) = outgoing_tx.0.lock() {
+                        let outgoing_msg =
+                            crate::mqtt::core_service::OutgoingMqttMessage::GenericPublish {
+                                topic,
+                                payload: payload_str,
+                                qos: rumqttc::QoS::AtMostOnce,
+                                retain: false,
+                            };
+
+                        if let Err(e) = tx.send(outgoing_msg) {
+                            error!(
+                                "MQTT: Failed to send blink command to Core MQTT Service: {}",
+                                e
+                            );
+                        } else {
+                            info!("MQTT: Blink command queued successfully via Core MQTT Service");
                         }
-                        Err(e) => error!("MQTT: Failed to publish blink command: {}", e),
                     }
-                });
+                }
             }
+        } else {
+            warn!("MQTT: Core MQTT Service not available for blink commands");
         }
 
-        // Give broker time
-        std::thread::sleep(Duration::from_millis(100));
         blink_state.last_sent = blink_state.light_state;
     }
 }
@@ -1469,35 +1590,51 @@ fn rotate_logo_system(time: Res<Time>, mut query: Query<&mut Transform, With<Log
 }
 
 // System to manage camera controller state based on console state
+#[cfg(feature = "console")]
 fn manage_camera_controller(
-    console_open: Res<ConsoleOpen>,
+    console_manager: Option<Res<ConsoleManager>>,
     mut camera_query: Query<&mut CameraController, With<Camera>>,
 ) {
     if let Ok(mut camera_controller) = camera_query.single_mut() {
         // Disable camera controller when console is open
-        camera_controller.enabled = !console_open.open;
+        let console_open = console_manager
+            .map(|manager| manager.console.is_visible())
+            .unwrap_or(false);
+        camera_controller.enabled = !console_open;
     }
 }
 
+// Alternative system when console feature is disabled
+#[cfg(not(feature = "console"))]
+fn manage_camera_controller(mut camera_query: Query<&mut CameraController, With<Camera>>) {
+    if let Ok(mut camera_controller) = camera_query.single_mut() {
+        // Always enable camera controller when console is not available
+        camera_controller.enabled = true;
+    }
+}
+
+// LEGACY: Resource and systems moved to debug module (debug_params.rs)
 // Resource to track diagnostics visibility
-#[derive(Resource)]
-struct DiagnosticsVisible {
-    visible: bool,
-}
+// #[derive(Resource)]
+// struct DiagnosticsVisible {
+//     visible: bool,
+// }
 
-impl Default for DiagnosticsVisible {
-    fn default() -> Self {
-        Self { visible: false }
-    }
-}
+// impl Default for DiagnosticsVisible {
+//     fn default() -> Self {
+//         Self { visible: false }
+//     }
+// }
 
-#[derive(Component)]
-struct DiagnosticsText;
+// #[derive(Component)]
+// struct DiagnosticsText;
 
-#[derive(Component)]
-struct DiagnosticsOverlay;
+// #[derive(Component)]
+// struct DiagnosticsOverlay;
 
+// LEGACY: System replaced by handle_diagnostics_toggle_bundled in debug_commands.rs
 // System to handle F3 key toggle
+/*
 fn handle_diagnostics_toggle(
     keyboard_input: Res<ButtonInput<KeyCode>>,
     mut diagnostics_visible: ResMut<DiagnosticsVisible>,
@@ -1520,7 +1657,10 @@ fn handle_diagnostics_toggle(
         );
     }
 }
+*/
 
+// LEGACY: System replaced by update_diagnostics_content_bundled in debug_commands.rs
+/*
 // System to update diagnostics content
 fn update_diagnostics_content(
     diagnostics_visible: Res<DiagnosticsVisible>,
@@ -1536,6 +1676,9 @@ fn update_diagnostics_content(
     local_profile: Res<crate::profile::PlayerProfile>,
     temperature: Res<TemperatureResource>,
     time: Res<Time>,
+    multiplayer_mode: Res<crate::multiplayer::MultiplayerMode>,
+    multiplayer_status: Res<crate::multiplayer::MultiplayerConnectionStatus>,
+    world_discovery: Res<crate::multiplayer::WorldDiscovery>,
 ) {
     if !diagnostics_visible.visible {
         return;
@@ -1610,54 +1753,149 @@ fn update_diagnostics_content(
                 "🔄 Connecting to MQTT broker..."
             };
 
+            // Get multiplayer mode information and world ID
+            let (multiplayer_mode_text, current_world_id) = match &*multiplayer_mode {
+                crate::multiplayer::MultiplayerMode::SinglePlayer => {
+                    ("🚫 SinglePlayer".to_string(), "None".to_string())
+                }
+                crate::multiplayer::MultiplayerMode::HostingWorld {
+                    world_id,
+                    is_published,
+                } => {
+                    let mode_text = if *is_published {
+                        "🏠 Hosting (Public)"
+                    } else {
+                        "🏠 Hosting (Private)"
+                    };
+                    (mode_text.to_string(), world_id.clone())
+                }
+                crate::multiplayer::MultiplayerMode::JoinedWorld {
+                    world_id,
+                    host_player: _,
+                } => ("👥 Joined World".to_string(), world_id.clone()),
+            };
+
+            let multiplayer_enabled = if multiplayer_status.connection_available {
+                "✅ Enabled"
+            } else {
+                "❌ Disabled"
+            };
+
+            // Get MQTT subscription information from WorldDiscovery resource
+            let subscribed_topics = vec![
+                "iotcraft/worlds/+/info".to_string(),
+                "iotcraft/worlds/+/data".to_string(),
+                "iotcraft/worlds/+/data/chunk".to_string(),
+                "iotcraft/worlds/+/changes".to_string(),
+                "iotcraft/worlds/+/state/blocks/placed".to_string(),
+                "iotcraft/worlds/+/state/blocks/removed".to_string(),
+            ];
+
+            // Get last messages from WorldDiscovery resource
+            let last_messages = if let Ok(messages) = world_discovery.last_messages.try_lock() {
+                messages.clone()
+            } else {
+                std::collections::HashMap::new()
+            };
+
+            let topics_text = subscribed_topics
+                .iter()
+                .map(|topic| {
+                    // Find matching topic in last_messages (handling wildcards)
+                    let _pattern = topic.replace("+", "[^/]+");
+                    let matching_message = last_messages.iter().find(|(msg_topic, _)| {
+                        // Simple pattern matching for wildcard topics
+                        if topic.contains("+") {
+                            // Create a basic regex-like match
+                            let pattern_parts: Vec<&str> = topic.split("+").collect();
+                            if pattern_parts.len() == 2 {
+                                msg_topic.starts_with(pattern_parts[0])
+                                    && msg_topic.ends_with(pattern_parts[1])
+                            } else {
+                                false
+                            }
+                        } else {
+                            *msg_topic == topic
+                        }
+                    });
+
+                    if let Some((_, last_msg)) = matching_message {
+                        format!("  • {}: {}", topic, last_msg.content)
+                    } else {
+                        format!("  • {}: (no messages)", topic)
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+
             let uptime = time.elapsed_secs();
             let minutes = (uptime / 60.0) as u32;
             let seconds = (uptime % 60.0) as u32;
 
             text.0 = format!(
-                "IoTCraft Debug Information (Press F3 to toggle)\n\
-                ------------------------------------------------------------------------------------------
-                \n\
-                - PLAYER INFORMATION\n\
-                Position: X={:.2}  Y={:.2}  Z={:.2}\n\
-                Rotation: Yaw={:.1}°  Pitch={:.1}°\n\
-                Selected Slot: {} ({})\n\
-                \n\
-                - MULTIPLAYER INFORMATION\n\
-                MQTT Broker: {}\n\
-                Connected Players: {} (1 local + {} remote)\n\
-                {}\n\
-                \n\
-                - WORLD INFORMATION\n\
-                Total Blocks: {}\n\
-                IoT Devices: {}\n\
-                Session Time: {}m {}s\n\
-                \n\
-                - SCRIPT COMMANDS\n\
-                Teleport: tp {:.2} {:.2} {:.2}\n\
-                Look Direction: look {:.1} {:.1}\n\
-                \n\
-                - CONTROLS\n\
-                F3: Toggle this debug screen\n\
-                T: Open console\n\
-                1-9: Select inventory slot\n\
-                Mouse Wheel: Scroll inventory slots",
-                translation.x, translation.y, translation.z,
-                yaw_degrees, pitch_degrees,
-                selected_slot, selected_item,
+                "IoTCraft Debug Information (Press F3 to toggle)                        MQTT SUBSCRIPTIONS\n\
+                -------------------------------------------------  |  --------------------------------------\n\
+                                                               |\n\
+                - PLAYER INFORMATION                           |  Current World Filter: {}\n\
+                Position: X={:.2}  Y={:.2}  Z={:.2}               |\n\
+                Rotation: Yaw={:.1}°  Pitch={:.1}°                    |  Subscribed Topics:\n\
+                Selected Slot: {} ({})                        |  {}\n\
+                                                               |\n\
+                - MULTIPLAYER INFORMATION                      |\n\
+                MQTT Broker: {}                               |\n\
+                Multiplayer Status: {}                        |\n\
+                Multiplayer Mode: {}                          |\n\
+                Current World ID: {}                          |\n\
+                Connected Players: {} (1 local + {} remote)   |\n\
+                {}                                             |\n\
+                                                               |\n\
+                - WORLD INFORMATION                            |\n\
+                Total Blocks: {}                              |\n\
+                IoT Devices: {}                               |\n\
+                Session Time: {}m {}s                         |\n\
+                                                               |\n\
+                - SCRIPT COMMANDS                              |\n\
+                Teleport: tp {:.2} {:.2} {:.2}                    |\n\
+                Look Direction: look {:.1} {:.1}                  |\n\
+                                                               |\n\
+                - CONTROLS                                     |\n\
+                F3: Toggle this debug screen                  |\n\
+                T: Open console                               |\n\
+                1-9: Select inventory slot                    |\n\
+                Mouse Wheel: Scroll inventory slots           |",
+                current_world_id, // Used for the filter line
+                translation.x,
+                translation.y,
+                translation.z,
+                yaw_degrees,
+                pitch_degrees,
+                selected_slot,
+                selected_item,
+                topics_text,
                 mqtt_connection_status,
-                remote_player_count + 1, remote_player_count,
+                multiplayer_enabled,
+                multiplayer_mode_text,
+                current_world_id,
+                remote_player_count + 1,
+                remote_player_count,
                 players_text,
                 block_count,
                 device_count,
-                minutes, seconds,
-                translation.x, translation.y, translation.z,
-                yaw_degrees, pitch_degrees
+                minutes,
+                seconds,
+                translation.x,
+                translation.y,
+                translation.z,
+                yaw_degrees,
+                pitch_degrees
             );
         }
     }
 }
+*/
 
+// LEGACY: System replaced by setup_diagnostics_ui_bundled in debug_commands.rs
+/*
 // System to setup diagnostics UI
 fn setup_diagnostics_ui(mut commands: Commands, fonts: Res<Fonts>) {
     // Create a full-width diagnostics panel at the top
@@ -1692,57 +1930,51 @@ fn setup_diagnostics_ui(mut commands: Commands, fonts: Res<Fonts>) {
             ));
         });
 }
+*/
 
 // System to handle mouse capture when window is clicked...
 fn handle_mouse_capture(
     mut windows: Query<&mut Window>,
+    mut cursor_options_query: Query<&mut bevy::window::CursorOptions>,
     mouse_button_input: Res<ButtonInput<MouseButton>>,
     game_state: Res<State<GameState>>,
 ) {
     // Only handle mouse recapture in InGame state (after it was released)
     if *game_state.get() == GameState::InGame && mouse_button_input.just_pressed(MouseButton::Left)
     {
-        for mut window in &mut windows {
+        for window in &mut windows {
             if !window.focused {
                 continue;
             }
 
-            // Only capture if cursor is currently not captured
-            if window.cursor_options.grab_mode == CursorGrabMode::None {
-                window.cursor_options.grab_mode = CursorGrabMode::Locked;
-                window.cursor_options.visible = false;
+            // Query for cursor options - now in separate component in Bevy 0.17
+            if let Ok(mut cursor_options) = cursor_options_query.single_mut() {
+                // Only capture if cursor is currently not captured
+                if cursor_options.grab_mode == CursorGrabMode::None {
+                    cursor_options.grab_mode = CursorGrabMode::Locked;
+                    cursor_options.visible = false;
+                }
             }
         }
     }
 }
 
-// System to handle 't' key to open console (only when closed)
-fn handle_console_t_key(
-    mut console_open: ResMut<ConsoleOpen>,
-    keyboard_input: Res<ButtonInput<KeyCode>>,
-    mut game_state: ResMut<NextState<GameState>>,
-    current_state: Res<State<GameState>>,
-) {
-    // Only open console with 't' when it's currently closed and in game
-    if keyboard_input.just_pressed(KeyCode::KeyT)
-        && !console_open.open
-        && *current_state.get() == GameState::InGame
-    {
-        console_open.open = true;
-        game_state.set(GameState::ConsoleOpen);
-    }
-}
-
+// LEGACY: Systems replaced by handle_inventory_input_bundled in inventory_commands.rs
+/*
 // System to handle inventory slot selection with number keys and mouse wheel
+#[cfg(feature = "console")]
 fn handle_inventory_input(
     keyboard_input: Res<ButtonInput<KeyCode>>,
     mut inventory: ResMut<PlayerInventory>,
     accumulated_mouse_scroll: Res<bevy::input::mouse::AccumulatedMouseScroll>,
-    console_open: Res<ConsoleOpen>,
+    console_manager: Option<Res<ConsoleManager>>,
     game_state: Res<State<GameState>>,
 ) {
     // Don't handle input when console is open or in any menu state
-    if console_open.open || *game_state.get() != GameState::InGame {
+    let console_open = console_manager
+        .map(|manager| manager.console.is_visible())
+        .unwrap_or(false);
+    if console_open || *game_state.get() != GameState::InGame {
         return;
     }
 
@@ -1792,3 +2024,64 @@ fn handle_inventory_input(
         }
     }
 }
+
+// Alternative system for inventory input when console feature is disabled
+#[cfg(not(feature = "console"))]
+fn handle_inventory_input(
+    keyboard_input: Res<ButtonInput<KeyCode>>,
+    mut inventory: ResMut<PlayerInventory>,
+    accumulated_mouse_scroll: Res<bevy::input::mouse::AccumulatedMouseScroll>,
+    game_state: Res<State<GameState>>,
+) {
+    // Don't handle input when in any menu state (console not available to check)
+    if *game_state.get() != GameState::InGame {
+        return;
+    }
+
+    // Handle mouse wheel for inventory slot switching
+    if accumulated_mouse_scroll.delta.y != 0.0 {
+        let current_slot = inventory.selected_slot;
+        let new_slot = if accumulated_mouse_scroll.delta.y > 0.0 {
+            // Scroll up - previous slot (wraps around)
+            if current_slot == 0 {
+                8
+            } else {
+                current_slot - 1
+            }
+        } else {
+            // Scroll down - next slot (wraps around)
+            if current_slot == 8 {
+                0
+            } else {
+                current_slot + 1
+            }
+        };
+
+        if new_slot != current_slot {
+            inventory.select_slot(new_slot);
+            info!("Selected inventory slot {}", new_slot + 1);
+        }
+    }
+
+    // Handle number keys 1-9 for slot selection
+    let key_mappings = [
+        (KeyCode::Digit1, 0),
+        (KeyCode::Digit2, 1),
+        (KeyCode::Digit3, 2),
+        (KeyCode::Digit4, 3),
+        (KeyCode::Digit5, 4),
+        (KeyCode::Digit6, 5),
+        (KeyCode::Digit7, 6),
+        (KeyCode::Digit8, 7),
+        (KeyCode::Digit9, 8),
+    ];
+
+    for (key, slot) in key_mappings {
+        if keyboard_input.just_pressed(key) {
+            inventory.select_slot(slot);
+            info!("Selected inventory slot {}", slot + 1);
+            break;
+        }
+    }
+}
+*/

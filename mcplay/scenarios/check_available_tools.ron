@@ -1,0 +1,82 @@
+// Quick check of available MCP tools
+Scenario(
+    name: "check_available_tools",
+    description: "Quick check to see what MCP tools are actually implemented",
+    version: "1.0",
+    
+    infrastructure: InfrastructureConfig(
+        mqtt_server: MqttServerConfig(
+            required: false, 
+            port: 1883,
+            config_file: None,
+            options: None,
+        ),
+        mqtt_observer: None,
+        mcp_server: None,
+        services: None,
+    ),
+    
+    clients: [
+        ClientConfig(
+            id: "check_client",
+            player_id: "check_client", 
+            mcp_port: 8080,
+            client_type: "desktop",
+            name: Some("Tool Check Client"),
+            config: None,
+        ),
+    ],
+    
+    steps: [
+        Step(
+            name: "mcp_initialize",
+            description: "Initialize MCP",
+            client: "check_client",
+            action: (
+                type: "mcp_call",
+                tool: "initialize", 
+                arguments: {
+                    "protocolVersion": "2024-11-05",
+                    "capabilities": {},
+                    "clientInfo": {
+                        "name": "tool-checker",
+                        "version": "1.0.0"
+                    }
+                },
+            ),
+            wait_before: 1000,
+            wait_after: 500,
+            timeout: 10000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: [],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+        
+        Step(
+            name: "list_tools",
+            description: "List all available MCP tools",
+            client: "check_client",
+            action: (
+                type: "mcp_call",
+                tool: "tools/list",
+                arguments: {},
+            ),
+            wait_before: 500,
+            wait_after: 1000,
+            timeout: 10000,
+            success_condition: Some((
+                type: "mcp_response",
+                expected: "success",
+            )),
+            depends_on: ["mcp_initialize"],
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+    ],
+)

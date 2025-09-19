@@ -1,0 +1,81 @@
+// Simple test scenario for indefinite MQTT server and desktop client testing
+// This starts MQTT server and desktop client, then waits indefinitely for manual testing
+Scenario(
+    name: "simple_test_indefinite",
+    description: "Starts MQTT server and desktop client, waits indefinitely for manual testing",
+    version: "1.0",
+    
+    // Infrastructure setup - MQTT server with observer for debugging
+    infrastructure: InfrastructureConfig(
+        mqtt_server: MqttServerConfig(
+            required: true,
+            port: 1883,
+            config_file: None,
+            options: None,
+        ),
+        mqtt_observer: Some(MqttObserverConfig(
+            required: true,  // Enable for debugging MQTT issues
+            topics: Some(["#"]),  // Monitor all topics
+            client_id: Some("debug_observer"),
+        )),
+        mcp_server: None,
+        services: None,
+    ),
+    
+    // Single client for testing
+    clients: [
+        ClientConfig(
+            id: "alice",
+            player_id: "alice", 
+            mcp_port: 3001,
+            client_type: "desktop",
+            name: Some("Alice - Test Client"),
+            config: None,
+        ),
+    ],
+    
+    // Single step - just keep everything running indefinitely
+    steps: [
+        // Single step: Wait indefinitely for manual testing
+        Step(
+            name: "wait_indefinitely",
+            description: "Keep MQTT server and desktop client running indefinitely for manual testing - press Ctrl+C to exit",
+            client: "orchestrator",
+            action: (
+                type: "wait_condition",
+                condition: "manual_exit",
+                expected_value: Some("never"),
+                timeout: 86400000,  // 24 hours timeout (essentially indefinite)
+            ),
+            wait_before: 3000,    // Wait 3 seconds for client to start
+            wait_after: 0,
+            timeout: 86400000,   // 24 hours
+            success_condition: None,
+            depends_on: [],       // No dependencies - start immediately
+            timing: None,
+            conditions: None,
+            expectations: None,
+        ),
+    ],
+    
+    // Global scenario configuration for long-running test
+    config: Some(ScenarioConfig(
+        timeout_ms: Some(86400000),  // 24 hours global timeout
+        logging: Some(LoggingConfig(
+            level: Some("info"),
+            log_mqtt: Some(true),
+            log_client_actions: Some(true),
+            filters: Some(["world/*", "mcp/*", "mqtt/*", "multiplayer/*", "ui/*"]),
+        )),
+        environment: Some({
+            "RUST_LOG": "info,rumqttc=warn",  // Reduce MQTT client noise
+            "SCENARIO_NAME": "simple_test_indefinite",
+            "ENABLE_MCP": "true",
+        }),
+        settings: Some({
+            "auto_cleanup": false,  // Don't auto cleanup for manual testing
+            "preserve_logs": true,
+            "manual_mode": true,
+        }),
+    )),
+)

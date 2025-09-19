@@ -1,6 +1,5 @@
 use crate::fonts::Fonts;
 use bevy::prelude::*;
-use bevy_console::PrintConsoleLine;
 
 #[derive(Component)]
 pub struct ErrorIndicator;
@@ -107,11 +106,7 @@ fn update_error_indicator(
     }
 }
 
-fn capture_error_logs(
-    _error_resource: ResMut<ErrorResource>,
-    _time: Res<Time>,
-    _print_console_line: EventWriter<PrintConsoleLine>,
-) {
+fn capture_error_logs(_error_resource: ResMut<ErrorResource>, _time: Res<Time>) {
     // This is a placeholder - in a real implementation you would hook into the logging system
     // For now, we'll just trigger the error indicator when certain conditions are met
 
@@ -121,16 +116,11 @@ fn capture_error_logs(
 
 // Function to trigger an error (can be called from other systems)
 #[allow(dead_code)]
-pub fn trigger_error(
-    mut error_resource: ResMut<ErrorResource>,
-    time: Res<Time>,
-    mut print_console_line: EventWriter<PrintConsoleLine>,
-    message: String,
-) {
+pub fn trigger_error(mut error_resource: ResMut<ErrorResource>, time: Res<Time>, message: String) {
     error_resource.indicator_on = true;
     error_resource.last_error_time = time.elapsed_secs();
     error_resource.messages.push(message.clone());
 
-    // Send to console
-    print_console_line.write(PrintConsoleLine::new(format!("ERROR: {}", message)));
+    // Log error message
+    error!("ERROR: {}", message);
 }

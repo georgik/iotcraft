@@ -10,12 +10,14 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 # Core dependencies that work on both desktop and web
-bevy = { version = "0.16.1", features = ["webp"] }
-bevy_console = "0.14.1"
+# Using Bevy 0.17-dev from git for latest features
+bevy = { git = "https://github.com/bevyengine/bevy.git", rev = "8e441c3", features = ["webp"] }
+
 tracing = "0.1"
 log = "0.4"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+ron = "0.8"
 chrono = { version = "0.4", features = ["serde"] }
 rand = "0.9"
 hex = "0.4"
@@ -23,15 +25,18 @@ fluent = "0.17.0"
 fluent-bundle = "0.16.0"
 fluent-syntax = "0.12.0"
 unic-langid = "0.9.6"
-avian3d = "0.3.1"
 futures = "0.3"
+futures-util = "0.3"
 anyhow = "1.0"
 uuid = { version = "1.0", features = ["v4"] }
 bytes = "1.0"
 # Async channels for Bevy-compatible communication
 async-channel = "2.5"
+# Compression for chunked world data
+flate2 = "1.0"
 # Performance optimization dependencies
 bytemuck = { version = "1.16", features = ["derive"] } # GPU data alignment
+iotcraft-mcp-protocol = { version = "0.1.0", path = "../iotcraft-mcp-protocol", features = ["serde"] }
 
 # Web-specific dependencies
 [target.'cfg(target_arch = "wasm32")'.dependencies]
@@ -49,10 +54,17 @@ web-sys = { version = "0.3", features = [
   "console",
   "Location",
   "Storage",
+  "HtmlInputElement",
+  "HtmlElement",
+  "Document",
+  "Element",
+  "CssStyleDeclaration",
+  "Node",
 ] }
 js-sys = "0.3"
 wasm-bindgen-futures = "0.4"
 console_error_panic_hook = "0.1"
+
 # Configure both getrandom versions for WASM
 getrandom = { version = "0.2", features = ["js"] }
 # Add getrandom v0.3 directly to enable wasm_js feature
@@ -61,49 +73,73 @@ getrandom_03 = { package = "getrandom", version = "0.3", features = ["wasm_js"] 
 # Desktop-specific dependencies (non-WASM)
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 rumqttc = "0.24.0"
-rumqttd = "0.19.0"
-tokio = { version = "1.47", features = ["rt-multi-thread", "macros", "fs", "net"] }
+# Use native-tls instead of rustls to avoid version conflicts
+rumqttd = { version = "0.19.0", default-features = false, features = ["use-native-tls", "websocket"] }
+# Force compatible rustls versions to avoid duplicate compilation (for rumqttc only)
+rustls = "0.22.4"  # Use the newer version (from rumqttc)
+tokio-rustls = "0.25.0"  # Use the newer version (from rumqttc)
+rustls-webpki = "0.102.8"  # Use the newer version (from rumqttc)
+tokio = { version = "1.47", features = ["rt-multi-thread", "macros", "fs", "net", "process", "signal"] }
 axum = "0.8"
 tower = "0.5"
 tower-http = { version = "0.6", features = ["cors"] }
 clap = { version = "4.5", features = ["derive"] }
 tracing-subscriber = "0.3"
+env_logger = "0.10"
 dirs = "6.0"
 whoami = "1.5"
 tokio-util = { version = "0.7", features = ["codec"] }
 rayon = "1.8" # Parallel processing
 tempfile = "3.8" # For testing async file operations
+crossterm = "0.29.0" # Terminal manipulation - desktop only
 
-# Enable max optimizations for dependencies (incl. Bevy), but not for our code
-# This keeps recompilations fast while making Bevy run at good performance
-[profile.dev.package."*"]
-opt-level = 3
-
-# Enable a small amount of optimization for our own code if needed
-[profile.dev]
-opt-level = 1
-
-# Optimize for size in WASM builds (important for web loading times)
-[profile.release]
-opt-level = 3
-lto = "thin"
-codegen-units = 1
-
-# Special profile for WASM release builds
-[profile.wasm-release]
-inherits = "release"
-opt-level = "s"  # Optimize for size
-lto = true
-codegen-units = 1
-strip = true
+# Profile definitions moved to workspace root (/Volumes/ssdt5/Users/georgik/projects/iotcraft/Cargo.toml)
+# to avoid 'profiles for the non root package will be ignored' warnings
 
 [build-dependencies]
 chrono = "0.4"
 
 # Workspace for xtask
-[workspace]
-members = [".", "xtask"]
+[features]
+default = ["console"]
+# Convenience feature aliases
+console = []                          # Default to Simple console (no extra deps)
+# World features
+chunk_world = []                      # Enable chunk-based world support (future feature)
+# Note: Integration testing is now handled by mcplay scenarios
+
+
+
+# Binary configurations
+# Desktop-only main binary
+[[bin]]
+name = "iotcraft-dekstop-client"
+path = "src/main.rs"
+required-features = []
+
+# Desktop-only binaries - exclude from WASM builds
+[[bin]]
+name = "mcp_test_client"
+path = "src/bin/mcp_test_client.rs"
+required-features = []
+
+[[bin]]
+name = "mqtt_test"
+path = "src/bin/mqtt_test.rs"
+required-features = []
+
 
 # Custom commands (use via .cargo/config.toml for local aliases)
 # For now, use: cargo run --package xtask -- <command>
+
+# Test configuration
+[dev-dependencies]
+# Testing utilities
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+tokio-test = "0.4"
+
+# Integration testing is now handled by mcplay scenarios
+# No custom integration test configuration needed
+
+# Test-specific features - moved to main features section above
 

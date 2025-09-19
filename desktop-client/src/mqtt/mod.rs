@@ -3,13 +3,16 @@ pub mod mqtt_types;
 
 // Platform-specific MQTT implementations
 #[cfg(not(target_arch = "wasm32"))]
+pub mod core_service;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod native;
 #[cfg(target_arch = "wasm32")]
 pub mod web;
 
 // Export the appropriate plugin based on target
+// Use the new CoreMqttServicePlugin for desktop (unified connection)
 #[cfg(not(target_arch = "wasm32"))]
-pub use native::NativeMqttPlugin as MqttPlugin;
+pub use core_service::CoreMqttServicePlugin as MqttPlugin;
 #[cfg(target_arch = "wasm32")]
 pub use web::WebMqttPlugin as MqttPlugin;
 

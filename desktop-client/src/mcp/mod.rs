@@ -1,3 +1,5 @@
+pub mod mcp_commands;
+pub mod mcp_params;
 pub mod mcp_protocol;
 pub mod mcp_server;
 pub mod mcp_tools;
