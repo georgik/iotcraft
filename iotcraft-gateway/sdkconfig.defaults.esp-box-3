@@ -5,6 +5,10 @@
 # - ESP32-S3 dual-core Xtensa
 
 CONFIG_IDF_TARGET="esp32s3"
+
+# Board selection
+CONFIG_SDL_BSP_ESP_BOX_3=y
+
 CONFIG_ESPTOOLPY_FLASHMODE_QIO=y
 CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
 
@@ -41,3 +45,13 @@ CONFIG_ESP_CONSOLE_SECONDARY_USB_SERIAL_JTAG=y
 # Disable LVGL in ESP-BOX-3 BSP (we're using SDL3)
 # This is equivalent to BSP_CONFIG_NO_GRAPHIC_LIB=1
 CONFIG_BSP_CONFIG_NO_GRAPHIC_LIB=y
+
+# This file was generated using idf.py save-defconfig. It can be edited manually.
+# Espressif IoT Development Framework (ESP-IDF) 6.0.0 Project Minimal Configuration
+#
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_COMPILER_OPTIMIZATION_PERF=y
+CONFIG_LWIP_IP_FORWARD=y
+CONFIG_LWIP_IPV4_NAPT=y
+CONFIG_IDF_EXPERIMENTAL_FEATURES=y
+
