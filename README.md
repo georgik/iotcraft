@@ -53,7 +53,7 @@ IoTCraft is a multi-component Rust project showcasing MQTT-controlled IoT device
   mosquitto_pub -h localhost -p 1883 -t home/cube/light -m "ON" -i mqtt-client
   ```
 
-- **esp32-c6-client**  
+- **esp32-c6-client**
   An embedded **no_std** application for the ESP32-C6 using Embassy and ESP HAL.  
   - Connects to Wi-Fi, announces itself via MQTT (`devices/announce` topic) with a unique device ID using random suffix
   - Subscribes to device-specific lamp control topic (`home/{device_id}/light`) and toggles an LED
@@ -61,9 +61,18 @@ IoTCraft is a multi-component Rust project showcasing MQTT-controlled IoT device
   - Reads the on-board temperature sensor via I2C and publishes readings (`home/sensor/temperature`)
   - Uses NVS (Non-Volatile Storage) to persist device properties between reboots
 
-- **esp32-c3-devkit-rust-1**  
+- **esp32-c3-devkit-rust-1**
   An embedded **no_std** application for the ESP32-C3-DevKit-RS board using Embassy.  
-  Similar to the C6 client but adapted to the C3’s GPIO layout and peripherals.
+  Similar to the C6 client but adapted to the C3's GPIO layout and peripherals.
+
+- **esp32-c6-swift-client**
+  **Embedded Swift** application for ESP32-C6 with full IoTCraft integration.
+  - Native ESP-IDF integration with WiFi and MQTT connectivity
+  - NeoPixel visual feedback for device status and light control
+  - Complete IoTCraft MQTT topic compatibility with device announcements
+  - Dynamic device ID generation and position update handling
+  - Custom partition table optimized for Swift binary size
+  - Modern Swift-on-embedded development showcase
 
 ## Getting Started
 
@@ -131,20 +140,44 @@ cargo run
 
 ### ESP32 Clients
 
+#### Rust Clients (Embassy + ESP-HAL)
 Set Wi-Fi SSID/PASSWORD and broker address in the embedded source, then flash:
 
 ```bash
 export SSID="your_wifi_ssid"
 export PASSWORD="your_wifi_password"
 export SERVER_IP="your_mqtt_broker_ip"
-# ESP32-C6
+# ESP32-C6 Rust
 cd esp32-c6-client
 cargo run --release
 
-# ESP32-C3-DevKit
+# ESP32-C3-DevKit Rust
 cd esp32-c3-devkit-rust-1
 cargo run --release
 ```
+
+#### Swift Client (ESP-IDF)
+Modern Embedded Swift with full IoTCraft integration:
+
+```bash
+# Configure WiFi credentials in main/Main.swift
+# let ssid = "your-wifi-name"
+# let password = "your-wifi-password"
+
+# ESP32-C6 Swift with NeoPixel feedback
+cd esp32-c6-swift-client
+idf.py set-target esp32c6
+idf.py build
+idf.py flash monitor
+```
+
+**Swift Client Features:**
+- 🎨 **NeoPixel Status**: Visual feedback for WiFi/MQTT connection and light control
+- 📱 **Native ESP-IDF**: Production-ready WiFi and MQTT integration
+- 🔧 **IoTCraft Compatible**: Full device announcement and control topic support
+- ⚡ **Optimized Build**: Custom partition table for Swift binary requirements
+
+**For detailed Swift client documentation:** See [esp32-c6-swift-client/README.md](esp32-c6-swift-client/README.md)
 
 #### Simulation
 
