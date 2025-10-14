@@ -8,6 +8,7 @@ use clap::{Arg, Command};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::io::{BufRead, Write};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -1351,6 +1352,620 @@ fn extract_json_path<'a>(
     Some(current)
 }
 
+// MCP Server Implementation
+
+#[derive(Clone)]
+struct ToolDefinition {
+    name: String,
+    description: String,
+    input_schema: serde_json::Value,
+    examples: Vec<String>,
+}
+
+struct MCPServer {
+    tools: HashMap<String, ToolDefinition>,
+}
+
+impl MCPServer {
+    fn new() -> Self {
+        let mut tools = HashMap::new();
+
+        // Register run_scenario tool
+        tools.insert("run_scenario".to_string(), ToolDefinition {
+            name: "run_scenario".to_string(),
+            description: "Run an IoTCraft testing scenario with full orchestration support (MQTT, clients, cross-platform testing)".to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "scenario_file": {
+                        "type": "string",
+                        "description": "Path to scenario RON file (relative to scenarios/ directory or absolute path)"
+                    },
+                    "verbose": {
+                        "type": "boolean",
+                        "description": "Enable verbose logging output",
+                        "default": false
+                    },
+                    "keep_alive": {
+                        "type": "boolean",
+                        "description": "Keep all processes running after scenario completion for manual testing",
+                        "default": false
+                    },
+                    "mqtt_port": {
+                        "type": "number",
+                        "description": "Override MQTT server port (default: 1883)"
+                    }
+                },
+                "required": ["scenario_file"]
+            }),
+            examples: vec![
+                "Run cross-platform test: {\"scenario_file\": \"alice_desktop_bob_wasm_visual.ron\"}".to_string(),
+                "Run with keep-alive for manual testing: {\"scenario_file\": \"alice_desktop_bob_wasm_visual.ron\", \"keep_alive\": true}".to_string(),
+                "Run medieval world test: {\"scenario_file\": \"alice_medieval_world_test.ron\"}".to_string(),
+                "Run four-player multiplayer: {\"scenario_file\": \"four_player_multiplayer_test.ron\", \"verbose\": true}".to_string(),
+            ],
+        });
+
+        // Register validate_scenario tool
+        tools.insert("validate_scenario".to_string(), ToolDefinition {
+            name: "validate_scenario".to_string(),
+            description: "Validate a scenario file without executing it - checks RON syntax, client references, step dependencies".to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "scenario_file": {
+                        "type": "string",
+                        "description": "Path to scenario RON file to validate"
+                    }
+                },
+                "required": ["scenario_file"]
+            }),
+            examples: vec![
+                "Validate scenario: {\"scenario_file\": \"alice_desktop_bob_wasm_visual.ron\"}".to_string(),
+                "Validate custom scenario: {\"scenario_file\": \"scenarios/my_custom_test.ron\"}".to_string(),
+            ],
+        });
+
+        // Register list_scenarios tool
+        tools.insert("list_scenarios".to_string(), ToolDefinition {
+            name: "list_scenarios".to_string(),
+            description: "List all available scenarios in the scenarios/ directory with validation status and descriptions".to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "validate_all": {
+                        "type": "boolean",
+                        "description": "Also validate all scenarios and show detailed report",
+                        "default": false
+                    }
+                }
+            }),
+            examples: vec![
+                "List all scenarios: {}".to_string(),
+                "List with validation: {\"validate_all\": true}".to_string(),
+            ],
+        });
+
+        // Register search_logs tool
+        tools.insert("search_logs".to_string(), ToolDefinition {
+            name: "search_logs".to_string(),
+            description: "Search and correlate events across log files from scenario runs - useful for debugging issues".to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "queries": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Search terms to look for in log files"
+                    },
+                    "logs_dir": {
+                        "type": "string",
+                        "description": "Directory containing log files (default: logs/)",
+                        "default": "logs"
+                    },
+                    "verbose": {
+                        "type": "boolean",
+                        "description": "Show verbose search results",
+                        "default": false
+                    }
+                },
+                "required": ["queries"]
+            }),
+            examples: vec![
+                "Search for errors: {\"queries\": [\"error\", \"failed\"]}".to_string(),
+                "Search MQTT issues: {\"queries\": [\"connection\", \"mqtt\"], \"verbose\": true}".to_string(),
+            ],
+        });
+
+        // Register build_wasm tool
+        tools.insert("build_wasm".to_string(), ToolDefinition {
+            name: "build_wasm".to_string(),
+            description: "Build WASM client for browser testing - builds the IoTCraft desktop client for WebAssembly".to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "release": {
+                        "type": "boolean",
+                        "description": "Build in release mode for better performance",
+                        "default": true
+                    }
+                }
+            }),
+            examples: vec![
+                "Build WASM release: {}".to_string(),
+                "Build WASM debug: {\"release\": false}".to_string(),
+            ],
+        });
+
+        // Register serve_web tool
+        tools.insert("serve_web".to_string(), ToolDefinition {
+            name: "serve_web".to_string(),
+            description: "Start web server to serve the WASM client - hosts the built client for browser access".to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "port": {
+                        "type": "number",
+                        "description": "Port to serve on (default: 8000)",
+                        "default": 8000
+                    },
+                    "background": {
+                        "type": "boolean",
+                        "description": "Run server in background",
+                        "default": true
+                    }
+                }
+            }),
+            examples: vec![
+                "Start web server: {}".to_string(),
+                "Serve on custom port: {\"port\": 3000}".to_string(),
+                "Run in foreground: {\"background\": false}".to_string(),
+            ],
+        });
+
+        Self { tools }
+    }
+
+    async fn run(&mut self) -> io::Result<()> {
+        let stdin = io::stdin();
+        let mut stdin = stdin.lock();
+
+        // Send a startup message to stderr for debugging
+        eprintln!("mcplay MCP Server starting...");
+
+        loop {
+            let mut line = String::new();
+            match stdin.read_line(&mut line) {
+                Ok(0) => {
+                    eprintln!("MCP server received EOF, shutting down");
+                    break; // EOF
+                }
+                Ok(_) => {
+                    let trimmed = line.trim();
+                    if trimmed.is_empty() {
+                        continue;
+                    }
+
+                    eprintln!("MCP server received: {}", trimmed);
+
+                    match serde_json::from_str::<serde_json::Value>(trimmed) {
+                        Ok(request) => {
+                            // Check if this is a notification (no id) or a request
+                            if request.get("id").is_some() {
+                                // This is a request, send a response
+                                let response = self.handle_request(&request).await;
+                                let response_str = serde_json::to_string(&response)?;
+                                println!("{}", response_str);
+                                eprintln!("MCP server responded: {}", response_str);
+                                io::stdout().flush()?;
+                            } else {
+                                // This is a notification, handle but don't respond
+                                eprintln!(
+                                    "MCP server handling notification: {}",
+                                    request.get("method").unwrap_or(&serde_json::Value::String(
+                                        "unknown".to_string()
+                                    ))
+                                );
+                                self.handle_notification(&request).await;
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!("MCP server JSON parse error: {}", e);
+                            // Send an error response
+                            let error_response = serde_json::json!({
+                                "jsonrpc": "2.0",
+                                "error": {
+                                    "code": -32700,
+                                    "message": "Parse error"
+                                },
+                                "id": null
+                            });
+                            println!("{}", serde_json::to_string(&error_response)?);
+                            io::stdout().flush()?;
+                        }
+                    }
+                }
+                Err(e) => {
+                    eprintln!("MCP server IO error: {}", e);
+                    return Err(e);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    async fn handle_request(&self, request: &serde_json::Value) -> serde_json::Value {
+        let method = request.get("method").and_then(|m| m.as_str()).unwrap_or("");
+        let id = request
+            .get("id")
+            .cloned()
+            .unwrap_or(serde_json::Value::Null);
+
+        let result = match method {
+            "initialize" => self.handle_initialize(),
+            "tools/list" => self.handle_tools_list(),
+            "tools/call" => self.handle_tools_call(request).await,
+            _ => {
+                return serde_json::json!({
+                    "jsonrpc": "2.0",
+                    "error": {
+                        "code": -32601,
+                        "message": "Method not found"
+                    },
+                    "id": id
+                });
+            }
+        };
+
+        // Add the ID to the response
+        let mut response = result;
+        if let serde_json::Value::Object(ref mut map) = response {
+            map.insert("id".to_string(), id);
+        }
+        response
+    }
+
+    async fn handle_notification(&self, notification: &serde_json::Value) {
+        let method = notification
+            .get("method")
+            .and_then(|m| m.as_str())
+            .unwrap_or("");
+
+        match method {
+            "initialized" => {
+                eprintln!("MCP server initialized successfully");
+            }
+            _ => {
+                eprintln!("Unknown notification method: {}", method);
+            }
+        }
+    }
+
+    fn handle_initialize(&self) -> serde_json::Value {
+        serde_json::json!({
+            "jsonrpc": "2.0",
+            "result": {
+                "protocolVersion": "2024-11-05",
+                "capabilities": {
+                    "tools": {}
+                },
+                "serverInfo": {
+                    "name": "mcplay",
+                    "version": "1.0.0",
+                    "description": "MCP server for IoTCraft mcplay orchestration and testing tools"
+                }
+            }
+        })
+    }
+
+    fn handle_tools_list(&self) -> serde_json::Value {
+        let tools: Vec<serde_json::Value> = self
+            .tools
+            .values()
+            .map(|tool| {
+                serde_json::json!({
+                    "name": tool.name,
+                    "description": tool.description,
+                    "inputSchema": tool.input_schema
+                })
+            })
+            .collect();
+
+        serde_json::json!({
+            "jsonrpc": "2.0",
+            "result": {
+                "tools": tools
+            }
+        })
+    }
+
+    async fn handle_tools_call(&self, request: &serde_json::Value) -> serde_json::Value {
+        let params = request.get("params").unwrap_or(&serde_json::Value::Null);
+        let tool_name = params.get("name").and_then(|n| n.as_str()).unwrap_or("");
+        let default_args = serde_json::Value::Object(Default::default());
+        let arguments = params.get("arguments").unwrap_or(&default_args);
+
+        match tool_name {
+            "run_scenario" => self.call_run_scenario(arguments).await,
+            "validate_scenario" => self.call_validate_scenario(arguments).await,
+            "list_scenarios" => self.call_list_scenarios(arguments).await,
+            "search_logs" => self.call_search_logs(arguments).await,
+            "build_wasm" => self.call_build_wasm(arguments).await,
+            "serve_web" => self.call_serve_web(arguments).await,
+            _ => serde_json::json!({
+                "jsonrpc": "2.0",
+                "error": {
+                    "code": -32602,
+                    "message": format!("Unknown tool: {}", tool_name)
+                }
+            }),
+        }
+    }
+
+    async fn call_run_scenario(&self, args: &serde_json::Value) -> serde_json::Value {
+        let scenario_file = match args.get("scenario_file").and_then(|s| s.as_str()) {
+            Some(file) => file,
+            None => {
+                return serde_json::json!({
+                    "jsonrpc": "2.0",
+                    "error": {
+                        "code": -32602,
+                        "message": "scenario_file parameter required"
+                    }
+                });
+            }
+        };
+
+        let mut cmd_args = vec!["run", "--"];
+
+        // Handle scenario file path - add scenarios/ prefix if not absolute
+        let scenario_path =
+            if scenario_file.starts_with('/') || scenario_file.contains("scenarios/") {
+                scenario_file.to_string()
+            } else {
+                format!("scenarios/{}", scenario_file)
+            };
+        cmd_args.push(&scenario_path);
+
+        // Add verbose flag if requested
+        if args
+            .get("verbose")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false)
+        {
+            cmd_args.push("--verbose");
+        }
+
+        // Add keep-alive flag if requested
+        if args
+            .get("keep_alive")
+            .and_then(|k| k.as_bool())
+            .unwrap_or(false)
+        {
+            cmd_args.push("--keep-alive");
+        }
+
+        // Add MQTT port override if specified
+        let mqtt_port_str;
+        if let Some(port) = args.get("mqtt_port").and_then(|p| p.as_f64()) {
+            mqtt_port_str = port.to_string();
+            cmd_args.push("--mqtt-port");
+            cmd_args.push(&mqtt_port_str);
+        }
+
+        self.run_cargo_command(&cmd_args).await
+    }
+
+    async fn call_validate_scenario(&self, args: &serde_json::Value) -> serde_json::Value {
+        let scenario_file = match args.get("scenario_file").and_then(|s| s.as_str()) {
+            Some(file) => file,
+            None => {
+                return serde_json::json!({
+                    "jsonrpc": "2.0",
+                    "error": {
+                        "code": -32602,
+                        "message": "scenario_file parameter required"
+                    }
+                });
+            }
+        };
+
+        let scenario_path =
+            if scenario_file.starts_with('/') || scenario_file.contains("scenarios/") {
+                scenario_file.to_string()
+            } else {
+                format!("scenarios/{}", scenario_file)
+            };
+
+        let cmd_args = vec!["run", "--", &scenario_path, "--validate"];
+        self.run_cargo_command(&cmd_args).await
+    }
+
+    async fn call_list_scenarios(&self, args: &serde_json::Value) -> serde_json::Value {
+        let mut cmd_args = vec!["run", "--", "--list-scenarios"];
+
+        if args
+            .get("validate_all")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false)
+        {
+            cmd_args = vec!["run", "--", "--validate-all"];
+        }
+
+        self.run_cargo_command(&cmd_args).await
+    }
+
+    async fn call_search_logs(&self, args: &serde_json::Value) -> serde_json::Value {
+        let queries = match args.get("queries").and_then(|q| q.as_array()) {
+            Some(queries) => queries,
+            None => {
+                return serde_json::json!({
+                    "jsonrpc": "2.0",
+                    "error": {
+                        "code": -32602,
+                        "message": "queries parameter required"
+                    }
+                });
+            }
+        };
+
+        let mut cmd_args = vec!["run", "--"];
+
+        for query in queries {
+            if let Some(q_str) = query.as_str() {
+                cmd_args.push("--search-logs");
+                cmd_args.push(q_str);
+            }
+        }
+
+        if args
+            .get("verbose")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false)
+        {
+            cmd_args.push("--verbose");
+        }
+
+        let logs_dir = args
+            .get("logs_dir")
+            .and_then(|d| d.as_str())
+            .unwrap_or("logs");
+        cmd_args.push("--logs-dir");
+        cmd_args.push(logs_dir);
+
+        self.run_cargo_command(&cmd_args).await
+    }
+
+    async fn call_build_wasm(&self, args: &serde_json::Value) -> serde_json::Value {
+        let release = args
+            .get("release")
+            .and_then(|r| r.as_bool())
+            .unwrap_or(true);
+
+        let mut cmd_args = vec!["ctask", "web-build"];
+        if release {
+            cmd_args.push("--release");
+        }
+
+        // Run from desktop-client directory
+        self.run_command_in_dir("cargo", &cmd_args, "../desktop-client")
+            .await
+    }
+
+    async fn call_serve_web(&self, args: &serde_json::Value) -> serde_json::Value {
+        let port = args.get("port").and_then(|p| p.as_f64()).unwrap_or(8000.0);
+        let port_str = port.to_string();
+
+        let cmd_args = vec!["ctask", "web-serve", "--port", &port_str];
+
+        // Run from desktop-client directory
+        self.run_command_in_dir("cargo", &cmd_args, "../desktop-client")
+            .await
+    }
+
+    async fn run_cargo_command(&self, args: &[&str]) -> serde_json::Value {
+        self.run_command_in_dir("cargo", args, ".").await
+    }
+
+    async fn run_command_in_dir(
+        &self,
+        command: &str,
+        args: &[&str],
+        working_dir: &str,
+    ) -> serde_json::Value {
+        use std::io::BufReader as StdBufReader;
+        use std::process::{Command, Stdio};
+
+        match Command::new(command)
+            .args(args)
+            .current_dir(working_dir)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+        {
+            Ok(mut child) => {
+                let stdout = child.stdout.take().unwrap();
+                let stderr = child.stderr.take().unwrap();
+
+                let stdout_reader = StdBufReader::new(stdout);
+                let stderr_reader = StdBufReader::new(stderr);
+
+                let mut output_lines = Vec::new();
+                let mut error_lines = Vec::new();
+
+                // Read stdout
+                for line in stdout_reader.lines() {
+                    if let Ok(line) = line {
+                        output_lines.push(line);
+                    }
+                }
+
+                // Read stderr
+                for line in stderr_reader.lines() {
+                    if let Ok(line) = line {
+                        error_lines.push(line);
+                    }
+                }
+
+                let exit_status = match child.wait() {
+                    Ok(status) => status,
+                    Err(_) => {
+                        return serde_json::json!({
+                            "jsonrpc": "2.0",
+                            "error": {
+                                "code": -32603,
+                                "message": "Failed to wait for process"
+                            }
+                        });
+                    }
+                };
+
+                let output_text = if !output_lines.is_empty() {
+                    output_lines.join("\n")
+                } else {
+                    "No output".to_string()
+                };
+
+                let error_text = if !error_lines.is_empty() {
+                    format!("\n\nErrors/Warnings:\n{}", error_lines.join("\n"))
+                } else {
+                    String::new()
+                };
+
+                serde_json::json!({
+                    "jsonrpc": "2.0",
+                    "result": {
+                        "content": [{
+                            "type": "text",
+                            "text": format!("Command: {} {} (in {})\n\nExit code: {}\n\nOutput:\n{}{}",
+                                          command,
+                                          args.join(" "),
+                                          working_dir,
+                                          exit_status.code().unwrap_or(-1),
+                                          output_text,
+                                          error_text)
+                        }]
+                    }
+                })
+            }
+            Err(e) => serde_json::json!({
+                "jsonrpc": "2.0",
+                "error": {
+                    "code": -32603,
+                    "message": format!("Failed to execute command: {}", e)
+                }
+            }),
+        }
+    }
+}
+
+/// Run mcplay as an MCP server
+async fn run_mcp_server() -> Result<(), Box<dyn std::error::Error>> {
+    let mut server = MCPServer::new();
+    server.run().await?;
+    Ok(())
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let matches = Command::new("mcplay - IoTCraft MCP Scenario Player")
@@ -1420,7 +2035,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .value_name("DIR")
                 .default_value("logs"),
         )
+        .arg(
+            Arg::new("mcp-server")
+                .long("mcp-server")
+                .help("Run as MCP (Model Context Protocol) server for Warp terminal integration")
+                .action(clap::ArgAction::SetTrue),
+        )
         .get_matches();
+
+    // Check if running as MCP server
+    if matches.get_flag("mcp-server") {
+        return run_mcp_server().await;
+    }
 
     if matches.get_flag("list-scenarios") {
         list_scenarios().await?;
@@ -1962,7 +2588,7 @@ async fn start_infrastructure(
 
             // Start MQTT server from ../mqtt-server directory
             println!(
-                "[DEBUG] About to spawn MQTT server process: cargo run --release -- --port {}",
+                "[DEBUG] About to spawn MQTT server process: cargo run --release -- --port {} --disable-mdns",
                 port
             );
             println!("[DEBUG] Working directory: ../mqtt-server");
@@ -1974,7 +2600,14 @@ async fn start_infrastructure(
 
             let mut mqtt_process = TokioCommand::new("cargo")
                 .current_dir("../mqtt-server")
-                .args(&["run", "--release", "--", "--port", &port.to_string()])
+                .args(&[
+                    "run",
+                    "--release",
+                    "--",
+                    "--port",
+                    &port.to_string(),
+                    "--disable-mdns",
+                ])
                 .stdout(std::process::Stdio::piped())
                 .stderr(std::process::Stdio::piped())
                 .spawn()

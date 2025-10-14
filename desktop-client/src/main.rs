@@ -32,6 +32,8 @@ mod debug;
 #[cfg(not(target_arch = "wasm32"))]
 mod devices;
 #[cfg(not(target_arch = "wasm32"))]
+mod discovery;
+#[cfg(not(target_arch = "wasm32"))]
 mod environment;
 #[cfg(not(target_arch = "wasm32"))]
 mod fonts;
@@ -1391,15 +1393,16 @@ mod wall_command_tests {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn main() {
+#[tokio::main]
+async fn main() {
     let args = Args::parse();
 
     // Logging is now handled by Bevy's LogPlugin in DefaultPlugins
 
     // Note: Script execution is now handled by the ScriptPlugin
 
-    // Load MQTT configuration from CLI args and environment variables
-    let mqtt_config = MqttConfig::from_env_with_override(args.mqtt_server);
+    // Load MQTT configuration with mDNS discovery fallback
+    let mqtt_config = MqttConfig::from_env_with_discovery(args.mqtt_server).await;
     info!("Using MQTT broker: {}", mqtt_config.broker_address());
 
     // Determine the language configuration

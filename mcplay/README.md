@@ -32,6 +32,12 @@ mcplay is a comprehensive orchestration and testing platform for IoTCraft that e
 - **Rich Messaging**: Multi-line formatted messages with emoji indicators
 - **Keep-Alive Mode**: Extended manual testing sessions with `--keep-alive` flag
 
+### 🤖 **MCP Integration**
+- **Built-in MCP Server**: Model Context Protocol server for Warp Terminal integration
+- **AI Agent Tools**: Expose scenario orchestration to Warp's AI agents
+- **Natural Language Control**: Run scenarios using conversational commands
+- **Comprehensive Tool Set**: 6 specialized tools for testing and development
+
 ## Architecture Benefits
 
 This project was extracted from the main `desktop-client` as a sibling project to:
@@ -107,6 +113,9 @@ cargo run -- --mqtt-port 1884 <scenario.ron>
 
 # Extended manual testing mode
 cargo run -- --keep-alive <scenario.ron>
+
+# Run as MCP server for Warp Terminal integration
+cargo run -- --mcp-server
 
 # View help
 cargo run -- --help
