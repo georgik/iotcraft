@@ -29,11 +29,6 @@ impl Plugin for EnvironmentPlugin {
                     rotate_logo_system,
                     update_thermometer_material,
                     update_thermometer_scale,
-                ),
-            )
-            .add_systems(
-                Update,
-                (
                     #[cfg(feature = "console")]
                     blinking_system,
                     #[cfg(not(feature = "console"))]
@@ -41,10 +36,10 @@ impl Plugin for EnvironmentPlugin {
                 ),
             );
 
-        // Add background world setup system for desktop only
+        // Add background world setup system for desktop only - run in PreUpdate to avoid conflicts
         #[cfg(not(target_arch = "wasm32"))]
         app.add_systems(
-            Update,
+            PreUpdate,
             setup_background_world
                 .run_if(|setup_complete: Res<BackgroundWorldSetupComplete>| !setup_complete.0)
                 .run_if(resource_exists::<PendingCommands>),

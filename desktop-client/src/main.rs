@@ -1502,35 +1502,74 @@ async fn main() {
     app.insert_resource(BlinkState::default());
 
     // .add_systems(Update, draw_cursor) // Disabled: InteractionPlugin handles cursor drawing
+
+    // Define SystemSets for proper ordering
+    #[derive(SystemSet, Debug, Hash, PartialEq, Eq, Clone)]
+    enum GameSystemSet {
+        Commands,  // Execute commands and spawn entities
+        Logic,     // Game logic that depends on spawned entities
+        Rendering, // Visual updates and UI
+    }
+
+    // Configure system set ordering
+    app.configure_sets(
+        Update,
+        (
+            GameSystemSet::Commands,
+            GameSystemSet::Logic,
+            GameSystemSet::Rendering,
+        )
+            .chain(),
+    );
+
+    // Entity spawning should happen in PreUpdate to ensure entities are available in Update
+    app.add_systems(
+        PreUpdate,
+        (
+            // Commands must run first to spawn entities - run in PreUpdate for better isolation
+            execute_pending_commands,
+            execute_console_commands,
+        ),
+    );
+
     app.add_systems(
         Update,
         (
+            // Logic systems that depend on spawned entities
+            manage_camera_controller,
+            handle_mouse_capture,
+            handle_inventory_input_bundled,
+        )
+            .in_set(GameSystemSet::Logic),
+    );
+
+    app.add_systems(
+        Update,
+        (
+            // Visual/rendering systems run last
             rotate_logo_system,
             crate::devices::device_positioning::draw_drag_feedback,
-        ),
+            handle_diagnostics_toggle_bundled,
+            update_diagnostics_content_bundled,
+        )
+            .in_set(GameSystemSet::Rendering),
     );
 
     // Add console-specific systems only when console feature is enabled
     #[cfg(feature = "console")]
-    app.add_systems(Update, blink_publisher_system);
-
-    app.add_systems(Update, manage_camera_controller)
-        .add_systems(Update, handle_mouse_capture);
+    app.add_systems(Update, blink_publisher_system.in_set(GameSystemSet::Logic));
 
     // Add console-dependent systems only when console feature is enabled
     #[cfg(feature = "console")]
     app.add_systems(
         Update,
-        crate::console::esc_handling::handle_esc_key.after(ConsoleSet::COMMANDS),
+        crate::console::esc_handling::handle_esc_key
+            .after(ConsoleSet::COMMANDS)
+            .in_set(GameSystemSet::Logic),
     );
 
     app.init_resource::<DiagnosticsVisible>()
         .add_systems(Startup, setup_diagnostics_ui_bundled)
-        .add_systems(Update, execute_pending_commands)
-        .add_systems(Update, execute_console_commands)
-        .add_systems(Update, handle_inventory_input_bundled)
-        .add_systems(Update, handle_diagnostics_toggle_bundled)
-        .add_systems(Update, update_diagnostics_content_bundled)
         .run();
 }
 

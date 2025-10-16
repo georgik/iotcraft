@@ -18,6 +18,8 @@ impl Plugin for WorldPlugin {
             .add_event::<DeleteWorldEvent>()
             .init_resource::<DiscoveredWorlds>()
             .add_systems(Startup, discover_worlds)
+            // World management systems should run early in Update to ensure
+            // world state changes are processed before other game logic
             .add_systems(
                 Update,
                 (
