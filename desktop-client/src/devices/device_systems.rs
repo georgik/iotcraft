@@ -15,6 +15,8 @@ impl Plugin for DevicePlugin {
         app.insert_resource(DevicesTracker {
             spawned_devices: std::collections::HashSet::new(),
         })
+        // Device announcement listener should run in Update stage to ensure
+        // it runs after command execution systems that might affect devices
         .add_systems(Update, listen_for_device_announcements);
     }
 }

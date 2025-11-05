@@ -92,6 +92,7 @@ tokio-util = { version = "0.7", features = ["codec"] }
 rayon = "1.8" # Parallel processing
 tempfile = "3.8" # For testing async file operations
 crossterm = "0.29.0" # Terminal manipulation - desktop only
+mdns-sd = "0.15.1"
 
 # Profile definitions moved to workspace root (/Volumes/ssdt5/Users/georgik/projects/iotcraft/Cargo.toml)
 # to avoid 'profiles for the non root package will be ignored' warnings
@@ -126,6 +127,11 @@ required-features = []
 [[bin]]
 name = "mqtt_test"
 path = "src/bin/mqtt_test.rs"
+required-features = []
+
+[[bin]]
+name = "test_discovery"
+path = "src/bin/test_discovery.rs"
 required-features = []
 
 

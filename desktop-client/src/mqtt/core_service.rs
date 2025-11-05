@@ -135,13 +135,14 @@ pub fn initialize_core_mqtt_service(
     )));
     commands.insert_resource(BlockChangeReceiver(Mutex::new(block_change_rx)));
 
+    // Generate persistent client ID that stays the same across reconnections
     let client_id = generate_unique_client_id("iotcraft-core-service");
     let mqtt_host = mqtt_config.host.clone();
     let mqtt_port = mqtt_config.port;
     let player_id = profile.player_id.clone();
 
     info!(
-        "🌐 Core MQTT Service using unified client ID: {}",
+        "🌐 Core MQTT Service using persistent client ID: {}",
         client_id
     );
 
@@ -163,6 +164,7 @@ pub fn initialize_core_mqtt_service(
         info!("🔔 Starting async Core MQTT Service...");
 
         let mut reconnect_attempts = 0;
+        let mut subscriptions_established = false;
         loop {
             // Check for shutdown signal in outer loop
             if MQTT_SERVICE_SHUTDOWN.load(Ordering::Relaxed) {
@@ -170,18 +172,18 @@ pub fn initialize_core_mqtt_service(
                 return; // Exit the async function, which will end the thread
             }
 
-            let reconnect_client_id = generate_unique_client_id("iotcraft-core-service");
             info!(
-                "🔄 Connecting Core MQTT Service with ID: {} (attempt {})",
-                reconnect_client_id, reconnect_attempts + 1
+                "🔄 Connecting Core MQTT Service with persistent ID: {} (attempt {})",
+                client_id, reconnect_attempts + 1
             );
 
-            let mut opts = MqttOptions::new(&reconnect_client_id, &mqtt_host, mqtt_port);
+            let mut opts = MqttOptions::new(&client_id, &mqtt_host, mqtt_port);
             opts.set_keep_alive(std::time::Duration::from_secs(30));
-            opts.set_clean_session(true);
+            // Use persistent session to maintain subscriptions across reconnects
+            opts.set_clean_session(false);
             // Increase max packet size to 5MB to handle large world data messages
             opts.set_max_packet_size(5242880, 5242880);
-            info!("🔧 Core MQTT Service configured with max packet size: 5MB");
+            info!("🔧 Core MQTT Service configured with persistent session and 5MB max packet size");
 
             let (client, mut eventloop) = AsyncClient::new(opts, 100);
             let current_world_id = String::from("default");
@@ -189,23 +191,29 @@ pub fn initialize_core_mqtt_service(
             // Send initial connection status
             let _ = connection_status_tx.send(false);
 
-            // Subscribe to required topics
-            let topics = vec![
-                "home/sensor/temperature",
-                "devices/announce",
-                "iotcraft/worlds/+/info",
-                "iotcraft/worlds/+/data",
-                "iotcraft/worlds/+/players/+/pose",
-                "iotcraft/worlds/+/state/blocks/placed",
-                "iotcraft/worlds/+/state/blocks/removed",
-            ];
+            // Only subscribe on first connection or if subscriptions were not established
+            if !subscriptions_established {
+                info!("📡 Establishing subscriptions for the first time...");
+                let topics = vec![
+                    "home/sensor/temperature",
+                    "devices/announce",
+                    "iotcraft/worlds/+/info",
+                    "iotcraft/worlds/+/data",
+                    "iotcraft/worlds/+/players/+/pose",
+                    "iotcraft/worlds/+/state/blocks/placed",
+                    "iotcraft/worlds/+/state/blocks/removed",
+                ];
 
-            for topic in &topics {
-                if let Err(e) = client.subscribe(*topic, QoS::AtMostOnce).await {
-                    error!("❌ Failed to subscribe to {}: {}", topic, e);
-                } else {
-                    info!("📡 Subscribed to topic: {}", topic);
+                for topic in &topics {
+                    if let Err(e) = client.subscribe(*topic, QoS::AtMostOnce).await {
+                        error!("❌ Failed to subscribe to {}: {}", topic, e);
+                    } else {
+                        info!("📡 Subscribed to topic: {}", topic);
+                    }
                 }
+                subscriptions_established = true;
+            } else {
+                info!("🔄 Using persistent session - subscriptions should be maintained by broker");
             }
 
             let mut connected = false;
@@ -253,6 +261,13 @@ pub fn initialize_core_mqtt_service(
                                 error!("❌ MQTT connection error: {:?}", e);
                                 let _ = connection_status_tx.send(false);
                                 connected = false; // Reset state before break - will be reinitialized in outer loop
+                                // If we lose connection due to broker restart or network issues,
+                                // we might need to reestablish subscriptions
+                                if format!("{:?}", e).contains("ConnectionRefused") || 
+                                   format!("{:?}", e).contains("ConnectionAborted") {
+                                    info!("🔄 Connection issue detected, will reestablish subscriptions on reconnect");
+                                    subscriptions_established = false;
+                                }
                                 break;
                             }
                         }

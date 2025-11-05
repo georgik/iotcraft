@@ -1,6 +1,11 @@
 use bevy::prelude::*;
 use std::env;
 
+#[cfg(not(target_arch = "wasm32"))]
+use crate::discovery::{
+    discover_best_mqtt_service, discover_best_mqtt_service_with_connectivity_test,
+};
+
 /// Configuration for MQTT broker connection
 #[derive(Debug, Clone, Resource)]
 pub struct MqttConfig {
@@ -72,6 +77,50 @@ mod tests {
 }
 
 impl MqttConfig {
+    /// Load configuration with mDNS discovery fallback
+    /// Precedence: CLI args > Environment variables > mDNS discovery > localhost fallback
+    pub async fn from_env_with_discovery(mqtt_server_override: Option<String>) -> Self {
+        // If explicit override provided, use it
+        if mqtt_server_override.is_some() {
+            return Self::from_env_with_override(mqtt_server_override);
+        }
+
+        // Check environment variables first
+        if env::var("MQTT_BROKER_HOST").is_ok() || env::var("MQTT_BROKER_PORT").is_ok() {
+            return Self::from_env_with_override(None);
+        }
+
+        // Try mDNS discovery with connectivity testing
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            info!(
+                "🔍 No MQTT server specified, attempting mDNS discovery with connectivity test..."
+            );
+            match discover_best_mqtt_service_with_connectivity_test(3, 2).await {
+                Ok(Some(service)) => {
+                    info!(
+                        "✅ Discovered reachable MQTT broker via mDNS: {}",
+                        service.broker_address()
+                    );
+                    return MqttConfig {
+                        host: service.ip.to_string(),
+                        port: service.port,
+                    };
+                }
+                Ok(None) => {
+                    warn!("⚠️ No reachable MQTT services found via mDNS discovery");
+                }
+                Err(e) => {
+                    warn!("⚠️ mDNS discovery with connectivity test failed: {}", e);
+                }
+            }
+        }
+
+        // Fallback to localhost
+        info!("📍 Using localhost fallback for MQTT broker");
+        Self::default()
+    }
+
     /// Load configuration from CLI args, environment variables, or defaults
     /// CLI args take precedence over environment variables
     pub fn from_env_with_override(mqtt_server_override: Option<String>) -> Self {

@@ -35,6 +35,9 @@ pub mod multiplayer;
 pub mod config;
 
 #[cfg(not(target_arch = "wasm32"))]
+pub mod discovery;
+
+#[cfg(not(target_arch = "wasm32"))]
 pub mod profile;
 
 // Environment and inventory modules available for both desktop and web

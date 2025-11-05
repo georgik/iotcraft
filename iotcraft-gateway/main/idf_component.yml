@@ -2,7 +2,7 @@
 dependencies:
   joltwallet/littlefs: ==1.14.8
 
-  georgik/sdl: "^3.3.0~7"
+  georgik/sdl: ^3.3.0~7
   # SDL3 component - using GitHub repository
   #georgik/sdl:
   #  version: feature/sdl_bsp
@@ -13,7 +13,7 @@ dependencies:
     version: '*'
     git: https://github.com/georgik/esp-idf-component-SDL_bsp.git
 
-  georgik/sdl_ttf: "^3.1.2~3"
+  georgik/sdl_ttf: ^3.1.2~3
   idf:
     version: '>=6.0.0'
 
@@ -28,3 +28,4 @@ dependencies:
     - if: $CONFIG{SDL_BSP_M5STACK_TAB5} == True
   espressif/mosquitto: '*'
   espressif/mdns: ^1.8.2
+  espressif/cjson: ^1.7.19
