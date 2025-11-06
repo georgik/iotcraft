@@ -717,7 +717,7 @@ brew install mosquitto
 
 Watch:
 ```shell
-mosquitto_sub -h localhost -p 1883 -t home/cube/light -i iotcraft-client
+mosquitto_sub -h localhost -p 1883 -t home/cube/light -i iotcraft-subscriber
 ```
 
 Change:
