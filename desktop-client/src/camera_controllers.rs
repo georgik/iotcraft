@@ -46,6 +46,10 @@ pub struct CameraController {
     pub initialized: bool,
     /// Multiplier for pitch and yaw rotation speed.
     pub sensitivity: f32,
+    /// Gamepad right stick X axis value for camera rotation
+    pub gamepad_look_x: f32,
+    /// Gamepad right stick Y axis value for camera rotation
+    pub gamepad_look_y: f32,
     /// [`KeyCode`] for forward translation.
     pub key_forward: KeyCode,
     /// [`KeyCode`] for backward translation.
@@ -90,6 +94,8 @@ impl Default for CameraController {
             enabled: true,
             initialized: false,
             sensitivity: 1.0,
+            gamepad_look_x: 0.0,
+            gamepad_look_y: 0.0,
             key_forward: KeyCode::KeyW,
             key_back: KeyCode::KeyS,
             key_left: KeyCode::KeyA,
@@ -178,6 +184,8 @@ fn run_camera_controller(
     game_state: Res<State<GameState>>,
     player_mode: Res<PlayerMode>,
     mut previous_mode: ResMut<PreviousPlayerMode>,
+    mut gamepad_events: EventReader<crate::input::GamepadInputEvent>,
+    gamepads: Query<&bevy::input::gamepad::Gamepad>,
     mut query: Query<(&mut Transform, &mut CameraController), With<Camera>>,
 ) {
     let dt = time.delta_secs();
@@ -262,6 +270,81 @@ fn run_camera_controller(
                 .clamp(-PI / 2., PI / 2.);
             controller.yaw -=
                 accumulated_mouse_motion.delta.x * RADIANS_PER_DOT * controller.sensitivity;
+            transform.rotation =
+                Quat::from_euler(EulerRot::ZYX, 0.0, controller.yaw, controller.pitch);
+        }
+    }
+
+    // Handle gamepad input for camera rotation
+    if *game_state.get() == GameState::InGame {
+        let gamepad_look_speed = 3.0 * controller.sensitivity; // Adjustable multiplier for gamepad
+        let deadzone = 0.15; // Deadzone to prevent drift
+
+        // Reset gamepad look values each frame
+        controller.gamepad_look_x = 0.0;
+        controller.gamepad_look_y = 0.0;
+
+        // Check gamepad state directly every frame (fixes stick return-to-center issue)
+        for gamepad in gamepads.iter() {
+            use bevy::input::gamepad::GamepadAxis;
+
+            // Check right stick X axis (horizontal look)
+            if let Some(x_value) = gamepad.get(GamepadAxis::RightStickX) {
+                if x_value.abs() > deadzone {
+                    controller.gamepad_look_x = x_value;
+                }
+            }
+
+            // Check right stick Y axis (vertical look)
+            if let Some(y_value) = gamepad.get(GamepadAxis::RightStickY) {
+                if y_value.abs() > deadzone {
+                    // Invert Y axis for more intuitive control (typical gamepad behavior)
+                    controller.gamepad_look_y = -y_value;
+                }
+            }
+        }
+
+        // Process gamepad axis events for additional responsiveness
+        for event in gamepad_events.read() {
+            if let crate::input::GamepadInputEvent::AxisMoved { value, action, .. } = event {
+                match action {
+                    crate::input::GameAxisAction::LookHorizontal => {
+                        if value.abs() > deadzone {
+                            controller.gamepad_look_x = *value;
+                        }
+                    }
+                    crate::input::GameAxisAction::LookVertical => {
+                        if value.abs() > deadzone {
+                            // Invert Y axis for more intuitive control (typical gamepad behavior)
+                            controller.gamepad_look_y = -*value;
+                        }
+                    }
+                    _ => {} // Ignore other axis events in camera controller
+                }
+            }
+        }
+
+        // Debug logging for camera rotation
+        static mut LAST_CAMERA_DEBUG: f64 = 0.0;
+        unsafe {
+            let current_time = time.elapsed_secs_f64();
+            if (controller.gamepad_look_x.abs() > 0.01 || controller.gamepad_look_y.abs() > 0.01)
+                && current_time - LAST_CAMERA_DEBUG > 1.0
+            {
+                LAST_CAMERA_DEBUG = current_time;
+                info!(
+                    "Camera rotation: look_x={:.3}, look_y={:.3}",
+                    controller.gamepad_look_x, controller.gamepad_look_y
+                );
+            }
+        }
+
+        // Apply gamepad camera rotation
+        if controller.gamepad_look_x.abs() > 0.0 || controller.gamepad_look_y.abs() > 0.0 {
+            controller.yaw -= controller.gamepad_look_x * gamepad_look_speed * dt;
+            controller.pitch = (controller.pitch
+                + controller.gamepad_look_y * gamepad_look_speed * dt)
+                .clamp(-PI / 2., PI / 2.);
             transform.rotation =
                 Quat::from_euler(EulerRot::ZYX, 0.0, controller.yaw, controller.pitch);
         }

@@ -1,4 +1,9 @@
 // Desktop-only main application - WASM uses lib.rs instead
+
+// Input module declaration for gamepad support
+#[cfg(not(target_arch = "wasm32"))]
+mod input;
+
 #[cfg(not(target_arch = "wasm32"))]
 use bevy::ecs::system::SystemParam;
 #[cfg(not(target_arch = "wasm32"))]
@@ -1456,6 +1461,7 @@ async fn main() {
 
     app.add_plugins(CameraControllerPlugin)
         .add_plugins(PlayerControllerPlugin) // Add player controller for walking/flying modes
+        .add_plugins(input::GamepadInputPlugin) // Add gamepad input support
         .add_plugins(script::script_systems::ScriptPlugin) // Add script plugin early for PendingCommands resource
         .add_plugins(SharedMaterialsPlugin); // Add shared materials for optimized rendering
 
@@ -1569,6 +1575,7 @@ async fn main() {
     );
 
     app.init_resource::<DiagnosticsVisible>()
+        .init_resource::<input::GamepadConfig>() // Initialize gamepad configuration
         .add_systems(Startup, setup_diagnostics_ui_bundled)
         .run();
 }

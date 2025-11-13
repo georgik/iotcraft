@@ -1,4 +1,5 @@
 // Import GameState - use desktop UI system for both desktop and web
+use crate::input::GameAction;
 use crate::ui::GameState;
 use bevy::prelude::*;
 
@@ -194,9 +195,13 @@ fn handle_mode_switch(
 fn player_movement(
     time: Res<Time>,
     keyboard_input: Res<ButtonInput<KeyCode>>,
+    gamepad_button_state: Res<crate::input::GamepadButtonState>,
+    gamepad_config: Res<crate::input::GamepadConfig>,
+    mut gamepad_events: EventReader<crate::input::GamepadInputEvent>,
     mut player_mode: ResMut<PlayerMode>,
     mut commands: Commands,
     mut camera_query: Query<(Entity, &mut Transform, Option<&mut PlayerMovement>), With<Camera>>,
+    gamepads: Query<&bevy::input::gamepad::Gamepad>,
     voxel_world: Res<crate::environment::VoxelWorld>,
     game_state: Res<State<GameState>>,
 ) {
@@ -284,10 +289,14 @@ fn player_movement(
                     handle_physics_free_walking_movement(
                         &time,
                         &keyboard_input,
+                        &gamepad_button_state,
+                        &gamepad_config,
+                        &mut gamepad_events,
                         transform,
                         &mut movement,
                         &voxel_world,
                         should_skip_jump,
+                        &gamepads,
                     );
                 } else if *game_state.get() == GameState::GameplayMenu {
                     // When in gameplay menu: only gravity, no input processing
@@ -590,10 +599,14 @@ pub fn handle_physics_free_walking_movement_menu_only(
 pub fn handle_physics_free_walking_movement(
     time: &Res<Time>,
     keyboard_input: &Res<ButtonInput<KeyCode>>,
+    gamepad_button_state: &Res<crate::input::GamepadButtonState>,
+    gamepad_config: &Res<crate::input::GamepadConfig>,
+    gamepad_events: &mut EventReader<crate::input::GamepadInputEvent>,
     mut transform: Mut<Transform>,
     movement: &mut PlayerMovement,
     voxel_world: &Res<crate::environment::VoxelWorld>,
     should_skip_jump: bool,
+    gamepads: &Query<&bevy::input::gamepad::Gamepad>,
 ) {
     let dt = time.delta_secs();
 
@@ -742,6 +755,8 @@ pub fn handle_physics_free_walking_movement(
 
     // STEP 2: Handle horizontal movement with collision detection
     let mut movement_input = Vec3::ZERO;
+
+    // Keyboard input
     if keyboard_input.pressed(KeyCode::KeyW) {
         movement_input += transform.forward().as_vec3();
     }
@@ -755,11 +770,140 @@ pub fn handle_physics_free_walking_movement(
         movement_input += transform.right().as_vec3();
     }
 
+    // Process gamepad axis movement by checking state directly every frame
+    let mut gamepad_movement_input = Vec3::ZERO;
+    let gamepad_deadzone = 0.15;
+
+    // Check left joystick state directly every frame (for continuous movement)
+    for gamepad in gamepads {
+        use bevy::input::gamepad::GamepadAxis;
+
+        // Debug: Log raw axis values
+        static mut LAST_AXIS_DEBUG: f64 = 0.0;
+        unsafe {
+            let current_time = time.elapsed_secs_f64();
+            if current_time - LAST_AXIS_DEBUG > 1.0 {
+                let x_val = gamepad.get(GamepadAxis::LeftStickX).unwrap_or(0.0);
+                let y_val = gamepad.get(GamepadAxis::LeftStickY).unwrap_or(0.0);
+                if x_val.abs() > 0.01 || y_val.abs() > 0.01 {
+                    LAST_AXIS_DEBUG = current_time;
+                    info!("Left stick raw values: X={:.3}, Y={:.3}", x_val, y_val);
+                }
+            }
+        }
+
+        // Check left stick X axis (horizontal movement)
+        if let Some(x_value) = gamepad.get(GamepadAxis::LeftStickX) {
+            if x_value.abs() > gamepad_deadzone {
+                gamepad_movement_input += x_value * transform.right().as_vec3();
+            }
+        }
+
+        // Check left stick Y axis (vertical movement)
+        if let Some(y_value) = gamepad.get(GamepadAxis::LeftStickY) {
+            if y_value.abs() > gamepad_deadzone {
+                // Forward/backward movement (remove Y inversion for standard gamepad feel)
+                gamepad_movement_input += y_value * transform.forward().as_vec3();
+            }
+        }
+    }
+
+    // Also process gamepad events for additional responsiveness
+    for event in gamepad_events.read() {
+        if let crate::input::GamepadInputEvent::AxisMoved { value, action, .. } = event {
+            if value.abs() > gamepad_deadzone {
+                match action {
+                    crate::input::GameAxisAction::MoveVertical => {
+                        // Forward/backward movement (events override state)
+                        gamepad_movement_input += *value * transform.forward().as_vec3();
+                    }
+                    crate::input::GameAxisAction::MoveHorizontal => {
+                        // Left/right movement (events override state)
+                        gamepad_movement_input += *value * transform.right().as_vec3();
+                    }
+                    _ => {} // Ignore other axis events
+                }
+            }
+        }
+    }
+
+    // Process D-pad input for continuous movement by checking gamepad state directly
+    // This should work for both analog and digital D-pad modes
+    for gamepad in gamepads {
+        use bevy::input::gamepad::GamepadButton;
+
+        // Debug: Check all D-pad buttons and log their state
+        static mut LAST_DPAD_STATE_DEBUG: f64 = 0.0;
+        unsafe {
+            let current_time = time.elapsed_secs_f64();
+            if current_time - LAST_DPAD_STATE_DEBUG > 0.5 {
+                // Log every 0.5 seconds when any D-pad is active
+                let up = gamepad.pressed(GamepadButton::DPadUp);
+                let down = gamepad.pressed(GamepadButton::DPadDown);
+                let left = gamepad.pressed(GamepadButton::DPadLeft);
+                let right = gamepad.pressed(GamepadButton::DPadRight);
+
+                if up || down || left || right {
+                    LAST_DPAD_STATE_DEBUG = current_time;
+                    info!(
+                        "D-pad state: up={}, down={}, left={}, right={}",
+                        up, down, left, right
+                    );
+                }
+            }
+        }
+
+        // Check D-pad state directly every frame
+        if gamepad.pressed(GamepadButton::DPadUp) {
+            gamepad_movement_input += transform.forward().as_vec3();
+        }
+        if gamepad.pressed(GamepadButton::DPadDown) {
+            gamepad_movement_input -= transform.forward().as_vec3();
+        }
+        if gamepad.pressed(GamepadButton::DPadLeft) {
+            gamepad_movement_input -= transform.right().as_vec3();
+        }
+        if gamepad.pressed(GamepadButton::DPadRight) {
+            gamepad_movement_input += transform.right().as_vec3();
+        }
+    }
+
+    // Debug logging for left joystick movement
+    static mut LAST_JOYSTICK_DEBUG: f64 = 0.0;
+    unsafe {
+        let current_time = time.elapsed_secs_f64();
+        if gamepad_movement_input.length() > 0.01 && current_time - LAST_JOYSTICK_DEBUG > 1.0 {
+            LAST_JOYSTICK_DEBUG = current_time;
+            info!(
+                "Left joystick movement: input_length={:.2}, input=({:.2}, {:.2}, {:.2})",
+                gamepad_movement_input.length(),
+                gamepad_movement_input.x,
+                gamepad_movement_input.y,
+                gamepad_movement_input.z
+            );
+        }
+    }
+
+    // Combine keyboard and gamepad movement input
+    movement_input += gamepad_movement_input;
+
     // Normalize and apply horizontal movement
     if movement_input.length() > 0.0 {
         movement_input = movement_input.normalize();
 
-        let current_speed = if keyboard_input.pressed(KeyCode::ShiftLeft) {
+        // Check if run button is pressed (keyboard or gamepad)
+        let mut run_button_pressed = keyboard_input.pressed(KeyCode::ShiftLeft);
+
+        // Also check gamepad run button directly
+        for gamepad in gamepads {
+            use bevy::input::gamepad::GamepadButton;
+            if gamepad.pressed(GamepadButton::LeftTrigger2) {
+                run_button_pressed = true;
+                break;
+            }
+        }
+
+        let current_speed = if run_button_pressed {
             movement.run_speed
         } else {
             movement.walk_speed
@@ -807,8 +951,29 @@ pub fn handle_physics_free_walking_movement(
         }
     }
 
-    // STEP 3: Handle jumping
-    if keyboard_input.just_pressed(KeyCode::Space) && movement.is_grounded && !should_skip_jump {
+    // STEP 3: Handle running and jumping
+    let mut jump_pressed = keyboard_input.just_pressed(KeyCode::Space);
+
+    // Also check gamepad jump button directly
+    for gamepad in gamepads {
+        use bevy::input::gamepad::GamepadButton;
+        if gamepad.just_pressed(GamepadButton::North) {
+            jump_pressed = true;
+            break;
+        }
+    }
+
+    // Check if any run button is pressed (keyboard or gamepad)
+    let mut run_button_pressed = keyboard_input.pressed(KeyCode::ShiftLeft);
+    for gamepad in gamepads {
+        use bevy::input::gamepad::GamepadButton;
+        if gamepad.pressed(GamepadButton::LeftTrigger2) {
+            run_button_pressed = true;
+            break;
+        }
+    }
+
+    if jump_pressed && movement.is_grounded && !should_skip_jump {
         movement.gravity_scale = movement.jump_force;
         movement.is_grounded = false;
         info!("Player jumped with velocity: {}!", movement.jump_force);

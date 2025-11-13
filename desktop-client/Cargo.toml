@@ -11,7 +11,7 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 # Core dependencies that work on both desktop and web
 # Using Bevy 0.17-dev from git for latest features
-bevy = { git = "https://github.com/bevyengine/bevy.git", rev = "8e441c3", features = ["webp"] }
+bevy = { git = "https://github.com/bevyengine/bevy.git", rev = "8e441c3", features = ["webp", "bevy_gilrs"] }
 
 tracing = "0.1"
 log = "0.4"

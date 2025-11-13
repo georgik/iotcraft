@@ -56,6 +56,9 @@ pub mod multiplayer_web;
 // Camera controllers module available for both desktop and web
 pub mod camera_controllers;
 
+// Input handling module (gamepad support)
+pub mod input;
+
 // Console module available for both desktop and web
 pub mod console;
 

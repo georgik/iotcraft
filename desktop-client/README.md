@@ -390,8 +390,94 @@ The project includes GitHub Actions workflows for:
 To manually deploy to GitHub Pages:
 1. Go to Actions tab in GitHub
 2. Select "Desktop Client Web Build" workflow
-3. Click "Run workflow" 
+3. Click "Run workflow"
 4. Check "Deploy to GitHub Pages" option
+
+## Controls
+
+IoTCraft supports both keyboard/mouse and gamepad input for full control of your 3D voxel world and IoT devices.
+
+### 🎮 Gamepad Controls
+
+**Movement:**
+- **Left Stick**: Move forward/backward/strafe left/right
+- **D-Pad**: Alternative movement (works in both analog and digital modes)
+- **LT (Left Trigger)**: Run modifier (hold for faster movement)
+
+**Camera:**
+- **Right Stick**: Look around/camera rotation
+- **Camera stops automatically when stick returns to center**
+
+**Actions:**
+- **A (South)**: Place block
+- **B (East)**: Remove block
+- **X (West)**: Interact with devices
+- **Y (North)**: Jump
+
+**System:**
+- **LB/Left Bumper**: Previous inventory slot
+- **RB/Right Bumper**: Next inventory slot
+- **LT (Left Trigger 2)**: Run/Walk toggle
+- **Start**: Open menu
+- **Select**: Toggle console
+- **Left Stick Button**: Toggle minimap
+
+### ⌨️ Keyboard & Mouse Controls
+
+**Movement:**
+- **W/A/S/D**: Move forward/left/backward/right
+- **Space**: Jump
+- **Left Shift**: Run modifier (hold for faster movement)
+- **F4**: Toggle between Flying and Walking modes
+
+**Camera:**
+- **Mouse**: Look around (requires cursor grab)
+- **ESC**: Release cursor/return to menu
+
+**Building & Interaction:**
+- **Left Click**: Place block/interact with devices
+- **Right Click**: Remove block
+- **1-9**: Select inventory hotbar slots
+- **G**: Toggle debug overlay
+
+**System:**
+- **Tilde (~)**: Toggle console
+- **M**: Toggle minimap
+- **F3**: Debug information
+- **Enter/Escape**: Navigate menus
+
+### 🎯 Controller Features
+
+**Analog Support:**
+- **Continuous Movement**: Left stick and D-pad provide smooth, continuous motion while held
+- **Variable Speed**: Analog stick pressure controls movement speed
+- **Precise Control**: Deadzone filtering prevents accidental movement
+
+**Digital Support:**
+- **D-pad Modes**: Works seamlessly in both analog and digital D-pad modes
+- **Button Hold**: Continuous action while buttons are held
+- **Responsive Input**: Low-latency input processing
+
+**Cross-Platform:**
+- **Auto-Detection**: Controllers are automatically detected when connected
+- **Hot-Swappable**: Connect/disconnect controllers during gameplay
+- **Standard Layout**: Compatible with Xbox, PlayStation, and most PC controllers
+
+### 🔧 Troubleshooting
+
+**If gamepad isn't working:**
+1. Ensure controller is properly connected via USB or Bluetooth
+2. Check that the game detects the controller (look for connection logs)
+3. Try pressing different buttons to verify input detection
+4. Restart the application if controller was connected after launch
+
+**Debug Information:**
+Enable console logging to see detailed gamepad input information:
+```
+D-pad state: up=true, down=false, left=false, right=false
+Left stick raw values: X=-1.000, Y=0.000
+Camera rotation: look_x=0.250, look_y=-0.100
+```
 
 ## Architecture
 
