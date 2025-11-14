@@ -1,5 +1,6 @@
 use bevy::prelude::*;
 use std::env;
+use std::time::Duration;
 
 #[cfg(not(target_arch = "wasm32"))]
 use crate::discovery::{
@@ -90,14 +91,21 @@ impl MqttConfig {
             return Self::from_env_with_override(None);
         }
 
-        // Try mDNS discovery with connectivity testing
+        // Try mDNS discovery with connectivity testing and proper timeout handling
         #[cfg(not(target_arch = "wasm32"))]
         {
             info!(
-                "🔍 No MQTT server specified, attempting mDNS discovery with connectivity test..."
+                "🔍 No MQTT server specified, attempting mDNS discovery with connectivity test (timeout: 8s total)..."
             );
-            match discover_best_mqtt_service_with_connectivity_test(3, 2).await {
-                Ok(Some(service)) => {
+
+            // Use tokio::time::timeout to prevent infinite hanging
+            match tokio::time::timeout(
+                Duration::from_secs(8), // Total timeout for discovery
+                discover_best_mqtt_service_with_connectivity_test(3, 2),
+            )
+            .await
+            {
+                Ok(Ok(Some(service))) => {
                     info!(
                         "✅ Discovered reachable MQTT broker via mDNS: {}",
                         service.broker_address()
@@ -107,11 +115,14 @@ impl MqttConfig {
                         port: service.port,
                     };
                 }
-                Ok(None) => {
+                Ok(Ok(None)) => {
                     warn!("⚠️ No reachable MQTT services found via mDNS discovery");
                 }
-                Err(e) => {
+                Ok(Err(e)) => {
                     warn!("⚠️ mDNS discovery with connectivity test failed: {}", e);
+                }
+                Err(_) => {
+                    warn!("⚠️ mDNS discovery timed out after 8 seconds");
                 }
             }
         }

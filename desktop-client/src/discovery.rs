@@ -130,9 +130,24 @@ pub async fn discover_mqtt_services(timeout_secs: u64) -> Result<Vec<DiscoveredM
         debug!("⚠️ Error stopping MQTT mDNS browse: {}", e);
     }
 
-    // Explicit shutdown of the mDNS daemon
-    if let Err(e) = mdns.shutdown() {
-        debug!("⚠️ Error shutting down mDNS daemon: {}", e);
+    // Explicit shutdown of the mDNS daemon with timeout
+    info!("🔄 Shutting down mDNS daemon...");
+    match tokio::time::timeout(
+        Duration::from_secs(2), // Give 2 seconds for graceful shutdown
+        tokio::task::spawn_blocking(move || {
+            if let Err(e) = mdns.shutdown() {
+                debug!("⚠️ Error shutting down mDNS daemon: {}", e);
+            }
+        }),
+    )
+    .await
+    {
+        Ok(_) => {
+            info!("✅ mDNS daemon shutdown successfully");
+        }
+        Err(_) => {
+            warn!("⚠️ mDNS daemon shutdown timed out, proceeding anyway");
+        }
     }
 
     let discovered_services: Vec<DiscoveredMqttService> = services.into_values().collect();
