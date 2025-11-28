@@ -4,14 +4,17 @@ use clap::{Parser, Subcommand};
 use html5ever::parse_document;
 use html5ever::tendril::TendrilSink;
 use if_addrs;
+use log::{error, info, warn};
 use markup5ever_rcdom::{Handle, NodeData, RcDom};
 use qr2term;
 use serde::Deserialize;
 use std::fs;
+use std::io::Read;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use which;
+use zip::ZipWriter;
 
 #[derive(clap::ValueEnum, Clone, Debug)]
 enum TestMode {
@@ -148,6 +151,21 @@ enum Commands {
         #[arg(short, long, default_value = "8000")]
         port: u16,
     },
+    /// Package desktop client for distribution
+    Package {
+        /// Package platform (windows, linux, macos)
+        #[arg(long, default_value = "windows")]
+        platform: String,
+        /// Build profile (dev, release, dist)
+        #[arg(long, default_value = "dist")]
+        profile: String,
+        /// Output directory for the package
+        #[arg(short, long, default_value = "dist-package")]
+        output: String,
+        /// Target triple for cross-compilation
+        #[arg(long)]
+        target: Option<String>,
+    },
     /// Clean up problematic lines that break formatting
     Cleanup {
         /// Only check for issues without fixing them
@@ -172,6 +190,11 @@ struct Workspace {
 }
 
 fn main() -> Result<()> {
+    // Initialize logger
+    env_logger::Builder::from_default_env()
+        .filter_level(log::LevelFilter::Info)
+        .init();
+
     let cli = Cli::parse();
 
     match &cli.command {
@@ -212,6 +235,14 @@ fn main() -> Result<()> {
         Commands::WebDev { port } => {
             build_web(false, "web")?;
             serve_web(*port, "web")?;
+        }
+        Commands::Package {
+            platform,
+            profile,
+            output,
+            target,
+        } => {
+            package_desktop_client(platform, profile, output, target)?;
         }
         Commands::Cleanup { check } => {
             cleanup_source_files(*check)?;
@@ -1890,5 +1921,192 @@ fn github_trigger_workflow(workflow: Option<&str>, branch: Option<&str>) -> Resu
         return Err(anyhow::anyhow!("GitHub CLI workflow run command failed"));
     }
 
+    Ok(())
+}
+
+/// Package desktop client for distribution
+fn package_desktop_client(
+    platform: &str,
+    profile: &str,
+    output: &str,
+    target: &Option<String>,
+) -> Result<()> {
+    info!("📦 Packaging desktop client for {} platform", platform);
+
+    // Determine target triple
+    let target_triple = target.as_deref().unwrap_or(match platform {
+        "windows" => "x86_64-pc-windows-msvc",
+        "linux" => "x86_64-unknown-linux-gnu",
+        "macos" => "x86_64-apple-darwin",
+        _ => return Err(anyhow::anyhow!("Unsupported platform: {}", platform)),
+    });
+
+    // Determine executable name
+    let exe_name = match platform {
+        "windows" => "iotcraft-dekstop-client.exe",
+        _ => "iotcraft-dekstop-client",
+    };
+
+    // Find the built executable
+    let target_dir = Path::new("target").join(target_triple).join(profile);
+    let exe_path = target_dir.join(exe_name);
+
+    if !exe_path.exists() {
+        error!(
+            "Executable not found at {}. Make sure to build the project first with: cargo build --profile {} --target {}",
+            exe_path.display(),
+            profile,
+            target_triple
+        );
+        return Err(anyhow::anyhow!(
+            "Executable not found at {}",
+            exe_path.display()
+        ));
+    }
+
+    info!("✅ Found executable at {}", exe_path.display());
+
+    // Create output directory
+    let package_dir = Path::new(output);
+    fs::create_dir_all(package_dir)?;
+
+    // Create release directory structure
+    let release_dir = package_dir.join("iotcraft-desktop-client");
+    fs::create_dir_all(&release_dir)?;
+
+    // Copy executable
+    let dest_exe = release_dir.join(exe_name);
+    fs::copy(&exe_path, &dest_exe)?;
+    info!("✅ Copied executable to {}", dest_exe.display());
+
+    // Copy required directories from desktop-client
+    let desktop_client_dir = Path::new("desktop-client");
+
+    // Copy assets
+    let assets_src = desktop_client_dir.join("assets");
+    if assets_src.exists() {
+        let assets_dest = release_dir.join("assets");
+        copy_dir(&assets_src, &assets_dest)?;
+        info!("✅ Copied assets directory");
+    } else {
+        warn!("⚠️  Assets directory not found at {}", assets_src.display());
+    }
+
+    // Copy scripts
+    let scripts_src = desktop_client_dir.join("scripts");
+    if scripts_src.exists() {
+        let scripts_dest = release_dir.join("scripts");
+        copy_dir(&scripts_src, &scripts_dest)?;
+        info!("✅ Copied scripts directory");
+    } else {
+        warn!(
+            "⚠️  Scripts directory not found at {}",
+            scripts_src.display()
+        );
+    }
+
+    // Copy localization
+    let localization_src = desktop_client_dir.join("localization");
+    if localization_src.exists() {
+        let localization_dest = release_dir.join("localization");
+        copy_dir(&localization_src, &localization_dest)?;
+        info!("✅ Copied localization directory");
+    } else {
+        warn!(
+            "⚠️  Localization directory not found at {}",
+            localization_src.display()
+        );
+    }
+
+    // Copy firmwares
+    let firmwares_src = desktop_client_dir.join("firmwares");
+    if firmwares_src.exists() {
+        let firmwares_dest = release_dir.join("firmwares");
+        copy_dir(&firmwares_src, &firmwares_dest)?;
+        info!("✅ Copied firmwares directory");
+    } else {
+        warn!(
+            "⚠️  Firmwares directory not found at {}",
+            firmwares_src.display()
+        );
+    }
+
+    // Create README
+    let readme_content = format!(
+        r#"IoTCraft Desktop Client - {}
+
+Usage:
+  Run {} to start the application
+
+Included components:
+  - Executable: {}
+  - Assets: Textures, fonts, and game resources
+  - Scripts: World initialization scripts
+  - Localization: Multi-language support files
+  - Firmwares: ESP32 device firmware files
+"#,
+        platform, exe_name, exe_name
+    );
+
+    fs::write(release_dir.join("README.txt"), readme_content)?;
+    info!("✅ Created README.txt");
+
+    // Create ZIP archive
+    let zip_path = package_dir.join(format!(
+        "iotcraft-desktop-client-{}-{}.zip",
+        platform, target_triple
+    ));
+    create_zip(&release_dir, &zip_path)?;
+    info!("✅ Created ZIP package at {}", zip_path.display());
+
+    info!("🎉 Packaging completed successfully!");
+    info!("📁 Package location: {}", package_dir.display());
+    info!("📦 ZIP file: {}", zip_path.display());
+
+    Ok(())
+}
+
+/// Copy directory recursively
+fn copy_dir(src: &Path, dst: &Path) -> Result<()> {
+    fs::create_dir_all(dst)?;
+    for entry in fs::read_dir(src)? {
+        let entry = entry?;
+        let file_type = entry.file_type()?;
+        let src_path = entry.path();
+        let dst_path = dst.join(entry.file_name());
+
+        if file_type.is_dir() {
+            copy_dir(&src_path, &dst_path)?;
+        } else {
+            fs::copy(&src_path, &dst_path)?;
+        }
+    }
+    Ok(())
+}
+
+/// Create ZIP archive from directory
+fn create_zip(src_dir: &Path, zip_path: &Path) -> Result<()> {
+    let file = fs::File::create(zip_path)?;
+    let mut zip = ZipWriter::new(file);
+
+    let options = zip::write::SimpleFileOptions::default()
+        .compression_method(zip::CompressionMethod::Deflated);
+
+    // Add all files to the ZIP
+    for entry in walkdir::WalkDir::new(src_dir) {
+        let entry = entry?;
+        let path = entry.path();
+        let relative_path = path.strip_prefix(src_dir)?;
+
+        if path.is_file() {
+            zip.start_file(relative_path.to_string_lossy(), options)?;
+            let mut file = fs::File::open(path)?;
+            let mut buffer = Vec::new();
+            file.read_to_end(&mut buffer)?;
+            zip.write_all(&buffer)?;
+        }
+    }
+
+    zip.finish()?;
     Ok(())
 }

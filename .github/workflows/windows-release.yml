@@ -40,75 +40,82 @@ jobs:
     - name: Cache Rust dependencies
       uses: Swatinem/rust-cache@v2
       with:
-        workspaces: desktop-client
-        key: windows-release-${{ runner.os }}
+        workspaces: |
+          desktop-client
+          iotcraft-mcp-protocol
+        key: windows-release-${{ runner.os }}-dist
+        cache-on-failure: true
 
     - name: Build optimized Windows binary
       run: |
         cargo build --profile dist --package iotcraft-dekstop-client --target x86_64-pc-windows-msvc
 
-    - name: Prepare release directory
+  - name: Get version info
+      id: version
       run: |
-        mkdir release-package
-        mkdir release-package/assets
-        mkdir release-package/scripts
-        mkdir release-package/localization
-        mkdir release-package/firmwares
+        if (git describe --tags --exact-match 2>$null) {
+          $tag = git describe --tags --exact-match
+          echo "version=$tag" >> $env:GITHUB_OUTPUT
+          echo "Version from git tag: $tag"
+        } else {
+          $version = "nightly-$($env:GITHUB_RUN_NUMBER)"
+          echo "version=$version" >> $env:GITHUB_OUTPUT
+          echo "Generated version: $version"
+        }
 
-    - name: Copy executable
+  - name: Create GitHub Release (if enabled) and upload .exe
+      if: github.event.inputs.create_release == 'true'
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       run: |
-        copy target\x86_64-pc-windows-msvc\dist\iotcraft-dekstop-client.exe release-package\
+        $releaseName = if ("${{ github.event.inputs.release_name }}") { "${{ github.event.inputs.release_name }}" } else { "${{ steps.version.outputs.version }}" }
+        $isPrerelease = "${{ github.event.inputs.prerelease }}" -eq "true"
 
-    - name: Copy required assets
+        echo "Creating release: $releaseName (prerelease: $isPrerelease)"
+
+        # Create GitHub release
+        gh release create "$releaseName" `
+          --title "IoTCraft Windows Release - $releaseName" `
+          --notes "Windows x64 release for IoTCraft desktop client.
+
+          **System Requirements:**
+          - Windows 11 x64
+
+          **Installation:**
+          1. Download iotcraft-dekstop-client.exe
+          2. Run the executable directly" `
+          --latest `
+          $(if ($isPrerelease) { "--prerelease" })
+
+        echo "Release created successfully!"
+
+    - name: Upload executable to release
+      if: github.event.inputs.create_release == 'true'
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       run: |
-        # Copy textures and fonts
-        robocopy desktop-client\assets release-package\assets /E /NP
-        if %ERRORLEVEL% GEQ 8 (exit /b %ERRORLEVEL%)
+        $releaseName = if ("${{ github.event.inputs.release_name }}") { "${{ github.event.inputs.release_name }}" } else { "${{ steps.version.outputs.version }}" }
 
-        # Copy world scripts
-        robocopy desktop-client\scripts release-package\scripts /E /NP
-        if %ERRORLEVEL% GEQ 8 (exit /b %ERRORLEVEL%)
+        gh release upload "$releaseName" target\x86_64-pc-windows-msvc\dist\iotcraft-dekstop-client.exe `
+          --label "Windows Executable (EXE)" `
+          --clobber
 
-        # Copy localization files
-        robocopy desktop-client\localization release-package\localization /E /NP
-        if %ERRORLEVEL% GEQ 8 (exit /b %ERRORLEVEL%)
-
-        # Copy firmware files
-        robocopy desktop-client\firmwares release-package\firmwares /E /NP
-        if %ERRORLEVEL% GEQ 8 (exit /b %ERRORLEVEL%)
-
-    - name: Create README for release
-      run: |
-        # Create a simple README for the Windows release
-        echo IoTCraft Desktop Client - Windows x64 > release-package\README.txt
-        echo. >> release-package\README.txt
-        echo Usage: >> release-package\README.txt
-        echo   Run iotcraft-dekstop-client.exe to start the application >> release-package\README.txt
-        echo. >> release-package\README.txt
-        echo Included components: >> release-package\README.txt
-        echo   - Executable: iotcraft-dekstop-client.exe >> release-package\README.txt
-        echo   - Assets: Textures, fonts, and game resources >> release-package\README.txt
-        echo   - Scripts: World initialization scripts >> release-package\README.txt
-        echo   - Localization: Multi-language support files >> release-package\README.txt
-        echo   - Firmwares: ESP32 device firmware files >> release-package\README.txt
-
-    - name: Create ZIP package
-      run: |
-        cd release-package
-        7z a -tzip ../iotcraft-desktop-client-windows-x64.zip *
-
-    - name: Upload executable as artifact
+  - name: Upload executable as artifact
       uses: actions/upload-artifact@v4
       with:
         name: iotcraft-windows-exe
-        path: release-package/iotcraft-dekstop-client.exe
+        path: target/x86_64-pc-windows-msvc/dist/iotcraft-dekstop-client.exe
         retention-days: 30
+
+    - name: Create package with xtask
+      run: |
+        cargo xtask package --platform windows --profile dist -o dist-package --target x86_64-pc-windows-msvc
 
     - name: Upload ZIP package as artifact
       uses: actions/upload-artifact@v4
       with:
         name: iotcraft-windows-zip
-        path: iotcraft-desktop-client-windows-x64.zip
+        path: dist-package/iotcraft-desktop-client-windows-x86_64-pc-windows-msvc.zip
         retention-days: 30
 
     - name: Get version info
@@ -124,7 +131,7 @@ jobs:
           echo "Generated version: $version"
         }
 
-    - name: Create Release and Upload Assets
+    - name: Upload ZIP package to release
       if: github.event.inputs.create_release == 'true'
       env:
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -136,7 +143,7 @@ jobs:
 
         # Create GitHub release
         $releaseData = gh release create "$releaseName" `
-          iotcraft-desktop-client-windows-x64.zip `
+          dist-package/iotcraft-desktop-client-windows-x86_64-pc-windows-msvc.zip `
           --title "IoTCraft Windows Release - $releaseName" `
           --notes "Windows x64 release package for IoTCraft desktop client.
 
@@ -145,20 +152,16 @@ jobs:
 
           **Installation:**
           1. Download and unzip the package
-          2. Run `iotcraft-dekstop-client.exe`" `
+          2. Run `iotcraft-dekstop-client.exe`
+
+          **Included:**
+          - Optimized executable built with --profile dist
+          - All required assets (textures, fonts, sounds)
+          - World initialization scripts
+          - Localization files
+          - ESP32 firmware files" `
           --latest `
           $(if ($isPrerelease) { "--prerelease" })
 
         echo "Release created successfully!"
         echo $releaseData
-
-    - name: Upload executable to release (if release exists)
-      if: github.event.inputs.create_release == 'true'
-      env:
-        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      run: |
-        $releaseName = if ("${{ github.event.inputs.release_name }}") { "${{ github.event.inputs.release_name }}" } else { "${{ steps.version.outputs.version }}" }
-
-        gh release upload "$releaseName" release-package/iotcraft-dekstop-client.exe `
-          --label "Windows Executable (EXE)" `
-          --clobber
