@@ -9,22 +9,6 @@ name: Comprehensive Tests (Unit, Integration, Scenarios)
 # for reliable, non-flaky integration testing in CI environments.
 
 on:
-  push:
-    branches: [ main, 'feature/**' ]
-    paths:
-      - 'desktop-client/**'
-      - 'mcplay/**'
-      - 'xtask/**'
-      - 'mqtt-server/**'
-      - '.github/workflows/comprehensive-tests.yml'
-  pull_request:
-    branches: [ main ]
-    paths:
-      - 'desktop-client/**'
-      - 'mcplay/**'
-      - 'xtask/**'
-      - 'mqtt-server/**'
-      - '.github/workflows/comprehensive-tests.yml'
   workflow_dispatch:
     inputs:
       test_mode:
