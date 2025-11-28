@@ -20,7 +20,6 @@ on:
 
 permissions:
   contents: write
-  releases: write
 
 env:
   CARGO_TERM_COLOR: always
