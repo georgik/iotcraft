@@ -63,23 +63,36 @@ jobs:
           exit 1
         }
 
-        echo "Creating release: $releaseName (prerelease: $isPrerelease)"
+        echo "Checking if release exists: $releaseName"
 
-        # Create GitHub release
-        gh release create "$releaseName" `
-          --title "IoTCraft Windows Release - $releaseName" `
-          --notes "Windows x64 release for IoTCraft desktop client.
+        # Check if release already exists
+        $releaseExists = gh release view "$releaseName" 2>$null
+        if ($LASTEXITCODE -eq 0) {
+          echo "Release $releaseName already exists, skipping creation"
+        } else {
+          echo "Creating release: $releaseName (prerelease: $isPrerelease)"
 
-          **System Requirements:**
-          - Windows 11 x64
+          # Create GitHub release
+          gh release create "$releaseName" `
+            --title "IoTCraft Windows Release - $releaseName" `
+            --notes "Windows x64 release for IoTCraft desktop client.
 
-          **Installation:**
-          1. Download iotcraft-dekstop-client.exe
-          2. Run the executable directly" `
-          --latest `
-          $(if ($isPrerelease) { "--prerelease" })
+            **System Requirements:**
+            - Windows 11 x64
 
-        echo "Release created successfully!"
+            **Installation:**
+            1. Download iotcraft-dekstop-client.exe
+            2. Run the executable directly" `
+            --latest `
+            $(if ($isPrerelease) { "--prerelease" })
+
+          if ($LASTEXITCODE -eq 0) {
+            echo "Release created successfully!"
+          } else {
+            echo "Failed to create release"
+            exit 1
+          }
+        }
 
     - name: Upload executable to release
       if: github.event.inputs.create_release == 'true'
