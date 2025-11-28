@@ -50,7 +50,7 @@ jobs:
       run: |
         cargo build --profile dist --package iotcraft-dekstop-client --target x86_64-pc-windows-msvc
 
-  - name: Get version info
+    - name: Get version info
       id: version
       run: |
         if (git describe --tags --exact-match 2>$null) {
@@ -63,7 +63,7 @@ jobs:
           echo "Generated version: $version"
         }
 
-  - name: Create GitHub Release (if enabled) and upload .exe
+    - name: Create GitHub Release (if enabled) and upload .exe
       if: github.event.inputs.create_release == 'true'
       env:
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -100,7 +100,7 @@ jobs:
           --label "Windows Executable (EXE)" `
           --clobber
 
-  - name: Upload executable as artifact
+    - name: Upload executable as artifact
       uses: actions/upload-artifact@v4
       with:
         name: iotcraft-windows-exe
@@ -117,19 +117,6 @@ jobs:
         name: iotcraft-windows-zip
         path: dist-package/iotcraft-desktop-client-windows-x86_64-pc-windows-msvc.zip
         retention-days: 30
-
-    - name: Get version info
-      id: version
-      run: |
-        if (git describe --tags --exact-match 2>$null) {
-          $tag = git describe --tags --exact-match
-          echo "version=$tag" >> $env:GITHUB_OUTPUT
-          echo "Version from git tag: $tag"
-        } else {
-          $version = "nightly-$($env:GITHUB_RUN_NUMBER)"
-          echo "version=$version" >> $env:GITHUB_OUTPUT
-          echo "Generated version: $version"
-        }
 
     - name: Upload ZIP package to release
       if: github.event.inputs.create_release == 'true'
