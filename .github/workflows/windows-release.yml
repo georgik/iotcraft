@@ -94,7 +94,6 @@ jobs:
         }
 
         gh release upload "$releaseName" target\x86_64-pc-windows-msvc\dist\iotcraft-dekstop-client.exe `
-          --label "Windows Executable (EXE)" `
           --clobber
 
     - name: Upload executable as artifact
@@ -128,5 +127,4 @@ jobs:
         }
 
         gh release upload "$releaseName" dist-package/iotcraft-desktop-client-windows-x86_64-pc-windows-msvc.zip `
-          --label "Windows Package (ZIP)" `
           --clobber
