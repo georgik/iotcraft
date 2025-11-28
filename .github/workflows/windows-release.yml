@@ -50,26 +50,18 @@ jobs:
       run: |
         cargo build --profile dist --package iotcraft-dekstop-client --target x86_64-pc-windows-msvc
 
-    - name: Get version info
-      id: version
-      run: |
-        if (git describe --tags --exact-match 2>$null) {
-          $tag = git describe --tags --exact-match
-          echo "version=$tag" >> $env:GITHUB_OUTPUT
-          echo "Version from git tag: $tag"
-        } else {
-          $version = "nightly-$($env:GITHUB_RUN_NUMBER)"
-          echo "version=$version" >> $env:GITHUB_OUTPUT
-          echo "Generated version: $version"
-        }
-
     - name: Create GitHub Release (if enabled) and upload .exe
       if: github.event.inputs.create_release == 'true'
       env:
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       run: |
-        $releaseName = if ("${{ github.event.inputs.release_name }}") { "${{ github.event.inputs.release_name }}" } else { "${{ steps.version.outputs.version }}" }
+        $releaseName = "${{ github.event.inputs.release_name }}"
         $isPrerelease = "${{ github.event.inputs.prerelease }}" -eq "true"
+
+        if (-not $releaseName) {
+          Write-Error "Release name is required when creating a release"
+          exit 1
+        }
 
         echo "Creating release: $releaseName (prerelease: $isPrerelease)"
 
@@ -94,7 +86,12 @@ jobs:
       env:
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       run: |
-        $releaseName = if ("${{ github.event.inputs.release_name }}") { "${{ github.event.inputs.release_name }}" } else { "${{ steps.version.outputs.version }}" }
+        $releaseName = "${{ github.event.inputs.release_name }}"
+
+        if (-not $releaseName) {
+          Write-Error "Release name is required when uploading to release"
+          exit 1
+        }
 
         gh release upload "$releaseName" target\x86_64-pc-windows-msvc\dist\iotcraft-dekstop-client.exe `
           --label "Windows Executable (EXE)" `
@@ -123,32 +120,13 @@ jobs:
       env:
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       run: |
-        $releaseName = if ("${{ github.event.inputs.release_name }}") { "${{ github.event.inputs.release_name }}" } else { "${{ steps.version.outputs.version }}" }
-        $isPrerelease = "${{ github.event.inputs.prerelease }}" -eq "true"
+        $releaseName = "${{ github.event.inputs.release_name }}"
 
-        echo "Creating release: $releaseName (prerelease: $isPrerelease)"
+        if (-not $releaseName) {
+          Write-Error "Release name is required when uploading to release"
+          exit 1
+        }
 
-        # Create GitHub release
-        $releaseData = gh release create "$releaseName" `
-          dist-package/iotcraft-desktop-client-windows-x86_64-pc-windows-msvc.zip `
-          --title "IoTCraft Windows Release - $releaseName" `
-          --notes "Windows x64 release package for IoTCraft desktop client.
-
-          **System Requirements:**
-          - Windows 11 x64
-
-          **Installation:**
-          1. Download and unzip the package
-          2. Run `iotcraft-dekstop-client.exe`
-
-          **Included:**
-          - Optimized executable built with --profile dist
-          - All required assets (textures, fonts, sounds)
-          - World initialization scripts
-          - Localization files
-          - ESP32 firmware files" `
-          --latest `
-          $(if ($isPrerelease) { "--prerelease" })
-
-        echo "Release created successfully!"
-        echo $releaseData
+        gh release upload "$releaseName" dist-package/iotcraft-desktop-client-windows-x86_64-pc-windows-msvc.zip `
+          --label "Windows Package (ZIP)" `
+          --clobber
