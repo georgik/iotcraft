@@ -45,7 +45,7 @@ jobs:
 
     - name: Build optimized Windows binary
       run: |
-        cargo build --profile dist --package desktop-client --target x86_64-pc-windows-msvc
+        cargo build --profile dist --package iotcraft-dekstop-client --target x86_64-pc-windows-msvc
 
     - name: Prepare release directory
       run: |
