@@ -115,11 +115,11 @@ void iotcraft_task(void *pvParameter)
     int32_t cam_y = (int32_t)floorf(g_camera.y);
     int32_t cam_z = (int32_t)floorf(g_camera.z);
 
-    // Check 5x5 area around camera
+    // Check 5x5x10 area around camera (including below)
     int blocks_found = 0;
     for (int32_t dx = -2; dx <= 2; dx++) {
         for (int32_t dz = -2; dz <= 2; dz++) {
-            for (int32_t dy = 0; dy < 5; dy++) {
+            for (int32_t dy = -5; dy <= 5; dy++) {
                 int32_t check_x = cam_x + dx;
                 int32_t check_y = cam_y + dy;
                 int32_t check_z = cam_z + dz;
@@ -133,7 +133,7 @@ void iotcraft_task(void *pvParameter)
             }
         }
     }
-    ESP_LOGI(TAG, "  Total blocks found in 5x5x5 area: %d", blocks_found);
+    ESP_LOGI(TAG, "  Total blocks found in 5x5x10 area: %d", blocks_found);
     ESP_LOGI(TAG, "");
 
     // Initialize renderer
@@ -295,6 +295,134 @@ void iotcraft_task(void *pvParameter)
 
     bool wdt_enabled = (wdt_ret == ESP_OK);  // Track if WDT is available
 
+    // Simple font for debug HUD (5x7 digits)
+    static const char digit_font[10][35] = {
+        // 0
+        {0,1,1,1,0,
+         1,0,0,0,1,
+         1,0,0,0,1,
+         1,0,0,0,1,
+         1,0,0,0,1,
+         1,0,0,0,1,
+         0,1,1,1,0},
+        // 1
+        {0,0,1,0,0,
+         0,1,1,0,0,
+         0,0,1,0,0,
+         0,0,1,0,0,
+         0,0,1,0,0,
+         0,0,1,0,0,
+         0,1,1,1,0},
+        // 2
+        {0,1,1,1,0,
+         1,0,0,0,1,
+         0,0,0,0,1,
+         0,0,0,1,0,
+         0,0,1,0,0,
+         0,1,0,0,0,
+         1,1,1,1,1},
+        // 3
+        {0,1,1,1,0,
+         1,0,0,0,1,
+         0,0,0,0,1,
+         0,0,1,1,0,
+         0,0,0,0,1,
+         1,0,0,0,1,
+         0,1,1,1,0},
+        // 4
+        {0,0,0,1,0,
+         0,0,1,1,0,
+         0,1,0,1,0,
+         1,0,0,1,0,
+         1,1,1,1,1,
+         0,0,0,1,0,
+         0,0,0,1,0},
+        // 5
+        {1,1,1,1,1,
+         1,0,0,0,0,
+         1,1,1,1,0,
+         0,0,0,0,1,
+         0,0,0,0,1,
+         1,0,0,0,1,
+         0,1,1,1,0},
+        // 6
+        {0,1,1,1,0,
+         1,0,0,0,0,
+         1,1,1,1,0,
+         1,0,0,0,1,
+         1,0,0,0,1,
+         1,0,0,0,1,
+         0,1,1,1,0},
+        // 7
+        {1,1,1,1,1,
+         0,0,0,0,1,
+         0,0,0,1,0,
+         0,0,1,0,0,
+         0,0,1,0,0,
+         0,0,1,0,0,
+         0,0,1,0,0},
+        // 8
+        {0,1,1,1,0,
+         1,0,0,0,1,
+         1,0,0,0,1,
+         0,1,1,1,0,
+         1,0,0,0,1,
+         1,0,0,0,1,
+         0,1,1,1,0},
+        // 9
+        {0,1,1,1,0,
+         1,0,0,0,1,
+         1,0,0,0,1,
+         0,1,1,1,1,
+         0,0,0,0,1,
+         1,0,0,0,1,
+         0,1,1,1,0}
+    };
+
+    // Helper function to draw integer on framebuffer
+    auto void draw_int(uint16_t* fb, int32_t fb_width, int32_t fb_height,
+                       int x, int y, int value, uint16_t color) {
+        char buf[16];
+        int len = 0;
+        int tmp = value;
+
+        // Handle negative
+        if (value < 0) {
+            tmp = -value;
+        }
+
+        // Convert to string (reversed)
+        do {
+            buf[len++] = '0' + (tmp % 10);
+            tmp /= 10;
+        } while (tmp > 0);
+
+        if (value < 0) {
+            buf[len++] = '-';
+        }
+
+        // Draw digits (in reverse order)
+        int draw_x = x;
+        for (int i = len - 1; i >= 0; i--) {
+            int digit = buf[i] - '0';
+            if (digit >= 0 && digit <= 9) {
+                const char* glyph = digit_font[digit];
+                for (int py = 0; py < 7; py++) {
+                    for (int px = 0; px < 5; px++) {
+                        if (glyph[py * 5 + px]) {
+                            int draw_x_pos = draw_x + px;
+                            int draw_y_pos = y + py;
+                            if (draw_x_pos < fb_width && draw_y_pos < fb_height) {
+                                fb[draw_y_pos * fb_width + draw_x_pos] = color;
+                            }
+                        }
+                    }
+                }
+            }
+            draw_x += 6;  // 5 pixels + 1 space
+        }
+    }
+
     while (g_game.running) {
         // Feed watchdog to prevent resets (only if we successfully added to WDT)
         if (wdt_enabled) {
@@ -312,7 +440,24 @@ void iotcraft_task(void *pvParameter)
         // Poll input (check for key presses)
         input_poll();
 
-        // Handle debug keys
+        // Update game key states from USB keyboard
+        if (usb_keyboard_is_connected()) {
+            // Map USB keyboard input to game actions
+            game_handle_key(&g_game, IOTCRAFT_KEY_W, input_is_key_pressed(IOTCRAFT_KEY_W));
+            game_handle_key(&g_game, IOTCRAFT_KEY_S, input_is_key_pressed(IOTCRAFT_KEY_S));
+            game_handle_key(&g_game, IOTCRAFT_KEY_A, input_is_key_pressed(IOTCRAFT_KEY_A));
+            game_handle_key(&g_game, IOTCRAFT_KEY_D, input_is_key_pressed(IOTCRAFT_KEY_D));
+            game_handle_key(&g_game, IOTCRAFT_KEY_LEFT, input_is_key_pressed(IOTCRAFT_KEY_LEFT));
+            game_handle_key(&g_game, IOTCRAFT_KEY_RIGHT, input_is_key_pressed(IOTCRAFT_KEY_RIGHT));
+            game_handle_key(&g_game, IOTCRAFT_KEY_UP, input_is_key_pressed(IOTCRAFT_KEY_UP));
+            game_handle_key(&g_game, IOTCRAFT_KEY_DOWN, input_is_key_pressed(IOTCRAFT_KEY_DOWN));
+            game_handle_key(&g_game, IOTCRAFT_KEY_SPACE, input_is_key_pressed(IOTCRAFT_KEY_SPACE));
+            game_handle_key(&g_game, IOTCRAFT_KEY_LEFT_SHIFT, input_is_key_pressed(IOTCRAFT_KEY_LEFT_SHIFT));
+            game_handle_key(&g_game, IOTCRAFT_KEY_RIGHT_SHIFT, input_is_key_pressed(IOTCRAFT_KEY_RIGHT_SHIFT));
+            game_handle_key(&g_game, IOTCRAFT_KEY_ESCAPE, input_is_key_pressed(IOTCRAFT_KEY_ESCAPE));
+        }
+
+        // Handle debug keys (Raylib interface for 'H', 'E', 'C')
         if (usb_keyboard_is_connected()) {
             if (IsKeyPressed(KEY_H)) {
                 show_help = !show_help;
@@ -438,6 +583,23 @@ void iotcraft_task(void *pvParameter)
                     }
                 }
             }
+
+            // Draw debug HUD (bottom-left corner)
+            int hud_y = fb_height - 60;  // Start from bottom
+            int hud_x = 10;
+            uint16_t hud_color = 0xFFFF;  // White
+
+            // Position: X, Y, Z
+            draw_int(fb_writable, fb_width, fb_height, hud_x, hud_y, (int)g_camera.x, hud_color);
+            hud_y += 10;
+            draw_int(fb_writable, fb_width, fb_height, hud_x, hud_y, (int)g_camera.y, hud_color);
+            hud_y += 10;
+            draw_int(fb_writable, fb_width, fb_height, hud_x, hud_y, (int)g_camera.z, hud_color);
+            hud_y += 10;
+
+            // Yaw (multiply by 100 to show 2 decimal places)
+            int yaw_scaled = (int)(g_camera.yaw * 100.0f);
+            draw_int(fb_writable, fb_width, fb_height, hud_x, hud_y, yaw_scaled, hud_color);
         }
 
         // Push framebuffer to display

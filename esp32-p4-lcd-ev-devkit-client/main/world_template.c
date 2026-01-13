@@ -20,7 +20,7 @@ static const char medieval_template[] =
     "# Creates a medieval-themed world with castle, village, and forest\n"
     "\n"
     "# Set initial camera position for good overview\n"
-    "tp -15 5 0\n"
+    "tp -15 2 0\n"
     "look -45 -10\n"
     "\n"
     "# Create base terrain (smaller than default for more intimate feel)\n"
