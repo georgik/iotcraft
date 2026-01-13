@@ -75,6 +75,23 @@ bool world_get_target_block(const voxel_world_t* world, const camera_t* camera,
 bool world_get_place_position(const voxel_world_t* world, const camera_t* camera,
                                int32_t* place_x, int32_t* place_y, int32_t* place_z);
 
+/**
+ * @brief Get height of highest block at (x,z) position
+ * @param world World to query
+ * @param x X coordinate
+ * @param z Z coordinate
+ * @return Height of highest block (0-15), or -1 if no blocks
+ */
+int32_t world_get_height(const voxel_world_t* world, int32_t x, int32_t z);
+
+/**
+ * @brief Update heightmap after placing/removing blocks
+ * @param world World to update
+ * @param x X coordinate
+ * @param z Z coordinate
+ */
+void world_update_heightmap(voxel_world_t* world, int32_t x, int32_t z);
+
 #ifdef __cplusplus
 }
 #endif

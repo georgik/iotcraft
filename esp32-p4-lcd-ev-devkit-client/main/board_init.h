@@ -34,6 +34,19 @@ esp_err_t board_init_display(void);
  */
 esp_err_t board_display_push_frame(const uint16_t* framebuffer, int width, int height);
 
+/**
+ * @brief Push framebuffer to display with hardware scaling
+ * @param framebuffer Source framebuffer (RGB565)
+ * @param src_width Source width
+ * @param src_height Source height
+ * @param dst_width Destination width (display size)
+ * @param dst_height Destination height (display size)
+ * @return ESP_OK on success
+ */
+esp_err_t board_display_push_frame_scaled(const uint16_t* framebuffer,
+                                          int src_width, int src_height,
+                                          int dst_width, int dst_height);
+
 #ifdef __cplusplus
 }
 #endif

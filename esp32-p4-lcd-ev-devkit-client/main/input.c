@@ -93,7 +93,20 @@ void input_process_hid_report(const uint8_t *report, uint16_t length)
         }
     }
 
-    // Mark keys in this report as pressed
+    // Process modifier keys (byte 0)
+    // Bit 0: Left Ctrl, Bit 1: Left Shift, Bit 2: Left Alt, Bit 3: Left GUI
+    // Bit 4: Right Ctrl, Bit 5: Right Shift, Bit 6: Right Alt, Bit 7: Right GUI
+    uint8_t modifiers = report[0];
+    g_currently_pressed[IOTCRAFT_KEY_LEFT_CTRL] = (modifiers & 0x01) != 0;
+    g_currently_pressed[IOTCRAFT_KEY_LEFT_SHIFT] = (modifiers & 0x02) != 0;
+    g_currently_pressed[IOTCRAFT_KEY_LEFT_ALT] = (modifiers & 0x04) != 0;
+    // g_currently_pressed[IOTCRAFT_KEY_LEFT_GUI] = (modifiers & 0x08) != 0;  // Not defined
+    g_currently_pressed[IOTCRAFT_KEY_RIGHT_CTRL] = (modifiers & 0x10) != 0;
+    g_currently_pressed[IOTCRAFT_KEY_RIGHT_SHIFT] = (modifiers & 0x20) != 0;
+    // g_currently_pressed[IOTCRAFT_KEY_RIGHT_ALT] = (modifiers & 0x40) != 0;  // Not defined
+    // g_currently_pressed[IOTCRAFT_KEY_RIGHT_GUI] = (modifiers & 0x80) != 0;  // Not defined
+
+    // Mark regular keys in this report as pressed (bytes 2-7)
     for (int i = 2; i < 8 && i < length; i++) {
         if (report[i] != 0) {
             g_currently_pressed[report[i]] = true;

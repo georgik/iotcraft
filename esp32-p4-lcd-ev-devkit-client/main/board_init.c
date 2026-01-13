@@ -12,11 +12,16 @@
 #include "esp_err.h"
 #include "esp_raylib_port.h"
 #include "esp_lcd_panel_io.h"
+#include "esp_heap_caps.h"
 
 static const char *TAG = "board_init";
 
 // Store panel handle for framebuffer push (P4 uses panel directly, not IO)
 static esp_lcd_panel_handle_t g_panel_handle = NULL;
+
+// Scaling buffer for 2x upscale (512x300 -> 1024x600)
+static uint16_t *g_scale_buf = NULL;
+static size_t g_scale_buf_size = 0;
 
 // Example configuration for ESP-BOX-3 using BSP
 #ifdef CONFIG_BOARD_ESP_BOX_3
@@ -243,6 +248,75 @@ esp_err_t board_display_push_frame(const uint16_t* framebuffer, int width, int h
         static int fail_count = 0;
         if (++fail_count % 100 == 1) {
             ESP_LOGW(TAG, "Failed to draw bitmap: %d (simulator may not have display)", ret);
+        }
+        return ret;
+    }
+
+    return ESP_OK;
+}
+
+esp_err_t board_display_push_frame_scaled(const uint16_t* framebuffer,
+                                          int src_width, int src_height,
+                                          int dst_width, int dst_height)
+{
+    if (!g_panel_handle) {
+        static int error_count = 0;
+        if (++error_count % 100 == 1) {
+            ESP_LOGE(TAG, "Panel handle not initialized");
+        }
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    if (!framebuffer || src_width <= 0 || src_height <= 0 || dst_width <= 0 || dst_height <= 0) {
+        ESP_LOGE(TAG, "Invalid framebuffer parameters");
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    // Check if 2x scaling is requested
+    if (dst_width != src_width * 2 || dst_height != src_height * 2) {
+        ESP_LOGE(TAG, "Only 2x scaling supported: %dx%d -> %dx%d", src_width, src_height, dst_width, dst_height);
+        return ESP_ERR_NOT_SUPPORTED;
+    }
+
+    // Allocate scaling buffer if needed (1024x600x2 = 1.2MB)
+    size_t required_size = dst_width * dst_height * sizeof(uint16_t);
+    if (!g_scale_buf || g_scale_buf_size < required_size) {
+        if (g_scale_buf) {
+            free(g_scale_buf);
+        }
+        g_scale_buf_size = required_size;
+        g_scale_buf = (uint16_t*)malloc(g_scale_buf_size);
+        if (!g_scale_buf) {
+            ESP_LOGE(TAG, "Failed to allocate scale buffer (%d bytes)", g_scale_buf_size);
+            g_scale_buf_size = 0;
+            return ESP_ERR_NO_MEM;
+        }
+        ESP_LOGI(TAG, "Scale buffer allocated: %d bytes (%dx%d)", g_scale_buf_size, dst_width, dst_height);
+    }
+
+    // Fast 2x nearest-neighbor scaling
+    // Each source pixel becomes 2x2 block in destination
+    for (int y = 0; y < src_height; y++) {
+        for (int x = 0; x < src_width; x++) {
+            uint16_t pixel = framebuffer[y * src_width + x];
+
+            // Write 2x2 block
+            int dst_x = x * 2;
+            int dst_y = y * 2;
+
+            g_scale_buf[dst_y * dst_width + dst_x] = pixel;
+            g_scale_buf[dst_y * dst_width + dst_x + 1] = pixel;
+            g_scale_buf[(dst_y + 1) * dst_width + dst_x] = pixel;
+            g_scale_buf[(dst_y + 1) * dst_width + dst_x + 1] = pixel;
+        }
+    }
+
+    // Draw scaled buffer to display
+    esp_err_t ret = esp_lcd_panel_draw_bitmap(g_panel_handle, 0, 0, dst_width, dst_height, g_scale_buf);
+    if (ret != ESP_OK) {
+        static int fail_count = 0;
+        if (++fail_count % 100 == 1) {
+            ESP_LOGW(TAG, "Failed to draw scaled bitmap: %d", ret);
         }
         return ret;
     }

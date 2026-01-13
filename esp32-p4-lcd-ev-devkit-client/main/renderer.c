@@ -5,6 +5,7 @@
 
 #include "renderer.h"
 #include "world.h"
+#include "trig_lut.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stdbool.h>
@@ -269,18 +270,20 @@ static void draw_textured_column(renderer_t* renderer, int32_t x,
     }
 }
 
-void renderer_render_frame(renderer_t* renderer) {
+void renderer_render_columns(renderer_t* renderer, int32_t start_col, int32_t end_col) {
     if (!renderer || !renderer->framebuffer || !renderer->camera || !renderer->world) {
         return;
     }
 
-    // Clear framebuffer with sky color
-    renderer_clear(renderer, COLOR_SKY);
+    // Clamp column range to valid bounds
+    if (start_col < 0) start_col = 0;
+    if (end_col > renderer->width) end_col = renderer->width;
+    if (start_col >= end_col) return;
 
     int32_t walls_drawn = 0;  // Debug counter
 
-    // Raycast for each column of the screen
-    for (int32_t x = 0; x < renderer->width; x++) {
+    // Raycast for specified column range
+    for (int32_t x = start_col; x < end_col; x++) {
         // Calculate ray direction based on camera angle and screen position
         float camera_x = 2.0f * x / (float)renderer->width - 1.0f;  // -1 to +1
         float ray_angle = renderer->camera->yaw + camera_x * renderer->camera->fov * 0.5f;
@@ -293,9 +296,9 @@ void renderer_render_frame(renderer_t* renderer) {
             angle_debug_count++;
         }
 
-        // Ray direction
-        float ray_dir_x = cosf(ray_angle);
-        float ray_dir_z = sinf(ray_angle);
+        // Ray direction (use fast lookup tables)
+        float ray_dir_x = cosf_fast(ray_angle);
+        float ray_dir_z = sinf_fast(ray_angle);
 
         // Current position in voxel grid
         int32_t map_x = (int32_t)floorf(renderer->camera->x);
@@ -345,16 +348,31 @@ void renderer_render_frame(renderer_t* renderer) {
                 side = 1;
             }
 
-            // Check if hit block (search y from 0 up for blocks at this x,z)
-            // Increased from 10 to 30 to support taller structures
-            for (int32_t y = 0; y < 30; y++) {
-                block_type = world_get_block(renderer->world, map_x, y, map_z);
-                if (block_type != BLOCK_AIR) {
-                    hit = true;
-                    hit_y = y;
-                    break;
+            // OPTIMIZATION: Use heightmap to skip empty columns
+            // If heightmap says no blocks at this (x,z), skip Y search entirely
+            int32_t highest_y = world_get_height(renderer->world, map_x, map_z);
+            if (highest_y >= 0) {
+                // Heightmap says there ARE blocks here
+                // Check from top down (faster - likely to hit near top)
+                for (int32_t y = highest_y; y >= 0; y--) {
+                    block_type = world_get_block(renderer->world, map_x, y, map_z);
+                    if (block_type != BLOCK_AIR) {
+                        hit = true;
+                        hit_y = y;
+                        break;  // Early exit - no need to continue searching
+                    }
                 }
+            } else {
+                // Heightmap says no blocks - this is now O(1) instead of O(15)!
+                // Just continue DDA without Y search
+                block_type = BLOCK_AIR;
             }
+
+            // Early exit if we hit something
+            if (hit) {
+                break;
+            }
+
             steps++;
         }
 
@@ -436,12 +454,23 @@ void renderer_render_frame(renderer_t* renderer) {
         }
     }
 
-    // Debug log every 30 frames
+    // Debug log every 30 frames (only log if walls were drawn)
     static int32_t frame_count = 0;
-    if (++frame_count % 30 == 0) {
-        ESP_LOGI(TAG, "Rendered %d walls/%d cols, camera: (%.1f, %.1f, %.1f)",
-                 walls_drawn, renderer->width, renderer->camera->x, renderer->camera->y, renderer->camera->z);
+    if (++frame_count % 30 == 0 && walls_drawn > 0) {
+        ESP_LOGI(TAG, "Rendered %d walls/%d cols", walls_drawn, (end_col - start_col));
     }
+}
+
+void renderer_render_frame(renderer_t* renderer) {
+    if (!renderer || !renderer->framebuffer || !renderer->camera || !renderer->world) {
+        return;
+    }
+
+    // Clear framebuffer with sky color
+    renderer_clear(renderer, COLOR_SKY);
+
+    // Render all columns (single-threaded version)
+    renderer_render_columns(renderer, 0, renderer->width);
 }
 
 const uint16_t* renderer_get_framebuffer(const renderer_t* renderer) {

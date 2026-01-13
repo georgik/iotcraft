@@ -101,6 +101,7 @@ typedef enum {
     IOTCRAFT_KEY_LEFT_CTRL = 225,
     IOTCRAFT_KEY_LEFT_ALT = 226,
     IOTCRAFT_KEY_RIGHT_SHIFT = 227,
+    IOTCRAFT_KEY_RIGHT_CTRL = 228,
 } iotcraft_key_code_t;
 
 /**

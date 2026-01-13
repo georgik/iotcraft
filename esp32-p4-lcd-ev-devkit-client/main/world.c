@@ -13,6 +13,8 @@ static const char* TAG = "World";
 
 #define HASH_TABLE_SIZE 4096  // Power of 2 for fast modulo
 #define MAX_VOXELS 8192       // Maximum voxels in world
+#define WORLDSIZE 256         // Heightmap covers -128 to +127
+#define WORLD_OFFSET 128      // Offset to map negative coords to 0..255
 
 // Spatial hash function for 3D coordinates
 static uint32_t hash_position(int32_t x, int32_t y, int32_t z) {
@@ -43,16 +45,36 @@ bool world_init(voxel_world_t* world) {
         g_hash_table[i] = NULL;
     }
 
+    // Allocate heightmap (256x256 = 65KB in PSRAM)
+    world->heightmap = (int32_t*)calloc(WORLDSIZE * WORLDSIZE, sizeof(int32_t));
+    if (!world->heightmap) {
+        ESP_LOGE(TAG, "Failed to allocate heightmap");
+        return false;
+    }
+
+    // Initialize heightmap to -1 (no blocks)
+    for (int32_t i = 0; i < WORLDSIZE * WORLDSIZE; i++) {
+        world->heightmap[i] = -1;
+    }
+
     world->count = 0;
     world->capacity = MAX_VOXELS;
+    world->world_size = WORLDSIZE;
+    world->world_offset = WORLD_OFFSET;
 
-    ESP_LOGI(TAG, "World initialized with hash table size %d", HASH_TABLE_SIZE);
+    ESP_LOGI(TAG, "World initialized with hash table size %d and 256x256 heightmap", HASH_TABLE_SIZE);
     return true;
 }
 
 void world_free(voxel_world_t* world) {
     if (!world) {
         return;
+    }
+
+    // Free heightmap
+    if (world->heightmap) {
+        free(world->heightmap);
+        world->heightmap = NULL;
     }
 
     // Free hash table entries
@@ -119,9 +141,23 @@ bool world_set_block(voxel_world_t* world, int32_t x, int32_t y, int32_t z, bloc
                 }
                 free(entry);
                 world->count--;
+
+                // Update heightmap for this (x,z) column
+                world_update_heightmap(world, x, z);
             } else {
                 // Update existing block type
                 entry->voxel.type = type;
+
+                // Update heightmap if this block is higher than current
+                int32_t hm_x = x + world->world_offset;
+                int32_t hm_z = z + world->world_offset;
+                if (hm_x >= 0 && hm_x < world->world_size &&
+                    hm_z >= 0 && hm_z < world->world_size) {
+                    int32_t idx = hm_z * world->world_size + hm_x;
+                    if (y > world->heightmap[idx]) {
+                        world->heightmap[idx] = y;
+                    }
+                }
             }
             return true;
         }
@@ -154,6 +190,17 @@ bool world_set_block(voxel_world_t* world, int32_t x, int32_t y, int32_t z, bloc
     new_entry->used = true;
     new_entry->next = g_hash_table[hash];
     g_hash_table[hash] = new_entry;
+
+    // Update heightmap if this block is higher than current
+    int32_t hm_x = x + world->world_offset;
+    int32_t hm_z = z + world->world_offset;
+    if (hm_x >= 0 && hm_x < world->world_size &&
+        hm_z >= 0 && hm_z < world->world_size) {
+        int32_t idx = hm_z * world->world_size + hm_x;
+        if (y > world->heightmap[idx]) {
+            world->heightmap[idx] = y;
+        }
+    }
 
     world->count++;
     return true;
@@ -280,4 +327,47 @@ bool world_get_place_position(const voxel_world_t* world, const camera_t* camera
     }
 
     return false;
+}
+int32_t world_get_height(const voxel_world_t* world, int32_t x, int32_t z) {
+    if (!world || !world->heightmap) {
+        return -1;
+    }
+
+    // Map world coordinates to heightmap indices
+    int32_t hm_x = x + world->world_offset;
+    int32_t hm_z = z + world->world_offset;
+
+    // Bounds check
+    if (hm_x < 0 || hm_x >= world->world_size ||
+        hm_z < 0 || hm_z >= world->world_size) {
+        return -1;
+    }
+
+    return world->heightmap[hm_z * world->world_size + hm_x];
+}
+
+void world_update_heightmap(voxel_world_t* world, int32_t x, int32_t z) {
+    if (!world || !world->heightmap) {
+        return;
+    }
+
+    // Map world coordinates to heightmap indices
+    int32_t hm_x = x + world->world_offset;
+    int32_t hm_z = z + world->world_offset;
+
+    // Bounds check
+    if (hm_x < 0 || hm_x >= world->world_size ||
+        hm_z < 0 || hm_z >= world->world_size) {
+        return;
+    }
+
+    // Search all Y levels at this (x,z) to find highest block
+    int32_t max_y = -1;
+    for (int32_t y = 0; y < 15; y++) {
+        if (world_get_block(world, x, y, z) != BLOCK_AIR) {
+            max_y = y;
+        }
+    }
+
+    world->heightmap[hm_z * world->world_size + hm_x] = max_y;
 }

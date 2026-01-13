@@ -51,6 +51,9 @@ typedef struct {
     voxel_t* voxels;
     int32_t count;
     int32_t capacity;
+    int32_t* heightmap;         // OPTIMIZATION: Highest block at each (x,z)
+    int32_t world_size;         // Size of heightmap (world_size x world_size)
+    int32_t world_offset;       // Offset to map negative coordinates to array
 } voxel_world_t;
 
 /**

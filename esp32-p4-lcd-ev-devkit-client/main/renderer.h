@@ -36,6 +36,14 @@ void renderer_free(renderer_t* renderer);
 void renderer_render_frame(renderer_t* renderer);
 
 /**
+ * @brief Render a range of columns (for multi-core rendering)
+ * @param renderer Renderer context
+ * @param start_col First column to render (inclusive)
+ * @param end_col Last column to render (exclusive)
+ */
+void renderer_render_columns(renderer_t* renderer, int32_t start_col, int32_t end_col);
+
+/**
  * @brief Clear framebuffer to solid color
  * @param renderer Renderer context
  * @param color RGB565 color

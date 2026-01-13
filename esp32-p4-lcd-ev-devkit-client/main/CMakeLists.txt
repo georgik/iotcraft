@@ -11,6 +11,7 @@ idf_component_register(
         "iotcraft_mqtt.c"
         "network_init.c"
         "world_template.c"
+        "trig_lut.c"
     INCLUDE_DIRS "."
     PRIV_REQUIRES
         georgik__raylib

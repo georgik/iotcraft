@@ -25,17 +25,27 @@
 #include "iotcraft_mqtt.h"
 #include "network_init.h"
 #include "world_template.h"
+#include "trig_lut.h"
 
 #define TAG "IotCraftClient"
-#define RAYLIB_TASK_STACK_SIZE (160 * 1024)  // 160KB stack for renderer (increased from 128KB)
-#define RENDER_WIDTH 320
-#define RENDER_HEIGHT 240
+#define RAYLIB_TASK_STACK_SIZE (160 * 1024)  // 160KB stack for main renderer task
+#define CORE1_RENDER_STACK_SIZE (32 * 1024)   // 32KB stack for Core 1 render task (only raycasting)
+#define RENDER_WIDTH 512    // Half resolution (4x fewer pixels = 4x faster rendering)
+#define RENDER_HEIGHT 300   // Half resolution (will be scaled to 1024x600 by display)
+#define DISPLAY_WIDTH 1024  // Physical display size
+#define DISPLAY_HEIGHT 600  // Physical display size
 
 // Global state
 static voxel_world_t g_world;
 static camera_t g_camera;
 static renderer_t g_renderer;
 static game_state_t g_game;
+
+// Multi-core rendering synchronization
+static SemaphoreHandle_t g_render_start_sem = NULL;  // Signals Core 1 to start
+static SemaphoreHandle_t g_render_done_sem = NULL;   // Signals Core 0 that Core 1 finished
+static volatile bool g_core1_ready = false;
+static TaskHandle_t g_core1_task_handle = NULL;
 
 // Convert block_type_t to string for MQTT messages
 static const char* block_type_to_string(block_type_t type) {
@@ -49,6 +59,33 @@ static const char* block_type_to_string(block_type_t type) {
         case BLOCK_TERRACOTTA: return "terracotta";
         case BLOCK_WATER: return "water";
         default: return "unknown";
+    }
+}
+
+// ============================================================
+// MULTI-CORE RENDERING: Core 1 Task (Right Half)
+// ============================================================
+/**
+ * @brief Core 1 rendering task - renders right half of screen
+ * @param pvParameter Unused
+ *
+ * This task runs on Core 1 and renders columns 512-1023 (right half)
+ * It synchronizes with Core 0 using a binary semaphore
+ */
+static void core1_render_task(void *pvParameter) {
+    ESP_LOGI(TAG, "Core 1 render task started (rendering right half: columns 512-1023)");
+    g_core1_ready = true;
+
+    // Wait for render requests from Core 0
+    while (true) {
+        // Wait for start signal from Core 0
+        if (xSemaphoreTake(g_render_start_sem, portMAX_DELAY) == pdTRUE) {
+            // Render right half of screen (columns 512-1023)
+            renderer_render_columns(&g_renderer, RENDER_WIDTH / 2, RENDER_WIDTH);
+
+            // Signal completion to Core 0
+            xSemaphoreGive(g_render_done_sem);
+        }
     }
 }
 
@@ -157,8 +194,89 @@ void iotcraft_task(void *pvParameter)
     }
 
     ESP_LOGI(TAG, "IotCraft client initialized successfully");
-    ESP_LOGI(TAG, "Controls: WASD=Move, Arrows=Rotate, Space/Shift=Up/Down");
-    ESP_LOGI(TAG, "Debug: 'C'=Chessboard test, 'H'=Toggle help, 'E'=Exit");
+    ESP_LOGI(TAG, "Controls: WASD=Move (Spectator mode), Arrows=Look, Q=Fly Up, E=Fly Down");
+    ESP_LOGI(TAG, "Debug: 'C'=Chessboard test, 'H'=Toggle help, ESC=Exit");
+
+    // Initialize trigonometric lookup tables for fast rendering
+    trig_lut_init();
+
+    // ============================================================
+    // MULTI-CORE RENDERING: Initialize
+    // ============================================================
+    ESP_LOGI(TAG, "Initializing multi-core rendering...");
+
+    // Create binary semaphores for synchronization
+    g_render_start_sem = xSemaphoreCreateBinary();
+    if (!g_render_start_sem) {
+        ESP_LOGE(TAG, "Failed to create render start semaphore");
+        renderer_free(&g_renderer);
+        world_free(&g_world);
+        vTaskDelete(NULL);
+        return;
+    }
+
+    g_render_done_sem = xSemaphoreCreateBinary();
+    if (!g_render_done_sem) {
+        ESP_LOGE(TAG, "Failed to create render done semaphore");
+        vSemaphoreDelete(g_render_start_sem);
+        renderer_free(&g_renderer);
+        world_free(&g_world);
+        vTaskDelete(NULL);
+        return;
+    }
+    ESP_LOGI(TAG, "Render semaphores created");
+
+    // Check available heap before creating Core 1 task
+    size_t free_heap = esp_get_free_heap_size();
+    size_t min_free_heap = esp_get_minimum_free_heap_size();
+    ESP_LOGI(TAG, "Free heap before Core 1 task: %zu bytes (min: %zu bytes)",
+             free_heap, min_free_heap);
+
+    // Create Core 1 rendering task (right half of screen)
+    ESP_LOGI(TAG, "Creating Core 1 render task with %d KB stack...",
+             CORE1_RENDER_STACK_SIZE / 1024);
+
+    BaseType_t task_ret = xTaskCreatePinnedToCore(
+        core1_render_task,           // Task function
+        "core1_render",              // Task name
+        CORE1_RENDER_STACK_SIZE,     // Stack size (much smaller - only raycasting)
+        NULL,                        // Parameters
+        5,                           // Priority (same as main task)
+        &g_core1_task_handle,        // Task handle
+        1                            // Core ID (run on Core 1)
+    );
+
+    if (task_ret != pdPASS) {
+        ESP_LOGE(TAG, "Failed to create Core 1 render task (ret=%d)", task_ret);
+        ESP_LOGE(TAG, "  Available heap: %zu bytes", esp_get_free_heap_size());
+        ESP_LOGE(TAG, "  Required stack: %d bytes", CORE1_RENDER_STACK_SIZE);
+        vSemaphoreDelete(g_render_start_sem);
+        vSemaphoreDelete(g_render_done_sem);
+        renderer_free(&g_renderer);
+        world_free(&g_world);
+        vTaskDelete(NULL);
+        return;
+    }
+
+    // Wait for Core 1 task to be ready
+    int wait_count = 0;
+    while (!g_core1_ready && wait_count < 100) {
+        vTaskDelay(pdMS_TO_TICKS(10));
+        wait_count++;
+    }
+
+    if (!g_core1_ready) {
+        ESP_LOGE(TAG, "Core 1 render task failed to start");
+        vSemaphoreDelete(g_render_start_sem);
+        vSemaphoreDelete(g_render_done_sem);
+        renderer_free(&g_renderer);
+        world_free(&g_world);
+        vTaskDelete(NULL);
+        return;
+    }
+
+    ESP_LOGI(TAG, "Multi-core rendering initialized (Core 0: left half, Core 1: right half)");
+
 
     // Debug flags
     bool show_chessboard = false;  // Disabled by default, press 'C' to enable
@@ -485,9 +603,8 @@ void iotcraft_task(void *pvParameter)
             game_handle_key(&g_game, IOTCRAFT_KEY_RIGHT, input_is_key_pressed(IOTCRAFT_KEY_RIGHT));
             game_handle_key(&g_game, IOTCRAFT_KEY_UP, input_is_key_pressed(IOTCRAFT_KEY_UP));
             game_handle_key(&g_game, IOTCRAFT_KEY_DOWN, input_is_key_pressed(IOTCRAFT_KEY_DOWN));
-            game_handle_key(&g_game, IOTCRAFT_KEY_SPACE, input_is_key_pressed(IOTCRAFT_KEY_SPACE));
-            game_handle_key(&g_game, IOTCRAFT_KEY_LEFT_SHIFT, input_is_key_pressed(IOTCRAFT_KEY_LEFT_SHIFT));
-            game_handle_key(&g_game, IOTCRAFT_KEY_RIGHT_SHIFT, input_is_key_pressed(IOTCRAFT_KEY_RIGHT_SHIFT));
+            game_handle_key(&g_game, IOTCRAFT_KEY_Q, input_is_key_pressed(IOTCRAFT_KEY_Q));
+            game_handle_key(&g_game, IOTCRAFT_KEY_E, input_is_key_pressed(IOTCRAFT_KEY_E));
             game_handle_key(&g_game, IOTCRAFT_KEY_ESCAPE, input_is_key_pressed(IOTCRAFT_KEY_ESCAPE));
         }
 
@@ -557,8 +674,21 @@ void iotcraft_task(void *pvParameter)
         // Update game logic
         game_update(&g_game, delta_time);
 
-        // Render a frame
-        renderer_render_frame(&g_renderer);
+        // ============================================================
+        // MULTI-CORE PARALLEL RENDERING
+        // ============================================================
+        // Clear framebuffer with sky color (done once by Core 0)
+        renderer_clear(&g_renderer, 0x867d);  // COLOR_SKY
+
+        // Signal Core 1 to start rendering right half
+        xSemaphoreGive(g_render_start_sem);
+
+        // Core 0 renders left half (columns 0-511) in parallel with Core 1
+        renderer_render_columns(&g_renderer, 0, RENDER_WIDTH / 2);
+
+        // Wait for Core 1 to finish rendering right half
+        xSemaphoreTake(g_render_done_sem, portMAX_DELAY);
+        // ============================================================
 
         // Get framebuffer and dimensions
         const uint16_t* fb = renderer_get_framebuffer(&g_renderer);
@@ -737,13 +867,14 @@ void iotcraft_task(void *pvParameter)
             draw_int(fb_writable, fb_width, fb_height, hud_x, hud_y, yaw_scaled, hud_color);
         }
 
-        // Push framebuffer to display
+        // Push framebuffer to display with hardware scaling
+        // Render at 512x300, scale to 1024x600 by display hardware (free performance boost!)
         if (fb && fb_width > 0 && fb_height > 0) {
-            esp_err_t ret = board_display_push_frame(fb, fb_width, fb_height);
+            esp_err_t ret = board_display_push_frame_scaled(fb, fb_width, fb_height, DISPLAY_WIDTH, DISPLAY_HEIGHT);
             if (ret != ESP_OK) {
                 // Only log errors occasionally to avoid spam
                 if (frameCounter % 30 == 0) {
-                    ESP_LOGW(TAG, "Failed to push frame to display: %d", ret);
+                    ESP_LOGW(TAG, "Failed to push scaled frame to display: %d", ret);
                 }
             }
         }

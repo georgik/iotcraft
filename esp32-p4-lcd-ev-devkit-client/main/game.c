@@ -68,12 +68,11 @@ void game_handle_key(game_state_t* game, iotcraft_key_code_t key, bool pressed) 
             key_actions.rotate_right = pressed;
             break;
 
-        // Space/Shift for vertical movement
-        case IOTCRAFT_KEY_SPACE:
+        // Q/E for vertical movement (altitude control)
+        case IOTCRAFT_KEY_Q:
             key_actions.up = pressed;
             break;
-        case IOTCRAFT_KEY_LEFT_SHIFT:
-        case IOTCRAFT_KEY_RIGHT_SHIFT:
+        case IOTCRAFT_KEY_E:
             key_actions.down = pressed;
             break;
 
