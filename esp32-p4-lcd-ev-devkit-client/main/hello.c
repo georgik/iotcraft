@@ -619,6 +619,103 @@ void iotcraft_task(void *pvParameter)
                 }
             }
 
+            // Draw minimap in top-right corner (2D top-down view)
+            const int minimap_size = 64;  // 64x64 pixel minimap
+            const int minimap_x = fb_width - minimap_size - 5;
+            const int minimap_y = 25;  // Below the "F" indicator
+
+            // Scale factor: how many world units per minimap pixel
+            const float minimap_scale = 2.0f;  // 2 world units = 1 minimap pixel
+
+            // Camera position in minimap coordinates
+            const int cam_minimap_x = minimap_size / 2;
+            const int cam_minimap_y = minimap_size / 2;
+
+            // Draw minimap background (semi-transparent dark)
+            for (int my = 0; my < minimap_size; my++) {
+                for (int mx = 0; mx < minimap_size; mx++) {
+                    int draw_x = minimap_x + mx;
+                    int draw_y = minimap_y + my;
+                    if (draw_x < fb_width && draw_y < fb_height) {
+                        fb_writable[draw_y * fb_width + draw_x] = 0x0000;  // Black
+                    }
+                }
+            }
+
+            // Draw blocks on minimap
+            for (int my = 0; my < minimap_size; my++) {
+                for (int mx = 0; mx < minimap_size; mx++) {
+                    // Convert minimap pixel to world coordinates
+                    float world_offset_x = (mx - cam_minimap_x) * minimap_scale;
+                    float world_offset_z = (my - cam_minimap_y) * minimap_scale;
+
+                    int32_t world_x = (int32_t)floorf(g_camera.x + world_offset_x);
+                    int32_t world_z = (int32_t)floorf(g_camera.z + world_offset_z);
+
+                    // Check for blocks at this position (search from bottom up)
+                    bool found_block = false;
+                    for (int32_t wy = 30; wy >= 0; wy--) {
+                        block_type_t block = world_get_block(&g_world, world_x, wy, world_z);
+                        if (block != BLOCK_AIR) {
+                            // Color based on block type
+                            uint16_t block_color;
+                            switch (block) {
+                                case BLOCK_GRASS: block_color = 0x07E0; break;  // Green
+                                case BLOCK_DIRT:  block_color = 0x6A44; break;  // Brown
+                                case BLOCK_STONE: block_color = 0xFFFF; break;  // White
+                                case BLOCK_QUARTZ: block_color = 0xFFFF; break; // White
+                                default: block_color = 0x8888; break;  // Gray
+                            }
+
+                            // Draw pixel on minimap
+                            int draw_x = minimap_x + mx;
+                            int draw_y = minimap_y + my;
+                            if (draw_x < fb_width && draw_y < fb_height) {
+                                fb_writable[draw_y * fb_width + draw_x] = block_color;
+                            }
+                            found_block = true;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            // Draw camera direction arrow on minimap
+            const int arrow_len = 8;
+            const float dir_x = cosf(g_camera.yaw);
+            const float dir_z = sinf(g_camera.yaw);
+            for (int i = 0; i < arrow_len; i++) {
+                int ax = cam_minimap_x + (int)(dir_x * i);
+                int ay = cam_minimap_y + (int)(dir_z * i);
+                if (ax >= 0 && ax < minimap_size && ay >= 0 && ay < minimap_size) {
+                    int draw_x = minimap_x + ax;
+                    int draw_y = minimap_y + ay;
+                    if (draw_x < fb_width && draw_y < fb_height) {
+                        fb_writable[draw_y * fb_width + draw_x] = 0xF800;  // Red arrow
+                    }
+                }
+            }
+
+            // Draw minimap border
+            for (int i = 0; i < minimap_size; i++) {
+                // Top border
+                if (minimap_y < fb_height) {
+                    fb_writable[minimap_y * fb_width + (minimap_x + i)] = 0xFFFF;  // White
+                }
+                // Bottom border
+                if (minimap_y + minimap_size - 1 < fb_height) {
+                    fb_writable[(minimap_y + minimap_size - 1) * fb_width + (minimap_x + i)] = 0xFFFF;
+                }
+                // Left border
+                if (minimap_x < fb_width) {
+                    fb_writable[(minimap_y + i) * fb_width + minimap_x] = 0xFFFF;
+                }
+                // Right border
+                if (minimap_x + minimap_size - 1 < fb_width) {
+                    fb_writable[(minimap_y + i) * fb_width + (minimap_x + minimap_size - 1)] = 0xFFFF;
+                }
+            }
+
             // Draw debug HUD (bottom-left corner)
             int hud_y = fb_height - 60;  // Start from bottom
             int hud_x = 10;

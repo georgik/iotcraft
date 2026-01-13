@@ -235,23 +235,18 @@ static void draw_textured_column(renderer_t* renderer, int32_t x,
     // Draw textured vertical line
     int32_t tex_y = tex_y_start;
 
-    // Debug: Log first wall column to see texture coordinates
-    static bool tex_debug_done = false;
-    if (!tex_debug_done) {
-        ESP_LOGI(TAG, "TEX_DEBUG: x=%d, y_range=%d..%d, tex_x=%d", x, y_start, y_end, tex_x);
+    // Debug: Log first few wall columns to verify X position
+    static int tex_debug_count = 0;
+    if (tex_debug_count < 5) {
+        ESP_LOGI(TAG, "TEX_DEBUG #%d: x=%d, y_range=%d..%d, tex_x=%d", tex_debug_count, x, y_start, y_end, tex_x);
         ESP_LOGI(TAG, "  tex_y_start=%d (0x%x), tex_y_step=%d (0x%x)",
                  tex_y_start, tex_y_start, tex_y_step, tex_y_step);
         ESP_LOGI(TAG, "  Column height: %d pixels", y_end - y_start + 1);
-
-        // Sample first 10 texture Y coordinates
-        int32_t ty_sample = tex_y_start;
-        ESP_LOGI(TAG, "  First 10 tex_y values:");
-        for (int i = 0; i < 10; i++) {
-            int32_t ty = (ty_sample >> 4) & 0x7;
-            ESP_LOGI(TAG, "    pixel[%d]: tex_y=%d (0x%x) -> ty=%d", i, ty_sample, ty_sample, ty);
-            ty_sample += tex_y_step;
-        }
-        tex_debug_done = true;
+        ESP_LOGI(TAG, "  Framebuffer index: [0]=%d, [mid]=%d, [last]=%d",
+                 y_start * renderer->width + x,
+                 ((y_start + y_end) / 2) * renderer->width + x,
+                 y_end * renderer->width + x);
+        tex_debug_count++;
     }
 
     for (int32_t y = y_start; y <= y_end; y++) {
@@ -404,15 +399,15 @@ void renderer_render_frame(renderer_t* renderer) {
             int32_t tex_y_step = (TEXTURE_SIZE << 12) / column_height;  // Fixed-point 12.4 for more precision
             int32_t tex_y_start = 0;  // Start from top of texture
 
-            // Debug: Log first wall calculation
-            static bool wall_debug_done = false;
-            if (!wall_debug_done) {
-                ESP_LOGI(TAG, "WALL_DEBUG: col_x=%d, dist=%.2f, line_height=%d", x, perp_wall_dist, line_height);
+            // Debug: Log first few wall calculations
+            static int wall_debug_count = 0;
+            if (wall_debug_count < 5) {
+                ESP_LOGI(TAG, "WALL_DEBUG #%d: col_x=%d, dist=%.2f, line_height=%d", wall_debug_count, x, perp_wall_dist, line_height);
                 ESP_LOGI(TAG, "  draw_start=%d, draw_end=%d, column_height=%d", draw_start, draw_end, column_height);
                 ESP_LOGI(TAG, "  TEXTURE_SIZE=%d, (TEXTURE_SIZE << 12)=%d", TEXTURE_SIZE, TEXTURE_SIZE << 12);
                 ESP_LOGI(TAG, "  tex_y_step=%d (0x%x), tex_y_start=%d", tex_y_step, tex_y_step, tex_y_start);
                 ESP_LOGI(TAG, "  Expected: Step should map %d pixels to 8 texture rows", column_height);
-                wall_debug_done = true;
+                wall_debug_count++;
             }
 
             // Calculate shading
