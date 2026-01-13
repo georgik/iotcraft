@@ -14,8 +14,15 @@
 
 static const char* TAG = "Renderer";
 
+// Wireframe mode (toggle with F1)
+static bool g_wireframe_mode = false;
+
 // RGB565 color helpers
 #define RGB565(r,g,b) ((((r)&0xF8)<<8)|(((g)&0xFC)<<3)|((b)>>3))
+
+// Wireframe colors
+#define COLOR_WIREFRAME_EDGE 0xFFFF  // White
+#define COLOR_WIREFRAME_FACE  0x4208  // Dark blue (transparent look)
 
 /**
  * @brief Shade an RGB565 color by a factor
@@ -548,139 +555,13 @@ void renderer_render_columns(renderer_t* renderer, int32_t start_col, int32_t en
 }
 
 /**
- * @brief Render floor (horizontal surfaces) using Doom-style span rendering
- * @param renderer Renderer context
- * @param render_floor If true, render floor below camera; if false, render ceiling above
- *
- * This renders horizontal surfaces by casting rays and finding where they hit.
- * Much more efficient than per-column rendering for horizontal surfaces.
+ * @brief Render wireframe view of all voxels (forward declaration)
  */
-static void renderer_render_horizontal_plane(renderer_t* renderer, bool render_floor) {
-    if (!renderer || !renderer->framebuffer || !renderer->camera || !renderer->world) {
-        return;
-    }
+static void renderer_render_wireframe(renderer_t* renderer);
 
-    int32_t horizon = renderer->height / 2;
-
-    // Determine Y range
-    int32_t y_start, y_end;
-
-    if (render_floor) {
-        // Render floor (below horizon)
-        y_start = horizon;
-        y_end = renderer->height;
-    } else {
-        // Render ceiling (above horizon)
-        y_start = 0;
-        y_end = horizon;
-    }
-
-    for (int32_t y = y_start; y != y_end; y += (render_floor ? 1 : 1)) {
-        // Calculate vertical angle for this row
-        float v_angle = (float)(y - horizon) / renderer->height;  // -0.5 to +0.5
-        float ray_pitch = renderer->camera->pitch + v_angle * 0.8f;
-
-        // Calculate ray Y direction
-        float ray_dir_y = sinf_fast(ray_pitch);
-
-        // Skip if ray direction is wrong for this plane
-        if (render_floor && ray_dir_y >= 0) continue;   // Floor needs rays going down
-        if (!render_floor && ray_dir_y <= 0) continue;  // Ceiling needs rays going up
-
-        // For each column, find where this horizontal ray hits
-        for (int32_t x = 0; x < renderer->width; x++) {
-            // Skip if this pixel was already drawn by wall renderer
-            // (Walls have priority)
-            if (renderer->framebuffer[y * renderer->width + x] != COLOR_SKY) {
-                continue;  // Already drawn
-            }
-
-            // Calculate ray angle in X-Z plane
-            float camera_x = 2.0f * x / (float)renderer->width - 1.0f;
-            float ray_angle = renderer->camera->yaw + camera_x * renderer->camera->fov * 0.5f;
-
-            float ray_dir_x = cosf_fast(ray_angle);
-            float ray_dir_z = sinf_fast(ray_angle);
-
-            // Find distance to horizontal plane at camera's Y level
-            // For floor: y = camera->y - 1.6 (eye height)
-            // For ceiling: y = camera->y + something (top of blocks)
-            float target_y;
-            if (render_floor) {
-                target_y = floorf(renderer->camera->y);  // Floor at integer below camera
-            } else {
-                target_y = floorf(renderer->camera->y) + 1.0f;  // Ceiling above camera
-            }
-
-            float delta_y = target_y - renderer->camera->y;
-
-            // Avoid division by zero
-            if (fabsf(ray_dir_y) < 0.001f) continue;
-
-            float plane_dist = delta_y / ray_dir_y;
-
-            // Skip if behind camera or too far
-            if (plane_dist < 0.1f || plane_dist > 50.0f) continue;
-
-            // Calculate world position of hit
-            float hit_x = renderer->camera->x + plane_dist * ray_dir_x;
-            float hit_z = renderer->camera->z + plane_dist * ray_dir_z;
-
-            // Get block at this position
-            int32_t map_x = (int32_t)floorf(hit_x);
-            int32_t map_z = (int32_t)floorf(hit_z);
-
-            // Find the block at this (x, z)
-            int32_t target_block_y;
-            block_type_t block_type;
-
-            if (render_floor) {
-                // For floor, get highest block at this (x, z)
-                target_block_y = world_get_height(renderer->world, map_x, map_z);
-                if (target_block_y < 0) target_block_y = 0;
-                block_type = world_get_block(renderer->world, map_x, target_block_y, map_z);
-            } else {
-                // For ceiling, get block above camera (if any)
-                target_block_y = (int32_t)floorf(renderer->camera->y) + 1;
-                block_type = world_get_block(renderer->world, map_x, target_block_y, map_z);
-            }
-
-            if (block_type == BLOCK_AIR) {
-                block_type = BLOCK_GRASS;  // Default to grass
-            }
-
-            const uint16_t* texture = textures[block_type];
-            if (!texture) {
-                texture = texture_grass;
-            }
-
-            // Calculate texture coordinates
-            float tex_x_frac = hit_x - floorf(hit_x);
-            float tex_z_frac = hit_z - floorf(hit_z);
-
-            int32_t tex_x = (int32_t)(tex_x_frac * TEXTURE_SIZE) & (TEXTURE_SIZE - 1);
-            int32_t tex_y = (int32_t)(tex_z_frac * TEXTURE_SIZE) & (TEXTURE_SIZE - 1);
-
-            uint16_t texel = texture[tex_y * TEXTURE_SIZE + tex_x];
-
-            // Apply distance shading
-            float shade = 1.0f - (plane_dist / 30.0f);
-            if (shade < 0.3f) shade = 0.3f;
-            if (shade > 1.0f) shade = 1.0f;
-
-            // Floor is slightly darker than ceiling
-            if (render_floor) {
-                shade *= 0.8f;
-            }
-
-            texel = shade_color(texel, shade);
-
-            // Draw pixel
-            renderer->framebuffer[y * renderer->width + x] = texel;
-        }
-    }
-}
-
+/**
+ * @brief Render a frame
+ */
 void renderer_render_frame(renderer_t* renderer) {
     if (!renderer || !renderer->framebuffer || !renderer->camera || !renderer->world) {
         return;
@@ -689,14 +570,14 @@ void renderer_render_frame(renderer_t* renderer) {
     // Clear framebuffer with sky color
     renderer_clear(renderer, COLOR_SKY);
 
-    // Render floor (below walls)
-    renderer_render_horizontal_plane(renderer, true);
-
-    // Render ceiling (above walls)
-    renderer_render_horizontal_plane(renderer, false);
-
-    // Render all columns (walls)
-    renderer_render_columns(renderer, 0, renderer->width);
+    // Check wireframe mode
+    if (g_wireframe_mode) {
+        // Render wireframe view (shows all voxels)
+        renderer_render_wireframe(renderer);
+    } else {
+        // Normal textured rendering
+        renderer_render_columns(renderer, 0, renderer->width);
+    }
 }
 
 const uint16_t* renderer_get_framebuffer(const renderer_t* renderer) {
@@ -714,4 +595,135 @@ void renderer_get_dimensions(const renderer_t* renderer, int32_t* width, int32_t
     }
     if (width) *width = renderer->width;
     if (height) *height = renderer->height;
+}
+
+/**
+ * @brief Toggle wireframe rendering mode
+ * @param new_mode If true, enable wireframe; if false, disable. If -1, toggle current state
+ * @return Current wireframe mode state
+ */
+bool renderer_toggle_wireframe(int new_mode) {
+    if (new_mode == -1) {
+        g_wireframe_mode = !g_wireframe_mode;
+    } else {
+        g_wireframe_mode = (new_mode != 0);
+    }
+
+    ESP_LOGI(TAG, "Wireframe mode: %s", g_wireframe_mode ? "ON" : "OFF");
+    return g_wireframe_mode;
+}
+
+/**
+ * @brief Draw a single voxel as wireframe
+ * @param renderer Renderer context
+ * @param x, y, z World coordinates of voxel
+ * @param color Wireframe color
+ */
+static void draw_voxel_wireframe(renderer_t* renderer, int32_t x, int32_t y, int32_t z, uint16_t color) {
+    if (!renderer || !renderer->framebuffer) {
+        return;
+    }
+
+    // Project 3D voxel position to 2D screen space
+    // This is a simple orthographic projection for debugging
+
+    // Calculate offset from camera
+    float dx = x - renderer->camera->x;
+    float dy = y - renderer->camera->y;
+    float dz = z - renderer->camera->z;
+
+    // Rotate by camera yaw
+    float cos_yaw = cosf_fast(-renderer->camera->yaw);
+    float sin_yaw = sinf_fast(-renderer->camera->yaw);
+
+    float rx = dx * cos_yaw - dz * sin_yaw;
+    float rz = dx * sin_yaw + dz * cos_yaw;
+
+    // Skip if behind camera
+    if (rz < 0.1f) {
+        return;
+    }
+
+    // Simple perspective projection
+    float fov_scale = renderer->height / 2.0f;
+    float screen_x = renderer->width / 2 + (rx / rz) * fov_scale;
+    float screen_y = renderer->height / 2 - (dy / rz) * fov_scale;
+
+    // Calculate voxel size on screen (decreases with distance)
+    float voxel_screen_size = fov_scale / rz;
+
+    // Skip if off screen
+    if (screen_x + voxel_screen_size < 0 || screen_x - voxel_screen_size >= renderer->width ||
+        screen_y + voxel_screen_size < 0 || screen_y - voxel_screen_size >= renderer->height) {
+        return;
+    }
+
+    // Draw wireframe edges (cube outline)
+    int32_t x1 = (int32_t)(screen_x - voxel_screen_size / 2);
+    int32_t x2 = (int32_t)(screen_x + voxel_screen_size / 2);
+    int32_t y1 = (int32_t)(screen_y - voxel_screen_size / 2);
+    int32_t y2 = (int32_t)(screen_y + voxel_screen_size / 2);
+
+    // Clamp to screen bounds
+    if (x1 < 0) x1 = 0;
+    if (x2 >= renderer->width) x2 = renderer->width - 1;
+    if (y1 < 0) y1 = 0;
+    if (y2 >= renderer->height) y2 = renderer->height - 1;
+
+    // Draw edges
+    for (int32_t ix = x1; ix <= x2; ix++) {
+        // Top and bottom edges
+        renderer->framebuffer[y1 * renderer->width + ix] = color;
+        renderer->framebuffer[y2 * renderer->width + ix] = color;
+    }
+    for (int32_t iy = y1; iy <= y2; iy++) {
+        // Left and right edges
+        renderer->framebuffer[iy * renderer->width + x1] = color;
+        renderer->framebuffer[iy * renderer->width + x2] = color;
+    }
+}
+
+/**
+ * @brief Render wireframe view of all voxels
+ * @param renderer Renderer context
+ */
+static void renderer_render_wireframe(renderer_t* renderer) {
+    if (!renderer || !renderer->framebuffer || !renderer->world) {
+        return;
+    }
+
+    // Iterate through all blocks in the world
+    voxel_world_t* world = renderer->world;
+    int32_t render_distance = 20;  // Only render nearby blocks
+
+    int32_t cam_x = (int32_t)floorf(renderer->camera->x);
+    int32_t cam_z = (int32_t)floorf(renderer->camera->z);
+
+    for (int32_t x = cam_x - render_distance; x <= cam_x + render_distance; x++) {
+        for (int32_t z = cam_z - render_distance; z <= cam_z + render_distance; z++) {
+            // Get highest block at this (x, z)
+            int32_t highest_y = world_get_height(world, x, z);
+
+            // Draw all blocks from Y=0 to highest_y
+            for (int32_t y = 0; y <= highest_y; y++) {
+                block_type_t block = world_get_block(world, x, y, z);
+                if (block != BLOCK_AIR) {
+                    // Choose color based on block type
+                    uint16_t color;
+                    switch (block) {
+                        case BLOCK_GRASS:   color = RGB565(0, 200, 0); break;
+                        case BLOCK_DIRT:    color = RGB565(139, 69, 19); break;
+                        case BLOCK_STONE:   color = RGB565(128, 128, 128); break;
+                        case BLOCK_QUARTZ:  color = RGB565(255, 255, 255); break;
+                        case BLOCK_GLASS:   color = RGB565(200, 200, 255); break;
+                        case BLOCK_TERRACOTTA: color = RGB565(200, 100, 100); break;
+                        case BLOCK_WATER:   color = RGB565(0, 100, 255); break;
+                        default:            color = COLOR_WIREFRAME_EDGE; break;
+                    }
+
+                    draw_voxel_wireframe(renderer, x, y, z, color);
+                }
+            }
+        }
+    }
 }

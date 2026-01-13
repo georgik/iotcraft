@@ -65,6 +65,13 @@ const uint16_t* renderer_get_framebuffer(const renderer_t* renderer);
  */
 void renderer_get_dimensions(const renderer_t* renderer, int32_t* width, int32_t* height);
 
+/**
+ * @brief Toggle wireframe rendering mode
+ * @param new_mode If true, enable wireframe; if false, disable. If -1, toggle current state
+ * @return Current wireframe mode state
+ */
+bool renderer_toggle_wireframe(int new_mode);
+
 #ifdef __cplusplus
 }
 #endif
