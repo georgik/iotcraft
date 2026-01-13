@@ -285,6 +285,14 @@ void renderer_render_frame(renderer_t* renderer) {
         float camera_x = 2.0f * x / (float)renderer->width - 1.0f;  // -1 to +1
         float ray_angle = renderer->camera->yaw + camera_x * renderer->camera->fov * 0.5f;
 
+        // Debug: Log ray angles for first few columns
+        static int angle_debug_count = 0;
+        if (angle_debug_count < 5) {
+            ESP_LOGI(TAG, "ANGLE_DEBUG #%d: x=%d, camera_x=%.4f, yaw=%.4f, fov=%.4f, ray_angle=%.4f",
+                     angle_debug_count, x, camera_x, renderer->camera->yaw, renderer->camera->fov, ray_angle);
+            angle_debug_count++;
+        }
+
         // Ray direction
         float ray_dir_x = cosf(ray_angle);
         float ray_dir_z = sinf(ray_angle);

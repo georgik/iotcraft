@@ -96,11 +96,14 @@ void iotcraft_task(void *pvParameter)
 
     // Load medieval world template (castle, village, forest)
     ESP_LOGI(TAG, "Loading medieval world template...");
+
+    // Initialize camera FIRST (sets FOV and defaults)
+    camera_init(&g_camera);
+
     if (!world_load_medieval_template(&g_world, &g_camera)) {
         ESP_LOGE(TAG, "Failed to load medieval template, using fallback");
         // Fallback to simple terrain if template fails
         world_generate_test_terrain(&g_world);
-        camera_init(&g_camera);
     } else {
         ESP_LOGI(TAG, "Medieval world loaded successfully!");
     }
