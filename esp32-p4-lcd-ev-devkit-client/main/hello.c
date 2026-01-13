@@ -443,6 +443,37 @@ void iotcraft_task(void *pvParameter)
         // Update game key states from USB keyboard
         if (usb_keyboard_is_connected()) {
             // Map USB keyboard input to game actions
+            // Log which keys are being pressed (only when any key is active)
+            bool any_key = false;
+            if (input_is_key_pressed(IOTCRAFT_KEY_W) ||
+                input_is_key_pressed(IOTCRAFT_KEY_A) ||
+                input_is_key_pressed(IOTCRAFT_KEY_S) ||
+                input_is_key_pressed(IOTCRAFT_KEY_D) ||
+                input_is_key_pressed(IOTCRAFT_KEY_LEFT) ||
+                input_is_key_pressed(IOTCRAFT_KEY_RIGHT) ||
+                input_is_key_pressed(IOTCRAFT_KEY_UP) ||
+                input_is_key_pressed(IOTCRAFT_KEY_DOWN)) {
+                any_key = true;
+            }
+
+            static int key_log_count = 0;
+            if (any_key && ++key_log_count >= 10) {  // Log every 10th frame with keys pressed (2x per second)
+                const char *keys = "";
+                if (input_is_key_pressed(IOTCRAFT_KEY_W)) keys = "W";
+                else if (input_is_key_pressed(IOTCRAFT_KEY_S)) keys = "S";
+                else if (input_is_key_pressed(IOTCRAFT_KEY_A)) keys = "A";
+                else if (input_is_key_pressed(IOTCRAFT_KEY_D)) keys = "D";
+                else if (input_is_key_pressed(IOTCRAFT_KEY_LEFT)) keys = "LEFT";
+                else if (input_is_key_pressed(IOTCRAFT_KEY_RIGHT)) keys = "RIGHT";
+                else if (input_is_key_pressed(IOTCRAFT_KEY_UP)) keys = "UP";
+                else if (input_is_key_pressed(IOTCRAFT_KEY_DOWN)) keys = "DOWN";
+                else keys = "MULTIPLE";
+
+                ESP_LOGI(TAG, "Processing key: %s | Camera: (%.1f, %.1f, %.1f) yaw=%.2f",
+                         keys, g_camera.x, g_camera.y, g_camera.z, g_camera.yaw);
+                key_log_count = 0;
+            }
+
             game_handle_key(&g_game, IOTCRAFT_KEY_W, input_is_key_pressed(IOTCRAFT_KEY_W));
             game_handle_key(&g_game, IOTCRAFT_KEY_S, input_is_key_pressed(IOTCRAFT_KEY_S));
             game_handle_key(&g_game, IOTCRAFT_KEY_A, input_is_key_pressed(IOTCRAFT_KEY_A));
@@ -475,8 +506,12 @@ void iotcraft_task(void *pvParameter)
             // DISABLED: Keep camera stationary to debug raycasting
             // auto_rotate += delta_time * 0.2f;  // Slower rotation: 0.2 radians per second (was 0.5)
             // g_camera.yaw = auto_rotate;
-            ESP_LOGI(TAG, "Auto-rotate DISABLED for debugging");
-            ESP_LOGI(TAG, "Camera staying at yaw=%.2f", g_camera.yaw);
+            // Only log occasionally (every 10 seconds)
+            static int no_kbd_log_count = 0;
+            if (++no_kbd_log_count >= 200) {  // 200 frames = ~10 seconds at 20 FPS
+                ESP_LOGI(TAG, "No keyboard detected - camera stationary at yaw=%.2f", g_camera.yaw);
+                no_kbd_log_count = 0;
+            }
 
             // Stay in center but higher up for better view
             // Camera already at good position from template (tp -15 8 20)

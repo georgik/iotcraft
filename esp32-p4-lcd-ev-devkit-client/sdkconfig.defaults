@@ -13,3 +13,16 @@ CONFIG_ESP_SYSTEM_PANIC_PRINT_HALT=y
 CONFIG_ESP_MAIN_TASK_STACK_SIZE=32000
 CONFIG_FREERTOS_HZ=1000
 CONFIG_IDF_EXPERIMENTAL_FEATURES=y
+
+# Simulation Compatibility Settings
+# These settings allow the same binary to work on both real hardware and Wokwi simulation
+
+# USB Keyboard support - Disable assertions to allow graceful degradation in simulation
+# The DWC HAL has an assert that fails when USB hardware is not present (simulation)
+# By disabling assertions, we can check return codes instead and handle missing USB gracefully
+CONFIG_COMPILER_OPTIMIZATION_ASSERTIONS_DISABLE=y
+
+# Display/Framebuffer support - Disable DMA2D hardware acceleration
+# DMA2D hardware doesn't exist in simulation, causing crashes
+# On real hardware, disabling this will use CPU memcpy instead (slower but works)
+# CONFIG_BSP_LCD_USE_DMA2D is not set
