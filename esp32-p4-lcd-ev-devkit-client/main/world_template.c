@@ -10,6 +10,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <math.h>
 
 static const char* TAG = "WorldTemplate";
 
@@ -19,7 +20,7 @@ static const char medieval_template[] =
     "# Creates a medieval-themed world with castle, village, and forest\n"
     "\n"
     "# Set initial camera position for good overview\n"
-    "tp -15 3 20\n"
+    "tp -15 5 0\n"
     "look -45 -10\n"
     "\n"
     "# Create base terrain (smaller than default for more intimate feel)\n"
@@ -180,13 +181,14 @@ static bool execute_tp(char* args[], camera_t* camera) {
 
 // Execute look command
 static bool execute_look(char* args[], camera_t* camera) {
-    // look <yaw> <pitch>
+    // look <yaw> <pitch> (angles in degrees)
     if (!camera || args[1] == NULL || args[2] == NULL) {
         return false;
     }
 
-    camera->yaw = (float)atoi(args[1]);
-    camera->pitch = (float)atoi(args[2]);
+    // Convert degrees to radians
+    camera->yaw = (float)atoi(args[1]) * (M_PI / 180.0f);
+    camera->pitch = (float)atoi(args[2]) * (M_PI / 180.0f);
 
     return true;
 }
