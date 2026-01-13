@@ -297,20 +297,24 @@ void renderer_render_columns(renderer_t* renderer, int32_t start_col, int32_t en
         }
 
         // Ray direction (use fast lookup tables)
-        float ray_dir_x = cosf_fast(ray_angle);
-        float ray_dir_z = sinf_fast(ray_angle);
+        // Calculate 3D ray direction from yaw and pitch
+        float ray_dir_x = cosf_fast(ray_angle) * cosf_fast(renderer->camera->pitch);
+        float ray_dir_y = sinf_fast(renderer->camera->pitch);  // Up/down component
+        float ray_dir_z = sinf_fast(ray_angle) * cosf_fast(renderer->camera->pitch);
 
-        // Current position in voxel grid
+        // Current position in voxel grid (3D)
         int32_t map_x = (int32_t)floorf(renderer->camera->x);
+        int32_t map_y = (int32_t)floorf(renderer->camera->y);
         int32_t map_z = (int32_t)floorf(renderer->camera->z);
 
         // Distance to next grid line
         float delta_dist_x = fabsf(1.0f / ray_dir_x);
+        float delta_dist_y = fabsf(1.0f / ray_dir_y);
         float delta_dist_z = fabsf(1.0f / ray_dir_z);
 
         // Step direction and initial side distance
-        int32_t step_x, step_z;
-        float side_dist_x, side_dist_z;
+        int32_t step_x, step_y, step_z;
+        float side_dist_x, side_dist_y, side_dist_z;
 
         if (ray_dir_x < 0) {
             step_x = -1;
@@ -318,6 +322,14 @@ void renderer_render_columns(renderer_t* renderer, int32_t start_col, int32_t en
         } else {
             step_x = 1;
             side_dist_x = (map_x + 1.0f - renderer->camera->x) * delta_dist_x;
+        }
+
+        if (ray_dir_y < 0) {
+            step_y = -1;
+            side_dist_y = (renderer->camera->y - map_y) * delta_dist_y;
+        } else {
+            step_y = 1;
+            side_dist_y = (map_y + 1.0f - renderer->camera->y) * delta_dist_y;
         }
 
         if (ray_dir_z < 0) {
@@ -328,49 +340,48 @@ void renderer_render_columns(renderer_t* renderer, int32_t start_col, int32_t en
             side_dist_z = (map_z + 1.0f - renderer->camera->z) * delta_dist_z;
         }
 
-        // Perform DDA (Digital Differential Analyzer)
+        // Perform 3D DDA (Digital Differential Analyzer)
         bool hit = false;
-        int32_t side = 0;  // 0 for NS wall, 1 for EW wall
+        int32_t side = 0;  // 0=NS, 1=EW, 2=Top/Bottom
         block_type_t block_type = BLOCK_AIR;
         int32_t max_steps = 50;  // Prevent infinite loops
         int32_t steps = 0;
         int32_t hit_y = 0;  // Y-coordinate of hit block
 
         while (!hit && steps < max_steps) {
-            // Jump to next map square
-            if (side_dist_x < side_dist_z) {
-                side_dist_x += delta_dist_x;
-                map_x += step_x;
-                side = 0;
-            } else {
-                side_dist_z += delta_dist_z;
-                map_z += step_z;
-                side = 1;
+            // Check for block at current 3D position BEFORE stepping
+            block_type = world_get_block(renderer->world, map_x, map_y, map_z);
+            if (block_type != BLOCK_AIR) {
+                hit = true;
+                hit_y = map_y;
+                break;
             }
 
-            // OPTIMIZATION: Use heightmap to skip empty columns
-            // If heightmap says no blocks at this (x,z), skip Y search entirely
-            int32_t highest_y = world_get_height(renderer->world, map_x, map_z);
-            if (highest_y >= 0) {
-                // Heightmap says there ARE blocks here
-                // Check from top down (faster - likely to hit near top)
-                for (int32_t y = highest_y; y >= 0; y--) {
-                    block_type = world_get_block(renderer->world, map_x, y, map_z);
-                    if (block_type != BLOCK_AIR) {
-                        hit = true;
-                        hit_y = y;
-                        break;  // Early exit - no need to continue searching
-                    }
+            // Jump to next map square in 3D (find closest of X, Y, Z)
+            if (side_dist_x < side_dist_z) {
+                if (side_dist_x < side_dist_y) {
+                    // X is closest
+                    side_dist_x += delta_dist_x;
+                    map_x += step_x;
+                    side = 0;
+                } else {
+                    // Y is closest
+                    side_dist_y += delta_dist_y;
+                    map_y += step_y;
+                    side = 2;
                 }
             } else {
-                // Heightmap says no blocks - this is now O(1) instead of O(15)!
-                // Just continue DDA without Y search
-                block_type = BLOCK_AIR;
-            }
-
-            // Early exit if we hit something
-            if (hit) {
-                break;
+                if (side_dist_z < side_dist_y) {
+                    // Z is closest
+                    side_dist_z += delta_dist_z;
+                    map_z += step_z;
+                    side = 1;
+                } else {
+                    // Y is closest
+                    side_dist_y += delta_dist_y;
+                    map_y += step_y;
+                    side = 2;
+                }
             }
 
             steps++;
@@ -379,10 +390,72 @@ void renderer_render_columns(renderer_t* renderer, int32_t start_col, int32_t en
         // Calculate distance to wall (perpendicular to avoid fisheye)
         float perp_wall_dist;
         float wall_x;  // Position on the wall for texture mapping
+
+        // Special handling for top/bottom faces (side=2)
+        if (side == 2) {
+            // We hit the top or bottom of a block
+            // Calculate distance to this horizontal face
+            perp_wall_dist = (map_y - renderer->camera->y + (1 - step_y) / 2.0f) / ray_dir_y;
+
+            // Skip if behind camera
+            if (perp_wall_dist <= 0.0f) {
+                continue;
+            }
+
+            // For horizontal faces, draw as a horizontal strip
+            // Calculate the vertical position on screen
+            float y_offset = (hit_y - renderer->camera->y) / perp_wall_dist;
+            int32_t v_center = renderer->height / 2 - (int32_t)(y_offset * renderer->height / 2.0f);
+
+            // Draw a short horizontal strip (8 pixels tall for top face)
+            int32_t strip_height = (int32_t)(8.0f / perp_wall_dist);
+            if (strip_height < 2) strip_height = 2;
+            if (strip_height > 32) strip_height = 32;
+
+            int32_t draw_start = v_center - strip_height / 2;
+            if (draw_start < 0) draw_start = 0;
+            int32_t draw_end = v_center + strip_height / 2;
+            if (draw_end >= renderer->height) draw_end = renderer->height - 1;
+
+            // Get texture for this block
+            const uint16_t* texture = textures[block_type];
+            if (!texture) {
+                continue;
+            }
+
+            // Texture coordinates (top-down view)
+            float hit_x = renderer->camera->x + perp_wall_dist * ray_dir_x;
+            float hit_z = renderer->camera->z + perp_wall_dist * ray_dir_z;
+
+            float tex_x_frac = hit_x - floorf(hit_x);
+            float tex_z_frac = hit_z - floorf(hit_z);
+
+            int32_t tex_x_base = (int32_t)(tex_x_frac * TEXTURE_SIZE) & (TEXTURE_SIZE - 1);
+            int32_t tex_y_base = (int32_t)(tex_z_frac * TEXTURE_SIZE) & (TEXTURE_SIZE - 1);
+
+            // Draw the horizontal strip
+            for (int32_t ty = draw_start; ty <= draw_end; ty++) {
+                // Use same texture for entire strip (top-down view)
+                uint16_t texel = texture[tex_y_base * TEXTURE_SIZE + tex_x_base];
+
+                // Apply shading (top faces are bright)
+                texel = shade_color(texel, 1.0f);
+
+                // Draw
+                renderer->framebuffer[ty * renderer->width + x] = texel;
+            }
+
+            walls_drawn++;
+            continue;  // Done with this column
+        }
+
+        // Normal X or Z face hit
         if (side == 0) {
+            // Hit X-facing wall
             perp_wall_dist = (map_x - renderer->camera->x + (1 - step_x) / 2.0f) / ray_dir_x;
             wall_x = renderer->camera->z + perp_wall_dist * ray_dir_z;
         } else {
+            // Hit Z-facing wall
             perp_wall_dist = (map_z - renderer->camera->z + (1 - step_z) / 2.0f) / ray_dir_z;
             wall_x = renderer->camera->x + perp_wall_dist * ray_dir_x;
         }
@@ -395,10 +468,16 @@ void renderer_render_columns(renderer_t* renderer, int32_t start_col, int32_t en
         // Calculate height of line to draw (classic Wolf3D formula)
         int32_t line_height = (int32_t)(renderer->height / perp_wall_dist);
 
+        // Calculate vertical centering based on hit position relative to camera
+        // If we hit something above camera (hit_y > camera_y), shift wall up
+        // If we hit something below camera (hit_y < camera_y), shift wall down
+        float y_offset = (hit_y - renderer->camera->y) / perp_wall_dist;
+        int32_t v_center = renderer->height / 2 - (int32_t)(y_offset * renderer->height / 2.0f);
+
         // Calculate draw positions (centered vertically on screen)
-        int32_t draw_start = -line_height / 2 + renderer->height / 2;
+        int32_t draw_start = -line_height / 2 + v_center;
         if (draw_start < 0) draw_start = 0;
-        int32_t draw_end = line_height / 2 + renderer->height / 2;
+        int32_t draw_end = line_height / 2 + v_center;
         if (draw_end >= renderer->height) draw_end = renderer->height - 1;
 
         // Draw the textured column
@@ -436,8 +515,15 @@ void renderer_render_columns(renderer_t* renderer, int32_t start_col, int32_t en
                 wall_debug_count++;
             }
 
-            // Calculate shading
-            float shade_factor = (side == 1) ? 0.7f : 0.85f;
+            // Calculate shading (different sides have different brightness)
+            float shade_factor;
+            if (side == 0) {
+                shade_factor = 0.85f;  // X-facing walls
+            } else if (side == 1) {
+                shade_factor = 0.7f;   // Z-facing walls
+            } else {
+                shade_factor = 1.0f;   // Y-facing walls (ceilings/floors) - brightest
+            }
 
             // Calculate fog
             float fog_factor = 0.0f;
@@ -461,6 +547,140 @@ void renderer_render_columns(renderer_t* renderer, int32_t start_col, int32_t en
     }
 }
 
+/**
+ * @brief Render floor (horizontal surfaces) using Doom-style span rendering
+ * @param renderer Renderer context
+ * @param render_floor If true, render floor below camera; if false, render ceiling above
+ *
+ * This renders horizontal surfaces by casting rays and finding where they hit.
+ * Much more efficient than per-column rendering for horizontal surfaces.
+ */
+static void renderer_render_horizontal_plane(renderer_t* renderer, bool render_floor) {
+    if (!renderer || !renderer->framebuffer || !renderer->camera || !renderer->world) {
+        return;
+    }
+
+    int32_t horizon = renderer->height / 2;
+
+    // Determine Y range
+    int32_t y_start, y_end;
+
+    if (render_floor) {
+        // Render floor (below horizon)
+        y_start = horizon;
+        y_end = renderer->height;
+    } else {
+        // Render ceiling (above horizon)
+        y_start = 0;
+        y_end = horizon;
+    }
+
+    for (int32_t y = y_start; y != y_end; y += (render_floor ? 1 : 1)) {
+        // Calculate vertical angle for this row
+        float v_angle = (float)(y - horizon) / renderer->height;  // -0.5 to +0.5
+        float ray_pitch = renderer->camera->pitch + v_angle * 0.8f;
+
+        // Calculate ray Y direction
+        float ray_dir_y = sinf_fast(ray_pitch);
+
+        // Skip if ray direction is wrong for this plane
+        if (render_floor && ray_dir_y >= 0) continue;   // Floor needs rays going down
+        if (!render_floor && ray_dir_y <= 0) continue;  // Ceiling needs rays going up
+
+        // For each column, find where this horizontal ray hits
+        for (int32_t x = 0; x < renderer->width; x++) {
+            // Skip if this pixel was already drawn by wall renderer
+            // (Walls have priority)
+            if (renderer->framebuffer[y * renderer->width + x] != COLOR_SKY) {
+                continue;  // Already drawn
+            }
+
+            // Calculate ray angle in X-Z plane
+            float camera_x = 2.0f * x / (float)renderer->width - 1.0f;
+            float ray_angle = renderer->camera->yaw + camera_x * renderer->camera->fov * 0.5f;
+
+            float ray_dir_x = cosf_fast(ray_angle);
+            float ray_dir_z = sinf_fast(ray_angle);
+
+            // Find distance to horizontal plane at camera's Y level
+            // For floor: y = camera->y - 1.6 (eye height)
+            // For ceiling: y = camera->y + something (top of blocks)
+            float target_y;
+            if (render_floor) {
+                target_y = floorf(renderer->camera->y);  // Floor at integer below camera
+            } else {
+                target_y = floorf(renderer->camera->y) + 1.0f;  // Ceiling above camera
+            }
+
+            float delta_y = target_y - renderer->camera->y;
+
+            // Avoid division by zero
+            if (fabsf(ray_dir_y) < 0.001f) continue;
+
+            float plane_dist = delta_y / ray_dir_y;
+
+            // Skip if behind camera or too far
+            if (plane_dist < 0.1f || plane_dist > 50.0f) continue;
+
+            // Calculate world position of hit
+            float hit_x = renderer->camera->x + plane_dist * ray_dir_x;
+            float hit_z = renderer->camera->z + plane_dist * ray_dir_z;
+
+            // Get block at this position
+            int32_t map_x = (int32_t)floorf(hit_x);
+            int32_t map_z = (int32_t)floorf(hit_z);
+
+            // Find the block at this (x, z)
+            int32_t target_block_y;
+            block_type_t block_type;
+
+            if (render_floor) {
+                // For floor, get highest block at this (x, z)
+                target_block_y = world_get_height(renderer->world, map_x, map_z);
+                if (target_block_y < 0) target_block_y = 0;
+                block_type = world_get_block(renderer->world, map_x, target_block_y, map_z);
+            } else {
+                // For ceiling, get block above camera (if any)
+                target_block_y = (int32_t)floorf(renderer->camera->y) + 1;
+                block_type = world_get_block(renderer->world, map_x, target_block_y, map_z);
+            }
+
+            if (block_type == BLOCK_AIR) {
+                block_type = BLOCK_GRASS;  // Default to grass
+            }
+
+            const uint16_t* texture = textures[block_type];
+            if (!texture) {
+                texture = texture_grass;
+            }
+
+            // Calculate texture coordinates
+            float tex_x_frac = hit_x - floorf(hit_x);
+            float tex_z_frac = hit_z - floorf(hit_z);
+
+            int32_t tex_x = (int32_t)(tex_x_frac * TEXTURE_SIZE) & (TEXTURE_SIZE - 1);
+            int32_t tex_y = (int32_t)(tex_z_frac * TEXTURE_SIZE) & (TEXTURE_SIZE - 1);
+
+            uint16_t texel = texture[tex_y * TEXTURE_SIZE + tex_x];
+
+            // Apply distance shading
+            float shade = 1.0f - (plane_dist / 30.0f);
+            if (shade < 0.3f) shade = 0.3f;
+            if (shade > 1.0f) shade = 1.0f;
+
+            // Floor is slightly darker than ceiling
+            if (render_floor) {
+                shade *= 0.8f;
+            }
+
+            texel = shade_color(texel, shade);
+
+            // Draw pixel
+            renderer->framebuffer[y * renderer->width + x] = texel;
+        }
+    }
+}
+
 void renderer_render_frame(renderer_t* renderer) {
     if (!renderer || !renderer->framebuffer || !renderer->camera || !renderer->world) {
         return;
@@ -469,7 +689,13 @@ void renderer_render_frame(renderer_t* renderer) {
     // Clear framebuffer with sky color
     renderer_clear(renderer, COLOR_SKY);
 
-    // Render all columns (single-threaded version)
+    // Render floor (below walls)
+    renderer_render_horizontal_plane(renderer, true);
+
+    // Render ceiling (above walls)
+    renderer_render_horizontal_plane(renderer, false);
+
+    // Render all columns (walls)
     renderer_render_columns(renderer, 0, renderer->width);
 }
 
