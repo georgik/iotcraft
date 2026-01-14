@@ -356,39 +356,39 @@ void renderer_render_columns(renderer_t* renderer, int32_t start_col, int32_t en
         int32_t hit_y = 0;  // Y-coordinate of hit block
 
         while (!hit && steps < max_steps) {
-            // Check for block at current 3D position BEFORE stepping
+            // Determine which face we'll hit BEFORE stepping
+            if (side_dist_x < side_dist_z) {
+                if (side_dist_x < side_dist_y) {
+                    // X is closest - will hit North/South face
+                    side = 0;
+                    side_dist_x += delta_dist_x;
+                    map_x += step_x;
+                } else {
+                    // Y is closest - will hit Top/Bottom face
+                    side = 2;
+                    side_dist_y += delta_dist_y;
+                    map_y += step_y;
+                }
+            } else {
+                if (side_dist_z < side_dist_y) {
+                    // Z is closest - will hit East/West face
+                    side = 1;
+                    side_dist_z += delta_dist_z;
+                    map_z += step_z;
+                } else {
+                    // Y is closest - will hit Top/Bottom face
+                    side = 2;
+                    side_dist_y += delta_dist_y;
+                    map_y += step_y;
+                }
+            }
+
+            // Now check for block at NEW position after stepping
             block_type = world_get_block(renderer->world, map_x, map_y, map_z);
             if (block_type != BLOCK_AIR) {
                 hit = true;
                 hit_y = map_y;
                 break;
-            }
-
-            // Jump to next map square in 3D (find closest of X, Y, Z)
-            if (side_dist_x < side_dist_z) {
-                if (side_dist_x < side_dist_y) {
-                    // X is closest
-                    side_dist_x += delta_dist_x;
-                    map_x += step_x;
-                    side = 0;
-                } else {
-                    // Y is closest
-                    side_dist_y += delta_dist_y;
-                    map_y += step_y;
-                    side = 2;
-                }
-            } else {
-                if (side_dist_z < side_dist_y) {
-                    // Z is closest
-                    side_dist_z += delta_dist_z;
-                    map_z += step_z;
-                    side = 1;
-                } else {
-                    // Y is closest
-                    side_dist_y += delta_dist_y;
-                    map_y += step_y;
-                    side = 2;
-                }
             }
 
             steps++;
@@ -397,6 +397,14 @@ void renderer_render_columns(renderer_t* renderer, int32_t start_col, int32_t en
         // Calculate distance to wall (perpendicular to avoid fisheye)
         float perp_wall_dist;
         float wall_x;  // Position on the wall for texture mapping
+
+        // Debug: Log first few hits to see which faces are detected
+        static int hit_debug_count = 0;
+        if (hit_debug_count < 10) {
+            ESP_LOGI(TAG, "HIT_DEBUG #%d: pos=(%d,%d,%d), side=%d (0=NS,1=EW,2=TB), type=%d",
+                     hit_debug_count, map_x, map_y, map_z, side, block_type);
+            hit_debug_count++;
+        }
 
         // Special handling for top/bottom faces (side=2)
         if (side == 2) {
@@ -411,18 +419,29 @@ void renderer_render_columns(renderer_t* renderer, int32_t start_col, int32_t en
 
             // For horizontal faces, draw as a horizontal strip
             // Calculate the vertical position on screen
-            float y_offset = (hit_y - renderer->camera->y) / perp_wall_dist;
-            int32_t v_center = renderer->height / 2 - (int32_t)(y_offset * renderer->height / 2.0f);
+            // y_offset: positive = below camera, negative = above camera
+            float y_offset = (renderer->camera->y - hit_y) / perp_wall_dist;
+            int32_t v_center = renderer->height / 2 + (int32_t)(y_offset * renderer->height / 2.0f);
 
-            // Draw a short horizontal strip (8 pixels tall for top face)
-            int32_t strip_height = (int32_t)(8.0f / perp_wall_dist);
-            if (strip_height < 2) strip_height = 2;
-            if (strip_height > 32) strip_height = 32;
+            // Draw a horizontal strip (top/bottom face of block)
+            // Calculate strip height based on perspective
+            // A full block at this distance would occupy: block_size / distance * screen_height
+            int32_t strip_height = (int32_t)(1.0f / perp_wall_dist * renderer->height);
+            if (strip_height < 1) strip_height = 1;
+            if (strip_height > renderer->height / 2) strip_height = renderer->height / 2;
 
             int32_t draw_start = v_center - strip_height / 2;
             if (draw_start < 0) draw_start = 0;
             int32_t draw_end = v_center + strip_height / 2;
             if (draw_end >= renderer->height) draw_end = renderer->height - 1;
+
+            // Debug: Log horizontal face rendering
+            static int horiz_debug_count = 0;
+            if (horiz_debug_count < 5) {
+                ESP_LOGI(TAG, "HORIZ_DEBUG #%d: y_offset=%.2f, v_center=%d, strip_h=%d, range=%d..%d, dist=%.2f",
+                         horiz_debug_count, y_offset, v_center, strip_height, draw_start, draw_end, perp_wall_dist);
+                horiz_debug_count++;
+            }
 
             // Get texture for this block
             const uint16_t* texture = textures[block_type];

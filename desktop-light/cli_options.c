@@ -38,6 +38,9 @@ int cli_parse_options(int argc, char* argv[], cli_options_t* options)
         else if (strcmp(argv[i], "--chessboard") == 0) {
             options->chessboard = true;
         }
+        else if (strcmp(argv[i], "--wireframe") == 0) {
+            options->wireframe = true;
+        }
         else if (strcmp(argv[i], "--cam-pos") == 0) {
             if (i + 3 >= argc) {
                 fprintf(stderr, "Error: --cam-pos requires X Y Z arguments\n");
@@ -114,6 +117,7 @@ void cli_print_usage(const char* program_name)
     printf("║  Options:                                                  ║\n");
     printf("║    -i, --interactive    Enable keyboard controls            ║\n");
     printf("║    --chessboard         Enable chessboard test pattern      ║\n");
+    printf("║    --wireframe          Enable wireframe rendering mode     ║\n");
     printf("║    --cam-pos X Y Z      Set camera position                ║\n");
     printf("║    --cam-rot YAW PITCH  Set camera rotation (radians)      ║\n");
     printf("║    --screenshot FILE    Save screenshot and exit           ║\n");

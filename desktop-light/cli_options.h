@@ -16,6 +16,7 @@ typedef struct {
     bool verbose;
     bool chessboard;
     bool interactive;
+    bool wireframe;
     int width;
     int height;
 

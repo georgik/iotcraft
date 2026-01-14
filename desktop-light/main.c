@@ -143,6 +143,13 @@ static int run_renderer(const cli_options_t* options) {
     }
 
     printf("[%s] Renderer initialized: %dx%d\n", TAG, options->width, options->height);
+
+    // Enable wireframe mode if requested
+    if (options->wireframe) {
+        printf("[%s] Enabling wireframe mode...\n", TAG);
+        renderer_toggle_wireframe(1);
+    }
+
     printf("[%s] Starting rendering loop...\n", TAG);
 
     // Create persistent texture for framebuffer display
