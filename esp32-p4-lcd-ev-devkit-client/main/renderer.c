@@ -210,6 +210,13 @@ void renderer_clear(renderer_t* renderer, uint16_t color) {
         return;
     }
 
+    static int clear_count = 0;
+    clear_count++;
+
+    if (clear_count <= 5) {
+        ESP_LOGI(TAG, "renderer_clear called #%d, color=0x%04x", clear_count, color);
+    }
+
     // Fill framebuffer with solid color
     int32_t total_pixels = renderer->width * renderer->height;
     for (int32_t i = 0; i < total_pixels; i++) {
@@ -295,18 +302,9 @@ void renderer_render_columns(renderer_t* renderer, int32_t start_col, int32_t en
         float camera_x = 2.0f * x / (float)renderer->width - 1.0f;  // -1 to +1
         float ray_angle = renderer->camera->yaw + camera_x * renderer->camera->fov * 0.5f;
 
-        // Debug: Log ray angles for first few columns
-        static int angle_debug_count = 0;
-        if (angle_debug_count < 5) {
-            ESP_LOGI(TAG, "ANGLE_DEBUG #%d: x=%d, camera_x=%.4f, yaw=%.4f, fov=%.4f, ray_angle=%.4f",
-                     angle_debug_count, x, camera_x, renderer->camera->yaw, renderer->camera->fov, ray_angle);
-            angle_debug_count++;
-        }
-
         // Ray direction (use fast lookup tables)
-        // Calculate 3D ray direction from yaw and pitch
         float ray_dir_x = cosf_fast(ray_angle) * cosf_fast(renderer->camera->pitch);
-        float ray_dir_y = sinf_fast(renderer->camera->pitch);  // Up/down component
+        float ray_dir_y = sinf_fast(renderer->camera->pitch);
         float ray_dir_z = sinf_fast(ray_angle) * cosf_fast(renderer->camera->pitch);
 
         // Current position in voxel grid (3D)
@@ -347,208 +345,122 @@ void renderer_render_columns(renderer_t* renderer, int32_t start_col, int32_t en
             side_dist_z = (map_z + 1.0f - renderer->camera->z) * delta_dist_z;
         }
 
-        // Perform 3D DDA (Digital Differential Analyzer)
-        bool hit = false;
-        int32_t side = 0;  // 0=NS, 1=EW, 2=Top/Bottom
-        block_type_t block_type = BLOCK_AIR;
+        // Perform 3D DDA and collect ALL visible faces (voxel-style)
+        // Unlike Wolfenstein, we continue through all blocks to see everything
+        typedef struct {
+            int32_t x, y, z;
+            int32_t side;  // 0=NS, 1=EW, 2=TB
+            block_type_t type;
+            float distance;
+            float perp_dist;  // Perpendicular distance for rendering
+        } visible_face_t;
+
+        visible_face_t faces[64];  // Collect up to 64 faces per column
+        int32_t face_count = 0;
         int32_t max_steps = 50;  // Prevent infinite loops
         int32_t steps = 0;
-        int32_t hit_y = 0;  // Y-coordinate of hit block
 
-        while (!hit && steps < max_steps) {
-            // Determine which face we'll hit BEFORE stepping
+        while (steps < max_steps && face_count < 64) {
+            // Check for block at current position
+            block_type_t block_type = world_get_block(renderer->world, map_x, map_y, map_z);
+
+            if (block_type != BLOCK_AIR) {
+                // Block found! Determine which face is visible and calculate distance
+                int32_t side = 0;
+                float perp_wall_dist = 0.0f;
+
+                // Determine which face we hit based on which side_dist was smallest
+                // This tells us which grid plane we crossed to get here
+                if (side_dist_x < side_dist_z) {
+                    if (side_dist_x < side_dist_y) {
+                        // Crossed X grid line → North/South face
+                        side = 0;
+                        perp_wall_dist = (map_x - renderer->camera->x + (1 - step_x) / 2.0f) / ray_dir_x;
+                    } else {
+                        // Crossed Y grid line → Top/Bottom face
+                        side = 2;
+                        perp_wall_dist = (map_y - renderer->camera->y + (1 - step_y) / 2.0f) / ray_dir_y;
+                    }
+                } else {
+                    if (side_dist_z < side_dist_y) {
+                        // Crossed Z grid line → East/West face
+                        side = 1;
+                        perp_wall_dist = (map_z - renderer->camera->z + (1 - step_z) / 2.0f) / ray_dir_z;
+                    } else {
+                        // Crossed Y grid line → Top/Bottom face
+                        side = 2;
+                        perp_wall_dist = (map_y - renderer->camera->y + (1 - step_y) / 2.0f) / ray_dir_y;
+                    }
+                }
+
+                // Only add faces in front of camera
+                if (perp_wall_dist > 0.1f) {
+                    faces[face_count].x = map_x;
+                    faces[face_count].y = map_y;
+                    faces[face_count].z = map_z;
+                    faces[face_count].side = side;
+                    faces[face_count].type = block_type;
+                    faces[face_count].distance = perp_wall_dist;  // Use perpendicular as distance
+                    faces[face_count].perp_dist = perp_wall_dist;
+                    face_count++;
+                }
+            }
+
+            // Step to next grid position (DDA always steps, doesn't stop at blocks)
             if (side_dist_x < side_dist_z) {
                 if (side_dist_x < side_dist_y) {
-                    // X is closest - will hit North/South face
-                    side = 0;
                     side_dist_x += delta_dist_x;
                     map_x += step_x;
                 } else {
-                    // Y is closest - will hit Top/Bottom face
-                    side = 2;
                     side_dist_y += delta_dist_y;
                     map_y += step_y;
                 }
             } else {
                 if (side_dist_z < side_dist_y) {
-                    // Z is closest - will hit East/West face
-                    side = 1;
                     side_dist_z += delta_dist_z;
                     map_z += step_z;
                 } else {
-                    // Y is closest - will hit Top/Bottom face
-                    side = 2;
                     side_dist_y += delta_dist_y;
                     map_y += step_y;
                 }
             }
 
-            // Now check for block at NEW position after stepping
-            block_type = world_get_block(renderer->world, map_x, map_y, map_z);
-            if (block_type != BLOCK_AIR) {
-                hit = true;
-                hit_y = map_y;
-                break;
-            }
-
             steps++;
         }
 
-        // Calculate distance to wall (perpendicular to avoid fisheye)
-        float perp_wall_dist;
-        float wall_x;  // Position on the wall for texture mapping
-
-        // Debug: Log first few hits to see which faces are detected
-        static int hit_debug_count = 0;
-        if (hit_debug_count < 10) {
-            ESP_LOGI(TAG, "HIT_DEBUG #%d: pos=(%d,%d,%d), side=%d (0=NS,1=EW,2=TB), type=%d",
-                     hit_debug_count, map_x, map_y, map_z, side, block_type);
-            hit_debug_count++;
+        // Sort faces by distance (far to near) for painter's algorithm
+        // Simple bubble sort - we have at most 64 faces, so this is fast enough
+        for (int32_t i = 0; i < face_count - 1; i++) {
+            for (int32_t j = 0; j < face_count - 1 - i; j++) {
+                if (faces[j].distance < faces[j + 1].distance) {
+                    visible_face_t temp = faces[j];
+                    faces[j] = faces[j + 1];
+                    faces[j + 1] = temp;
+                }
+            }
         }
 
-        // Special handling for top/bottom faces (side=2)
-        if (side == 2) {
-            // We hit the top or bottom of a block
-            // Calculate distance to this horizontal face
-            perp_wall_dist = (map_y - renderer->camera->y + (1 - step_y) / 2.0f) / ray_dir_y;
+        // Debug: Log face collection for first column
+        static int collection_debug_count = 0;
+        if (collection_debug_count < 3 && face_count > 0) {
+            ESP_LOGI(TAG, "COLLECTION_DEBUG #%d: x=%d, collected %d faces", collection_debug_count, x, face_count);
+            for (int32_t f = 0; f < face_count && f < 5; f++) {
+                ESP_LOGI(TAG, "  Face %d: pos=(%d,%d,%d), side=%d, dist=%.2f",
+                         f, faces[f].x, faces[f].y, faces[f].z, faces[f].side, faces[f].distance);
+            }
+            collection_debug_count++;
+        }
 
-            // Skip if behind camera
+        // Render each collected face (far to near)
+        for (int32_t f = 0; f < face_count; f++) {
+            visible_face_t* face = &faces[f];
+            int32_t side = face->side;
+            block_type_t block_type = face->type;
+            float perp_wall_dist = face->perp_dist;
+
+            // Skip faces behind camera
             if (perp_wall_dist <= 0.0f) {
                 continue;
-            }
-
-            // For horizontal faces, draw as a horizontal strip
-            // Calculate the vertical position on screen
-            // y_offset: positive = below camera, negative = above camera
-            float y_offset = (renderer->camera->y - hit_y) / perp_wall_dist;
-            int32_t v_center = renderer->height / 2 + (int32_t)(y_offset * renderer->height / 2.0f);
-
-            // Draw a horizontal strip (top/bottom face of block)
-            // Calculate strip height based on perspective
-            // A full block at this distance would occupy: block_size / distance * screen_height
-            int32_t strip_height = (int32_t)(1.0f / perp_wall_dist * renderer->height);
-            if (strip_height < 1) strip_height = 1;
-            if (strip_height > renderer->height / 2) strip_height = renderer->height / 2;
-
-            int32_t draw_start = v_center - strip_height / 2;
-            if (draw_start < 0) draw_start = 0;
-            int32_t draw_end = v_center + strip_height / 2;
-            if (draw_end >= renderer->height) draw_end = renderer->height - 1;
-
-            // Debug: Log horizontal face rendering
-            static int horiz_debug_count = 0;
-            if (horiz_debug_count < 5) {
-                ESP_LOGI(TAG, "HORIZ_DEBUG #%d: y_offset=%.2f, v_center=%d, strip_h=%d, range=%d..%d, dist=%.2f",
-                         horiz_debug_count, y_offset, v_center, strip_height, draw_start, draw_end, perp_wall_dist);
-                horiz_debug_count++;
-            }
-
-            // Get texture for this block
-            const uint16_t* texture = textures[block_type];
-            if (!texture) {
-                continue;
-            }
-
-            // Texture coordinates (top-down view)
-            float hit_x = renderer->camera->x + perp_wall_dist * ray_dir_x;
-            float hit_z = renderer->camera->z + perp_wall_dist * ray_dir_z;
-
-            float tex_x_frac = hit_x - floorf(hit_x);
-            float tex_z_frac = hit_z - floorf(hit_z);
-
-            int32_t tex_x_base = (int32_t)(tex_x_frac * TEXTURE_SIZE) & (TEXTURE_SIZE - 1);
-            int32_t tex_y_base = (int32_t)(tex_z_frac * TEXTURE_SIZE) & (TEXTURE_SIZE - 1);
-
-            // Draw the horizontal strip
-            for (int32_t ty = draw_start; ty <= draw_end; ty++) {
-                // Use same texture for entire strip (top-down view)
-                uint16_t texel = texture[tex_y_base * TEXTURE_SIZE + tex_x_base];
-
-                // Apply shading (top faces are bright)
-                texel = shade_color(texel, 1.0f);
-
-                // Draw
-                renderer->framebuffer[ty * renderer->width + x] = texel;
-            }
-
-            walls_drawn++;
-            continue;  // Done with this column
-        }
-
-        // Normal X or Z face hit
-        if (side == 0) {
-            // Hit X-facing wall
-            perp_wall_dist = (map_x - renderer->camera->x + (1 - step_x) / 2.0f) / ray_dir_x;
-            wall_x = renderer->camera->z + perp_wall_dist * ray_dir_z;
-        } else {
-            // Hit Z-facing wall
-            perp_wall_dist = (map_z - renderer->camera->z + (1 - step_z) / 2.0f) / ray_dir_z;
-            wall_x = renderer->camera->x + perp_wall_dist * ray_dir_x;
-        }
-
-        // Skip walls behind camera (negative distance)
-        if (perp_wall_dist <= 0.0f) {
-            continue;
-        }
-
-        // Calculate height of line to draw (classic Wolf3D formula)
-        int32_t line_height = (int32_t)(renderer->height / perp_wall_dist);
-
-        // Calculate vertical centering based on hit position relative to camera
-        // If we hit something above camera (hit_y > camera_y), shift wall up
-        // If we hit something below camera (hit_y < camera_y), shift wall down
-        float y_offset = (hit_y - renderer->camera->y) / perp_wall_dist;
-        int32_t v_center = renderer->height / 2 - (int32_t)(y_offset * renderer->height / 2.0f);
-
-        // Calculate draw positions (centered vertically on screen)
-        int32_t draw_start = -line_height / 2 + v_center;
-        if (draw_start < 0) draw_start = 0;
-        int32_t draw_end = line_height / 2 + v_center;
-        if (draw_end >= renderer->height) draw_end = renderer->height - 1;
-
-        // Draw the textured column
-        if (hit && block_type != BLOCK_AIR) {
-            // Get texture for this block type
-            const uint16_t* texture = textures[block_type];
-            if (!texture) {
-                continue;  // Skip if no texture (shouldn't happen)
-            }
-
-            // Calculate texture X coordinate
-            wall_x -= floorf(wall_x);  // Get fractional part
-            int32_t tex_x = (int32_t)(wall_x * TEXTURE_SIZE);
-            if (side == 0 && ray_dir_x > 0) tex_x = TEXTURE_SIZE - 1 - tex_x;
-            if (side == 1 && ray_dir_z < 0) tex_x = TEXTURE_SIZE - 1 - tex_x;
-            tex_x = tex_x & (TEXTURE_SIZE - 1);  // Clamp to 0-7
-
-            // Calculate texture Y mapping (fixed-point 8.8)
-            // We need to stretch the 8-pixel texture over the column height
-            int32_t column_height = draw_end - draw_start + 1;
-            if (column_height < 1) column_height = 1;  // Prevent division by zero
-
-            // Use larger multiplier to avoid losing precision with small columns
-            int32_t tex_y_step = (TEXTURE_SIZE << 12) / column_height;  // Fixed-point 12.4 for more precision
-            int32_t tex_y_start = 0;  // Start from top of texture
-
-            // Debug: Log first few wall calculations
-            static int wall_debug_count = 0;
-            if (wall_debug_count < 5) {
-                ESP_LOGI(TAG, "WALL_DEBUG #%d: col_x=%d, dist=%.2f, line_height=%d", wall_debug_count, x, perp_wall_dist, line_height);
-                ESP_LOGI(TAG, "  draw_start=%d, draw_end=%d, column_height=%d", draw_start, draw_end, column_height);
-                ESP_LOGI(TAG, "  TEXTURE_SIZE=%d, (TEXTURE_SIZE << 12)=%d", TEXTURE_SIZE, TEXTURE_SIZE << 12);
-                ESP_LOGI(TAG, "  tex_y_step=%d (0x%x), tex_y_start=%d", tex_y_step, tex_y_step, tex_y_start);
-                ESP_LOGI(TAG, "  Expected: Step should map %d pixels to 8 texture rows", column_height);
-                wall_debug_count++;
-            }
-
-            // Calculate shading (different sides have different brightness)
-            float shade_factor;
-            if (side == 0) {
-                shade_factor = 0.85f;  // X-facing walls
-            } else if (side == 1) {
-                shade_factor = 0.7f;   // Z-facing walls
-            } else {
-                shade_factor = 1.0f;   // Y-facing walls (ceilings/floors) - brightest
             }
 
             // Calculate fog
@@ -558,10 +470,52 @@ void renderer_render_columns(renderer_t* renderer, int32_t start_col, int32_t en
                 if (fog_factor > 1.0f) fog_factor = 1.0f;
             }
 
-            // Draw textured column
-            draw_textured_column(renderer, x, draw_start, draw_end,
-                               tex_x, texture, tex_y_start, tex_y_step,
-                               shade_factor, COLOR_SKY, fog_factor);
+            // Render based on face type
+            if (side == 2) {
+                // Horizontal face (top or bottom)
+            } else {
+                // Vertical face (North/South/East/West)
+                float wall_x;
+                if (side == 0) {
+                    wall_x = renderer->camera->z + perp_wall_dist * ray_dir_z;
+                } else {
+                    wall_x = renderer->camera->x + perp_wall_dist * ray_dir_x;
+                }
+
+                // Calculate height of line to draw
+                int32_t line_height = (int32_t)(renderer->height / perp_wall_dist);
+
+                // Calculate draw start and end positions
+                int32_t vdraw_start = -line_height / 2 + renderer->height / 2;
+                if (vdraw_start < 0) vdraw_start = 0;
+                int32_t vdraw_end = line_height / 2 + renderer->height / 2;
+                if (vdraw_end >= renderer->height) vdraw_end = renderer->height - 1;
+
+                int32_t column_height = vdraw_end - vdraw_start + 1;
+
+                // Get texture
+                const uint16_t* texture = textures[block_type];
+                if (!texture) continue;
+
+                // Calculate texture X coordinate
+                int32_t tex_x = (int32_t)(wall_x * TEXTURE_SIZE);
+                if (side == 0 && ray_dir_x > 0) tex_x = TEXTURE_SIZE - 1 - tex_x;
+                if (side == 1 && ray_dir_z < 0) tex_x = TEXTURE_SIZE - 1 - tex_x;
+                tex_x = tex_x & (TEXTURE_SIZE - 1);
+
+                // Calculate texture Y step
+                int32_t tex_y_step = (TEXTURE_SIZE << 12) / column_height;
+                int32_t tex_y_start = ((renderer->height / 2 - vdraw_start) * tex_y_step + (TEXTURE_SIZE << 11)) & (~0xFFF);
+
+                // Calculate shading
+                float shade_factor = (side == 0) ? 0.85f : 0.7f;
+
+                // Draw textured column
+                draw_textured_column(renderer, x, vdraw_start, vdraw_end,
+                                   tex_x, texture, tex_y_start, tex_y_step,
+                                   shade_factor, COLOR_SKY, fog_factor);
+            }
+
             walls_drawn++;
         }
     }
@@ -569,14 +523,11 @@ void renderer_render_columns(renderer_t* renderer, int32_t start_col, int32_t en
     // Debug log every 30 frames (only log if walls were drawn)
     static int32_t frame_count = 0;
     if (++frame_count % 30 == 0 && walls_drawn > 0) {
-        ESP_LOGI(TAG, "Rendered %d walls/%d cols", walls_drawn, (end_col - start_col));
+        ESP_LOGI(TAG, "Rendered %d faces/%d cols", walls_drawn, (end_col - start_col));
     }
 }
-
-/**
- * @brief Render wireframe view of all voxels (forward declaration)
- */
 static void renderer_render_wireframe(renderer_t* renderer);
+static void renderer_render_3d(renderer_t* renderer);
 
 /**
  * @brief Render a frame
@@ -594,8 +545,8 @@ void renderer_render_frame(renderer_t* renderer) {
         // Render wireframe view (shows all voxels)
         renderer_render_wireframe(renderer);
     } else {
-        // Normal textured rendering
-        renderer_render_columns(renderer, 0, renderer->width);
+        // Normal textured rendering using true 3D projection
+        renderer_render_3d(renderer);
     }
 }
 
@@ -630,6 +581,283 @@ bool renderer_toggle_wireframe(int new_mode) {
 
     ESP_LOGI(TAG, "Wireframe mode: %s", g_wireframe_mode ? "ON" : "OFF");
     return g_wireframe_mode;
+}
+
+/**
+ * @brief Project a 3D point to screen space
+ * @param renderer Renderer context
+ * @param wx, wy, wz World coordinates
+ * @param sx, sy Output screen coordinates
+ * @return true if point is in front of camera, false if behind
+ */
+static bool project_point(renderer_t* renderer, float wx, float wy, float wz, float* sx, float* sy, float* depth) {
+    // Calculate offset from camera
+    float dx = wx - renderer->camera->x;
+    float dy = wy - renderer->camera->y;
+    float dz = wz - renderer->camera->z;
+
+    // Rotate by camera yaw (around Y axis)
+    float cos_yaw = cosf_fast(-renderer->camera->yaw);
+    float sin_yaw = sinf_fast(-renderer->camera->yaw);
+
+    float rx = dx * cos_yaw - dz * sin_yaw;
+    float rz = dx * sin_yaw + dz * cos_yaw;
+
+    // Skip if behind camera
+    if (rz < 0.1f) {
+        return false;
+    }
+
+    // Rotate by camera pitch (around X axis)
+    float cos_pitch = cosf_fast(-renderer->camera->pitch);
+    float sin_pitch = sinf_fast(-renderer->camera->pitch);
+
+    float ry = dy * cos_pitch - rz * sin_pitch;
+    float final_rz = dy * sin_pitch + rz * cos_pitch;
+
+    // Skip if behind camera after pitch rotation
+    if (final_rz < 0.1f) {
+        return false;
+    }
+
+    // Perspective projection
+    float fov_scale = renderer->height / 2.0f;
+    *sx = renderer->width / 2 + (rx / final_rz) * fov_scale;
+    *sy = renderer->height / 2 - (ry / final_rz) * fov_scale;
+    *depth = final_rz;
+
+    return true;
+}
+
+/**
+ * @brief Draw a textured quad (4 vertices)
+ * @param renderer Renderer context
+ * @param x0, y0, x1, y1, x2, y2, x3, y3 Screen coordinates (4 corners in order)
+ * @param tex_x0, tex_y0, tex_x1, tex_y1 Texture coordinates (0-7)
+ * @param texture Texture data
+ * @param shade Shading factor
+ */
+static void draw_textured_quad(renderer_t* renderer,
+                               float x0, float y0, float x1, float y1,
+                               float x2, float y2, float x3, float y3,
+                               int tex_x0, int tex_y0, int tex_x1, int tex_y1,
+                               const uint16_t* texture, float shade) {
+    if (!renderer || !renderer->framebuffer || !texture) {
+        return;
+    }
+
+    // Debug: Log first quad
+    static bool first_quad = true;
+    static int total_quads = 0;
+    static int total_pixels = 0;
+    int pixels_drawn = 0;
+
+    total_quads++;
+    if (total_quads <= 10) {
+        ESP_LOGI(TAG, "Quad #%d: vertices (%.1f,%.1f) (%.1f,%.1f) (%.1f,%.1f) (%.1f,%.1f)",
+                 total_quads, x0, y0, x1, y1, x2, y2, x3, y3);
+    }
+
+    // Bounding box for clipping
+    int min_x = (int)floorf(fminf(fminf(x0, x1), fminf(x2, x3)));
+    int max_x = (int)ceilf(fmaxf(fmaxf(x0, x1), fmaxf(x2, x3)));
+    int min_y = (int)floorf(fminf(fminf(y0, y1), fminf(y2, y3)));
+    int max_y = (int)ceilf(fmaxf(fmaxf(y0, y1), fmaxf(y2, y3)));
+
+    // Clip to screen
+    if (min_x < 0) min_x = 0;
+    if (max_x >= renderer->width) max_x = renderer->width - 1;
+    if (min_y < 0) min_y = 0;
+    if (max_y >= renderer->height) max_y = renderer->height - 1;
+
+    // Rasterize quad using scanlines
+    for (int y = min_y; y <= max_y; y++) {
+        // Find intersections with quad edges
+        float intersections[4];
+        int intersect_count = 0;
+
+        // Edge 0-1
+        if ((y0 <= y && y1 > y) || (y1 <= y && y0 > y)) {
+            float t = (y - y0) / (y1 - y0);
+            intersections[intersect_count++] = x0 + t * (x1 - x0);
+        }
+        // Edge 1-2
+        if ((y1 <= y && y2 > y) || (y2 <= y && y1 > y)) {
+            float t = (y - y1) / (y2 - y1);
+            intersections[intersect_count++] = x1 + t * (x2 - x1);
+        }
+        // Edge 2-3
+        if ((y2 <= y && y3 > y) || (y3 <= y && y2 > y)) {
+            float t = (y - y2) / (y3 - y2);
+            intersections[intersect_count++] = x2 + t * (x3 - x2);
+        }
+        // Edge 3-0
+        if ((y3 <= y && y0 > y) || (y0 <= y && y3 > y)) {
+            float t = (y - y3) / (y0 - y3);
+            intersections[intersect_count++] = x3 + t * (x0 - x3);
+        }
+
+        if (intersect_count < 2) continue;
+
+        // Sort intersections
+        if (intersections[0] > intersections[1]) {
+            float temp = intersections[0];
+            intersections[0] = intersections[1];
+            intersections[1] = temp;
+        }
+
+        // Draw span
+        int x_start = (int)ceilf(intersections[0]);
+        int x_end = (int)floorf(intersections[1]);
+
+        if (x_start < min_x) x_start = min_x;
+        if (x_end > max_x) x_end = max_x;
+
+        for (int x = x_start; x <= x_end; x++) {
+            // Calculate barycentric coordinates for texture mapping
+            // Simplified: just interpolate based on position
+            float u = (float)(x - x_start) / (x_end - x_start + 1);
+            int tex_x = tex_x0 + (int)(u * (tex_x1 - tex_x0));
+            int tex_y = tex_y0 + (int)(u * (tex_y1 - tex_y0));
+
+            // Clamp texture coordinates
+            tex_x = tex_x & 0x7;
+            tex_y = tex_y & 0x7;
+
+            uint16_t texel = texture[tex_y * TEXTURE_SIZE + tex_x];
+            texel = shade_color(texel, shade);
+
+            renderer->framebuffer[y * renderer->width + x] = texel;
+            pixels_drawn++;
+        }
+    }
+
+    total_pixels += pixels_drawn;
+
+    if (first_quad && pixels_drawn > 0) {
+        ESP_LOGI(TAG, "First quad: bbox=(%d,%d)-(%d,%d), drew %d pixels",
+                 min_x, min_y, max_x, max_y, pixels_drawn);
+        ESP_LOGI(TAG, "  Vertices: (%.1f,%.1f) (%.1f,%.1f) (%.1f,%.1f) (%.1f,%.1f)",
+                 x0, y0, x1, y1, x2, y2, x3, y3);
+        first_quad = false;
+    }
+
+    // Log summary after 1000 quads
+    if (total_quads == 1000) {
+        ESP_LOGI(TAG, "After 1000 quads: %d total pixels drawn", total_pixels);
+    }
+}
+
+/**
+ * @brief Draw a single voxel with textured faces
+ * @param renderer Renderer context
+ * @param x, y, z World coordinates of voxel
+ * @param block Block type
+ * @param depth Output depth for sorting
+ */
+static void draw_voxel_3d(renderer_t* renderer, int32_t x, int32_t y, int32_t z, block_type_t block, float* depth) {
+    if (!renderer || !renderer->framebuffer) {
+        return;
+    }
+
+    const uint16_t* texture = textures[block];
+    if (!texture) return;
+
+    // Voxel 8 corners in world space
+    float corners[8][3] = {
+        {x, y, z}, {x+1, y, z}, {x+1, y, z+1}, {x, y, z+1},     // Bottom face (y)
+        {x, y+1, z}, {x+1, y+1, z}, {x+1, y+1, z+1}, {x, y+1, z+1}  // Top face (y+1)
+    };
+
+    // Project all 8 corners
+    float screen_x[8], screen_y[8], corner_depth[8];
+    int visible_corners = 0;
+    float avg_depth = 0.0f;
+
+    for (int i = 0; i < 8; i++) {
+        if (project_point(renderer, corners[i][0], corners[i][1], corners[i][2],
+                         &screen_x[i], &screen_y[i], &corner_depth[i])) {
+            visible_corners++;
+            avg_depth += corner_depth[i];
+        }
+    }
+
+    if (visible_corners == 0) {
+        return;  // Entire voxel behind camera
+    }
+
+    avg_depth /= visible_corners;
+    *depth = avg_depth;
+
+    // Check camera direction to determine which faces are visible
+    float cam_dx = renderer->camera->x - (x + 0.5f);
+    float cam_dy = renderer->camera->y - (y + 0.5f);
+    float cam_dz = renderer->camera->z - (z + 0.5f);
+
+    // Face normals and visibility tests
+    // Format: {4 corner indices, normal_component_to_check}
+    int faces[6][5] = {
+        {0, 1, 5, 4, 0},  // Front (Z-): normal = (0, 0, -1), check cam_dz < 0
+        {2, 3, 7, 6, 0},  // Back (Z+): normal = (0, 0, 1), check cam_dz > 0
+        {3, 0, 4, 7, 1},  // Left (X-): normal = (-1, 0, 0), check cam_dx < 0
+        {1, 2, 6, 5, 1},  // Right (X+): normal = (1, 0, 0), check cam_dx > 0
+        {4, 5, 6, 7, 2},  // Top (Y+): normal = (0, 1, 0), check cam_dy > 0
+        {0, 3, 2, 1, 2}   // Bottom (Y-): normal = (0, -1, 0), check cam_dy < 0
+    };
+
+    float normals[6][3] = {
+        {0, 0, -1},  // Front
+        {0, 0, 1},   // Back
+        {-1, 0, 0},  // Left
+        {1, 0, 0},   // Right
+        {0, 1, 0},   // Top
+        {0, -1, 0}   // Bottom
+    };
+
+    float face_shades[6] = {0.7f, 0.5f, 0.6f, 0.5f, 1.0f, 0.4f};
+
+    // Debug: Log first voxel
+    static bool first_voxel = true;
+    int faces_rendered = 0;
+
+    // Render visible faces
+    for (int f = 0; f < 6; f++) {
+        // Back-face culling: dot product of face normal with camera direction
+        float dot = normals[f][0] * cam_dx + normals[f][1] * cam_dy + normals[f][2] * cam_dz;
+
+        if (dot > 0) {  // Face is visible (camera is in front of this face)
+            int* face = faces[f];
+            float fx0 = screen_x[face[0]], fy0 = screen_y[face[0]];
+            float fx1 = screen_x[face[1]], fy1 = screen_y[face[1]];
+            float fx2 = screen_x[face[2]], fy2 = screen_y[face[2]];
+            float fx3 = screen_x[face[3]], fy3 = screen_y[face[3]];
+
+            // Skip if any corner is behind camera (project_point returned false)
+            if (corner_depth[face[0]] < 0.1f || corner_depth[face[1]] < 0.1f ||
+                corner_depth[face[2]] < 0.1f || corner_depth[face[3]] < 0.1f) {
+                continue;
+            }
+
+            // Texture coordinates for this face
+            int tx0, ty0, tx1, ty1;
+            if (f < 4) {  // Vertical faces
+                tx0 = 0; ty0 = 0; tx1 = 7; ty1 = 7;
+            } else {  // Top/bottom faces
+                tx0 = 0; ty0 = 0; tx1 = 7; ty1 = 7;
+            }
+
+            draw_textured_quad(renderer, fx0, fy0, fx1, fy1, fx2, fy2, fx3, fy3,
+                             tx0, ty0, tx1, ty1, texture, face_shades[f]);
+            faces_rendered++;
+        }
+    }
+
+    if (first_voxel && faces_rendered > 0) {
+        ESP_LOGI(TAG, "First voxel at (%d,%d,%d): %d faces rendered, visible_corners=%d, avg_depth=%.2f",
+                 x, y, z, faces_rendered, visible_corners, avg_depth);
+        ESP_LOGI(TAG, "  Camera direction: (%.2f, %.2f, %.2f)", cam_dx, cam_dy, cam_dz);
+        first_voxel = false;
+    }
 }
 
 /**
@@ -745,4 +973,91 @@ static void renderer_render_wireframe(renderer_t* renderer) {
             }
         }
     }
+}
+
+/**
+ * @brief Render 3D voxels with textures (true 3D renderer)
+ * @param renderer Renderer context
+ */
+static void renderer_render_3d(renderer_t* renderer) {
+    if (!renderer || !renderer->framebuffer || !renderer->world) {
+        return;
+    }
+
+    voxel_world_t* world = renderer->world;
+    int32_t render_distance = 20;
+
+    int32_t cam_x = (int32_t)floorf(renderer->camera->x);
+    int32_t cam_z = (int32_t)floorf(renderer->camera->z);
+
+    // Debug: Log first frame
+    static bool first_frame = true;
+    if (first_frame) {
+        ESP_LOGI(TAG, "3D Renderer: Camera at (%.1f, %.1f, %.1f), yaw=%.2f, pitch=%.2f",
+                 renderer->camera->x, renderer->camera->y, renderer->camera->z,
+                 renderer->camera->yaw, renderer->camera->pitch);
+        first_frame = false;
+    }
+
+    // Collect all visible voxels
+    typedef struct {
+        int32_t x, y, z;
+        block_type_t block;
+        float depth;
+    } visible_voxel_t;
+
+    visible_voxel_t voxels[4096];  // Up to 4096 visible voxels
+    int voxel_count = 0;
+
+    for (int32_t x = cam_x - render_distance; x <= cam_x + render_distance; x++) {
+        for (int32_t z = cam_z - render_distance; z <= cam_z + render_distance; z++) {
+            int32_t highest_y = world_get_height(world, x, z);
+
+            for (int32_t y = 0; y <= highest_y; y++) {
+                block_type_t block = world_get_block(world, x, y, z);
+                if (block != BLOCK_AIR) {
+                    if (voxel_count < 4096) {
+                        voxels[voxel_count].x = x;
+                        voxels[voxel_count].y = y;
+                        voxels[voxel_count].z = z;
+                        voxels[voxel_count].block = block;
+                        voxels[voxel_count].depth = 0.0f;  // Will be calculated
+                        voxel_count++;
+                    }
+                }
+            }
+        }
+    }
+
+    ESP_LOGI(TAG, "3D Renderer: Collected %d voxels", voxel_count);
+
+    // Sort voxels by depth (far to near) for painter's algorithm
+    // Largest distance first, smallest distance last
+    for (int i = 0; i < voxel_count - 1; i++) {
+        for (int j = 0; j < voxel_count - 1 - i; j++) {
+            // Calculate distance for sorting
+            float d1 = (voxels[j].x - renderer->camera->x) * (voxels[j].x - renderer->camera->x) +
+                      (voxels[j].y - renderer->camera->y) * (voxels[j].y - renderer->camera->y) +
+                      (voxels[j].z - renderer->camera->z) * (voxels[j].z - renderer->camera->z);
+            float d2 = (voxels[j+1].x - renderer->camera->x) * (voxels[j+1].x - renderer->camera->x) +
+                      (voxels[j+1].y - renderer->camera->y) * (voxels[j+1].y - renderer->camera->y) +
+                      (voxels[j+1].z - renderer->camera->z) * (voxels[j+1].z - renderer->camera->z);
+
+            if (d1 < d2) {  // If first is closer than second, swap (we want far first)
+                visible_voxel_t temp = voxels[j];
+                voxels[j] = voxels[j+1];
+                voxels[j+1] = temp;
+            }
+        }
+    }
+
+    // Render voxels back-to-front
+    int rendered_count = 0;
+    for (int i = 0; i < voxel_count; i++) {
+        float depth;
+        draw_voxel_3d(renderer, voxels[i].x, voxels[i].y, voxels[i].z, voxels[i].block, &depth);
+        rendered_count++;
+    }
+
+    ESP_LOGI(TAG, "3D Renderer: Rendered %d voxels", rendered_count);
 }

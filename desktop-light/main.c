@@ -257,6 +257,18 @@ static int run_renderer(const cli_options_t* options) {
         if (fb && fb_width > 0 && fb_height > 0) {
             unsigned char* pixels = (unsigned char*)fb_image.data;
 
+            // DEBUG: Check first few pixels on frame 20
+            static int debug_frame = 0;
+            debug_frame++;
+            if (debug_frame == 20) {
+                printf("[%s] DEBUG: Frame 20 framebuffer dump:\n", TAG);
+                printf("  fb[0] = 0x%04x\n", fb[0]);
+                printf("  fb[1] = 0x%04x\n", fb[1]);
+                printf("  fb[%d] = 0x%04x (diagonal)\n", fb_width + 1, fb[fb_width + 1]);
+                printf("  fb[%d] = 0x%04x (middle)\n", (fb_height/2) * fb_width + fb_width/2,
+                       fb[(fb_height/2) * fb_width + fb_width/2]);
+            }
+
             for (int32_t i = 0; i < fb_width * fb_height; i++) {
                 uint16_t pixel = fb[i];
 

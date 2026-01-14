@@ -232,6 +232,10 @@ void iotcraft_task(void *pvParameter)
     ESP_LOGI(TAG, "Free heap before Core 1 task: %zu bytes (min: %zu bytes)",
              free_heap, min_free_heap);
 
+    // ============================================================
+    // DISABLED: Multi-core rendering (using single-core 3D renderer)
+    // ============================================================
+    /*
     // Create Core 1 rendering task (right half of screen)
     ESP_LOGI(TAG, "Creating Core 1 render task with %d KB stack...",
              CORE1_RENDER_STACK_SIZE / 1024);
@@ -262,20 +266,12 @@ void iotcraft_task(void *pvParameter)
     int wait_count = 0;
     while (!g_core1_ready && wait_count < 100) {
         vTaskDelay(pdMS_TO_TICKS(10));
-        wait_count++;
     }
+    */
+    g_core1_ready = true;  // Pretend Core 1 is ready
+    // ============================================================
 
-    if (!g_core1_ready) {
-        ESP_LOGE(TAG, "Core 1 render task failed to start");
-        vSemaphoreDelete(g_render_start_sem);
-        vSemaphoreDelete(g_render_done_sem);
-        renderer_free(&g_renderer);
-        world_free(&g_world);
-        vTaskDelete(NULL);
-        return;
-    }
-
-    ESP_LOGI(TAG, "Multi-core rendering initialized (Core 0: left half, Core 1: right half)");
+    ESP_LOGI(TAG, "Single-core 3D renderer initialized (both platforms now use same code)");
 
 
     // Debug flags
@@ -683,19 +679,10 @@ void iotcraft_task(void *pvParameter)
         game_update(&g_game, delta_time);
 
         // ============================================================
-        // MULTI-CORE PARALLEL RENDERING
+        // TRUE 3D RENDERING (shared with desktop-light)
         // ============================================================
-        // Clear framebuffer with sky color (done once by Core 0)
-        renderer_clear(&g_renderer, 0x867d);  // COLOR_SKY
-
-        // Signal Core 1 to start rendering right half
-        xSemaphoreGive(g_render_start_sem);
-
-        // Core 0 renders left half (columns 0-511) in parallel with Core 1
-        renderer_render_columns(&g_renderer, 0, RENDER_WIDTH / 2);
-
-        // Wait for Core 1 to finish rendering right half
-        xSemaphoreTake(g_render_done_sem, portMAX_DELAY);
+        // Render frame using new 3D renderer
+        renderer_render_frame(&g_renderer);
         // ============================================================
 
         // Get framebuffer and dimensions
