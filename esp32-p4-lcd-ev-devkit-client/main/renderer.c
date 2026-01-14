@@ -795,26 +795,29 @@ static void draw_voxel_3d(renderer_t* renderer, int32_t x, int32_t y, int32_t z,
     float cam_dz = renderer->camera->z - (z + 0.5f);
 
     // Face normals and visibility tests
-    // Format: {4 corner indices, normal_component_to_check}
+    // Voxel corners: 0-3 are bottom (Y=0), 4-7 are top (Y=1)
+    // Bottom: 0=(0,0,0) 1=(1,0,0) 2=(1,0,1) 3=(0,0,1)
+    // Top:    4=(0,1,0) 5=(1,1,0) 6=(1,1,1) 7=(0,1,1)
+    // Format: {4 corner indices in counter-clockwise order when viewed from outside}
     int faces[6][5] = {
-        {0, 1, 5, 4, 0},  // Front (Z-): normal = (0, 0, -1), check cam_dz < 0
-        {2, 3, 7, 6, 0},  // Back (Z+): normal = (0, 0, 1), check cam_dz > 0
-        {3, 0, 4, 7, 1},  // Left (X-): normal = (-1, 0, 0), check cam_dx < 0
-        {1, 2, 6, 5, 1},  // Right (X+): normal = (1, 0, 0), check cam_dx > 0
-        {4, 5, 6, 7, 2},  // Top (Y+): normal = (0, 1, 0), check cam_dy > 0
-        {0, 3, 2, 1, 2}   // Bottom (Y-): normal = (0, -1, 0), check cam_dy < 0
+        {0, 3, 7, 4, 0},  // Left (X-): normal = (-1, 0, 0)
+        {1, 2, 6, 5, 1},  // Right (X+): normal = (1, 0, 0)
+        {0, 1, 5, 4, 2},  // Front (Z-): normal = (0, 0, -1)
+        {2, 3, 7, 6, 2},  // Back (Z+): normal = (0, 0, 1)
+        {4, 5, 6, 7, 1},  // Top (Y+): normal = (0, 1, 0)
+        {0, 3, 2, 1, 1}   // Bottom (Y-): normal = (0, -1, 0)
     };
 
     float normals[6][3] = {
-        {0, 0, -1},  // Front
-        {0, 0, 1},   // Back
-        {-1, 0, 0},  // Left
-        {1, 0, 0},   // Right
-        {0, 1, 0},   // Top
-        {0, -1, 0}   // Bottom
+        {-1, 0, 0},  // Left (X-)
+        {1, 0, 0},   // Right (X+)
+        {0, 0, -1},  // Front (Z-)
+        {0, 0, 1},   // Back (Z+)
+        {0, 1, 0},   // Top (Y+)
+        {0, -1, 0}   // Bottom (Y-)
     };
 
-    float face_shades[6] = {0.7f, 0.5f, 0.6f, 0.5f, 1.0f, 0.4f};
+    float face_shades[6] = {0.6f, 0.5f, 0.7f, 0.5f, 1.0f, 0.4f};
 
     // Debug: Log first voxel
     static bool first_voxel = true;
@@ -835,6 +838,30 @@ static void draw_voxel_3d(renderer_t* renderer, int32_t x, int32_t y, int32_t z,
             // Skip if any corner is behind camera (project_point returned false)
             if (corner_depth[face[0]] < 0.1f || corner_depth[face[1]] < 0.1f ||
                 corner_depth[face[2]] < 0.1f || corner_depth[face[3]] < 0.1f) {
+                continue;
+            }
+
+            // Additional validation: skip if projected coordinates are invalid or extreme
+            // This prevents "triangle spikes" when vertices are near camera plane
+            const float MAX_COORD = 10000.0f;  // Reasonable screen coordinate limit
+            if (fabsf(fx0) > MAX_COORD || fabsf(fy0) > MAX_COORD ||
+                fabsf(fx1) > MAX_COORD || fabsf(fy1) > MAX_COORD ||
+                fabsf(fx2) > MAX_COORD || fabsf(fy2) > MAX_COORD ||
+                fabsf(fx3) > MAX_COORD || fabsf(fy3) > MAX_COORD) {
+                continue;
+            }
+
+            // Skip if the quad bounding box is too small (likely a degenerate quad)
+            float min_x = fminf(fminf(fx0, fx1), fminf(fx2, fx3));
+            float max_x = fmaxf(fmaxf(fx0, fx1), fmaxf(fx2, fx3));
+            float min_y = fminf(fminf(fy0, fy1), fminf(fy2, fy3));
+            float max_y = fmaxf(fmaxf(fy0, fy1), fmaxf(fy2, fy3));
+
+            float quad_width = max_x - min_x;
+            float quad_height = max_y - min_y;
+
+            // Skip tiny quads (likely artifacts)
+            if (quad_width < 0.5f || quad_height < 0.5f) {
                 continue;
             }
 

@@ -19,6 +19,11 @@ int cli_parse_options(int argc, char* argv[], cli_options_t* options)
     options->verbose = false;
     options->interactive = false;
 
+    // Multi-screenshot defaults
+    options->screenshot_count = 1;
+    options->screenshot_interval = 0.33f;  // ~3 screenshots per second
+    options->camera_rotate_yaw = 0.0f;
+
     // Camera defaults (use NaN to indicate "not set")
     options->cam_x = NAN;
     options->cam_y = NAN;
@@ -65,6 +70,36 @@ int cli_parse_options(int argc, char* argv[], cli_options_t* options)
             }
             options->screenshot_mode = true;
             strncpy(options->screenshot_path, argv[++i], sizeof(options->screenshot_path) - 1);
+        }
+        else if (strcmp(argv[i], "--screenshots") == 0) {
+            if (i + 1 >= argc) {
+                fprintf(stderr, "Error: --screenshots requires a count argument\n");
+                return -1;
+            }
+            options->screenshot_count = atoi(argv[++i]);
+            if (options->screenshot_count < 1) {
+                fprintf(stderr, "Error: screenshot count must be at least 1\n");
+                return -1;
+            }
+            options->screenshot_mode = true;  // Automatically enable screenshot mode
+        }
+        else if (strcmp(argv[i], "--interval") == 0) {
+            if (i + 1 >= argc) {
+                fprintf(stderr, "Error: --interval requires a seconds argument\n");
+                return -1;
+            }
+            options->screenshot_interval = atof(argv[++i]);
+            if (options->screenshot_interval < 0.01) {
+                fprintf(stderr, "Error: interval must be at least 0.01 seconds\n");
+                return -1;
+            }
+        }
+        else if (strcmp(argv[i], "--rotate-yaw") == 0) {
+            if (i + 1 >= argc) {
+                fprintf(stderr, "Error: --rotate-yaw requires a radians argument\n");
+                return -1;
+            }
+            options->camera_rotate_yaw = atof(argv[++i]);
         }
         else if (strcmp(argv[i], "--duration") == 0) {
             if (i + 1 >= argc) {
@@ -121,6 +156,9 @@ void cli_print_usage(const char* program_name)
     printf("║    --cam-pos X Y Z      Set camera position                ║\n");
     printf("║    --cam-rot YAW PITCH  Set camera rotation (radians)      ║\n");
     printf("║    --screenshot FILE    Save screenshot and exit           ║\n");
+    printf("║    --screenshots N      Take N screenshots with rotation   ║\n");
+    printf("║    --interval SEC       Time between screenshots (default: 0.33)║\n");
+    printf("║    --rotate-yaw RAD     Rotate camera between shots        ║\n");
     printf("║    --duration SECONDS   Run for N seconds (default: 5)      ║\n");
     printf("║    --headless           Don't show window (for screenshots) ║\n");
     printf("║    --size WIDTH HEIGHT  Resolution (default: 320x240)       ║\n");
@@ -133,6 +171,9 @@ void cli_print_usage(const char* program_name)
     printf("║                                                            ║\n");
     printf("║    %s --cam-pos 0 2 10 --cam-rot 1.57 0              ║\n", program_name);
     printf("║        Set camera to specific position and angle         ║\n");
+    printf("║                                                            ║\n");
+    printf("║    %s --screenshots 3 --interval 0.5 --rotate-yaw 0.1  ║\n", program_name);
+    printf("║        Take 3 screenshots while rotating camera          ║\n");
     printf("║                                                            ║\n");
     printf("║    %s --screenshot output.png                     ║\n", program_name);
     printf("║        Run for 5 seconds, save screenshot, exit           ║\n");

@@ -11,6 +11,9 @@
 typedef struct {
     bool screenshot_mode;
     char screenshot_path[256];
+    int screenshot_count;        // Number of screenshots to take (default: 1)
+    float screenshot_interval;   // Seconds between screenshots (default: 0.33)
+    float camera_rotate_yaw;     // Rotate camera by this yaw between shots (radians)
     int duration_seconds;
     bool headless;
     bool verbose;

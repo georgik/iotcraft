@@ -35,6 +35,7 @@
 
 // Flag to control main loop
 static volatile sig_atomic_t g_running = 1;
+static camera_t g_camera = {0};  // Global camera for multi-screenshot rotation
 
 // Signal handler for graceful shutdown
 void signal_handler(int sig) {
@@ -91,27 +92,30 @@ static void display_chessboard_test(int duration_ms) {
 static int run_renderer(const cli_options_t* options) {
     printf("[%s] Initializing 3D renderer...\n", TAG);
 
-    // Initialize camera
-    camera_t camera = {0};
-    camera_init(&camera);
+    // Initialize global camera (only on first call)
+    static bool camera_initialized = false;
+    if (!camera_initialized) {
+        camera_init(&g_camera);
+        camera_initialized = true;
 
-    // Use CLI camera position if provided, otherwise use defaults
-    if (!isnan(options->cam_x)) {
-        camera.x = options->cam_x;
-        camera.y = options->cam_y;
-        camera.z = options->cam_z;
-    } else {
-        camera.x = -15.0f;
-        camera.y = 2.0f;
-        camera.z = 0.0f;
-    }
+        // Use CLI camera position if provided, otherwise use defaults
+        if (!isnan(options->cam_x)) {
+            g_camera.x = options->cam_x;
+            g_camera.y = options->cam_y;
+            g_camera.z = options->cam_z;
+        } else {
+            g_camera.x = -15.0f;
+            g_camera.y = 2.0f;
+            g_camera.z = 0.0f;
+        }
 
-    if (!isnan(options->cam_yaw)) {
-        camera.yaw = options->cam_yaw;
-        camera.pitch = options->cam_pitch;
-    } else {
-        camera.yaw = -0.78f;  // -45 degrees
-        camera.pitch = -0.17f;  // -10 degrees
+        if (!isnan(options->cam_yaw)) {
+            g_camera.yaw = options->cam_yaw;
+            g_camera.pitch = options->cam_pitch;
+        } else {
+            g_camera.yaw = -0.78f;  // -45 degrees
+            g_camera.pitch = -0.17f;  // -10 degrees
+        }
     }
 
     // Initialize world
@@ -123,7 +127,7 @@ static int run_renderer(const cli_options_t* options) {
 
     // Load medieval world template
     printf("[%s] Loading medieval world template...\n", TAG);
-    if (!world_load_medieval_template(&world, &camera)) {
+    if (!world_load_medieval_template(&world, &g_camera)) {
         fprintf(stderr, "[%s] Failed to load world template\n", TAG);
         world_free(&world);
         return -1;
@@ -136,7 +140,7 @@ static int run_renderer(const cli_options_t* options) {
 
     // Initialize renderer
     renderer_t renderer = {0};
-    if (!renderer_init(&renderer, options->width, options->height, &camera, &world)) {
+    if (!renderer_init(&renderer, options->width, options->height, &g_camera, &world)) {
         fprintf(stderr, "[%s] Failed to initialize renderer\n", TAG);
         world_free(&world);
         return -1;
@@ -166,7 +170,7 @@ static int run_renderer(const cli_options_t* options) {
 
     // Rendering loop
     int frameCounter = 0;
-    float auto_rotate = camera.yaw;  // Start from initial yaw
+    float auto_rotate = g_camera.yaw;  // Start from initial yaw
     int max_frames = options->duration_seconds * 20;  // 20 FPS
     bool keys_pressed = false;  // Track if user interacted
 
@@ -179,49 +183,49 @@ static int run_renderer(const cli_options_t* options) {
 
             // Movement
             if (IsKeyDown(KEY_W)) {
-                camera.x += cosf(camera.yaw) * move_speed;
-                camera.z += sinf(camera.yaw) * move_speed;
+                g_camera.x += cosf(g_camera.yaw) * move_speed;
+                g_camera.z += sinf(g_camera.yaw) * move_speed;
                 any_key = true;
             }
             if (IsKeyDown(KEY_S)) {
-                camera.x -= cosf(camera.yaw) * move_speed;
-                camera.z -= sinf(camera.yaw) * move_speed;
+                g_camera.x -= cosf(g_camera.yaw) * move_speed;
+                g_camera.z -= sinf(g_camera.yaw) * move_speed;
                 any_key = true;
             }
             if (IsKeyDown(KEY_A)) {
-                camera.x += cosf(camera.yaw - 1.57f) * move_speed;
-                camera.z += sinf(camera.yaw - 1.57f) * move_speed;
+                g_camera.x += cosf(g_camera.yaw - 1.57f) * move_speed;
+                g_camera.z += sinf(g_camera.yaw - 1.57f) * move_speed;
                 any_key = true;
             }
             if (IsKeyDown(KEY_D)) {
-                camera.x += cosf(camera.yaw + 1.57f) * move_speed;
-                camera.z += sinf(camera.yaw + 1.57f) * move_speed;
+                g_camera.x += cosf(g_camera.yaw + 1.57f) * move_speed;
+                g_camera.z += sinf(g_camera.yaw + 1.57f) * move_speed;
                 any_key = true;
             }
             if (IsKeyDown(KEY_SPACE)) {
-                camera.y += move_speed;
+                g_camera.y += move_speed;
                 any_key = true;
             }
             if (IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT)) {
-                camera.y -= move_speed;
+                g_camera.y -= move_speed;
                 any_key = true;
             }
 
             // Rotation
             if (IsKeyDown(KEY_LEFT)) {
-                camera.yaw -= rot_speed;
+                g_camera.yaw -= rot_speed;
                 any_key = true;
             }
             if (IsKeyDown(KEY_RIGHT)) {
-                camera.yaw += rot_speed;
+                g_camera.yaw += rot_speed;
                 any_key = true;
             }
             if (IsKeyDown(KEY_UP)) {
-                camera.pitch += rot_speed;
+                g_camera.pitch += rot_speed;
                 any_key = true;
             }
             if (IsKeyDown(KEY_DOWN)) {
-                camera.pitch -= rot_speed;
+                g_camera.pitch -= rot_speed;
                 any_key = true;
             }
 
@@ -233,7 +237,7 @@ static int run_renderer(const cli_options_t* options) {
         // Auto-rotate camera only if no user interaction
         if (!keys_pressed && !options->interactive) {
             auto_rotate += 0.05f;  // 0.05 radians per frame
-            camera.yaw = auto_rotate;
+            g_camera.yaw = auto_rotate;
         }
 
         // Extend max frames if user is interacting
@@ -298,8 +302,8 @@ static int run_renderer(const cli_options_t* options) {
         if (options->verbose || options->interactive) {
             DrawText(TextFormat("Frame: %d/%d", frameCounter, max_frames), 10, 10, 15, WHITE);
             DrawText(TextFormat("Blocks: %d", world.count), 10, 25, 15, WHITE);
-            DrawText(TextFormat("Pos: (%.1f, %.1f, %.1f)", camera.x, camera.y, camera.z), 10, 40, 15, WHITE);
-            DrawText(TextFormat("Yaw: %.2f Pitch: %.2f", camera.yaw, camera.pitch), 10, 55, 15, WHITE);
+            DrawText(TextFormat("Pos: (%.1f, %.1f, %.1f)", g_camera.x, g_camera.y, g_camera.z), 10, 40, 15, WHITE);
+            DrawText(TextFormat("Yaw: %.2f Pitch: %.2f", g_camera.yaw, g_camera.pitch), 10, 55, 15, WHITE);
 
             if (options->interactive) {
                 DrawText("WASD=Move Space/Shift=Up/Down Arrows=Look", 10, 75, 12, YELLOW);
@@ -422,12 +426,55 @@ int main(int argc, char* argv[])
         return 1;
     }
 
-    // Save screenshot if requested
+    // Save screenshot(s) if requested
     if (options.screenshot_mode && g_running) {
-        printf("\n[%s] Saving screenshot...\n", TAG);
-        if (save_screenshot(options.screenshot_path) < 0) {
-            CloseWindow();
-            return 1;
+        if (options.screenshot_count == 1) {
+            // Single screenshot mode (backward compatible)
+            printf("\n[%s] Saving screenshot...\n", TAG);
+            if (save_screenshot(options.screenshot_path) < 0) {
+                CloseWindow();
+                return 1;
+            }
+        } else {
+            // Multi-screenshot mode with camera rotation
+            printf("\n[%s] Taking %d screenshots with camera rotation...\n", TAG, options.screenshot_count);
+
+            for (int shot = 0; shot < options.screenshot_count; shot++) {
+                // Generate filename with shot number
+                char shot_filename[512];
+                const char* ext = strstr(options.screenshot_path, ".png");
+                if (ext) {
+                    size_t base_len = ext - options.screenshot_path;
+                    snprintf(shot_filename, sizeof(shot_filename), "%.*s_%d%s",
+                             (int)base_len, options.screenshot_path, shot + 1, ".png");
+                } else {
+                    snprintf(shot_filename, sizeof(shot_filename), "%s_%d.png",
+                             options.screenshot_path, shot + 1);
+                }
+
+                // Save screenshot
+                printf("[%s] Saving screenshot %d/%d: %s\n", TAG, shot + 1, options.screenshot_count, shot_filename);
+                if (save_screenshot(shot_filename) < 0) {
+                    CloseWindow();
+                    return 1;
+                }
+
+                // Rotate camera for next shot (if not the last one)
+                if (shot < options.screenshot_count - 1 && options.camera_rotate_yaw != 0.0f) {
+                    // Rotate camera using camera_rotate function
+                    camera_rotate(&g_camera, options.camera_rotate_yaw, 0.0f);
+
+                    // Render a few frames to let the scene update
+                    for (int frame = 0; frame < 10; frame++) {
+                        run_renderer(&options);
+                    }
+
+                    // Small delay
+                    WaitTime(options.screenshot_interval);
+                }
+            }
+
+            printf("[%s] All screenshots saved!\n", TAG);
         }
     }
 
