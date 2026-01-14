@@ -5,6 +5,7 @@
 
 #include "trig_lut.h"
 #include <math.h>
+#include <stdbool.h>
 #include "esp_log.h"
 
 static const char* TAG = "TrigLUT";

@@ -29,6 +29,7 @@
 #include "game.h"
 #include "input.h"
 #include "world_template.h"
+#include "trig_lut.h"
 
 #define TAG "IotCraftDesktop"
 
@@ -101,8 +102,8 @@ static int run_renderer(const cli_options_t* options) {
         camera.z = options->cam_z;
     } else {
         camera.x = -15.0f;
-        camera.y = 3.0f;
-        camera.z = 20.0f;
+        camera.y = 2.0f;
+        camera.z = 0.0f;
     }
 
     if (!isnan(options->cam_yaw)) {
@@ -128,6 +129,10 @@ static int run_renderer(const cli_options_t* options) {
         return -1;
     }
     printf("[%s] World loaded: %d blocks\n", TAG, world.count);
+
+    // Initialize trigonometry lookup tables
+    printf("[%s] Initializing trigonometry lookup tables...\n", TAG);
+    trig_lut_init();
 
     // Initialize renderer
     renderer_t renderer = {0};

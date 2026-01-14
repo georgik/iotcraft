@@ -29,6 +29,7 @@ set(SHARED_SOURCES
     ../esp32-p4-lcd-ev-devkit-client/main/world.c
     ../esp32-p4-lcd-ev-devkit-client/main/world_template.c
     ../esp32-p4-lcd-ev-devkit-client/main/renderer.c
+    ../esp32-p4-lcd-ev-devkit-client/main/trig_lut.c
 )
 
 # Mock sources (ESP-IDF replacements)
