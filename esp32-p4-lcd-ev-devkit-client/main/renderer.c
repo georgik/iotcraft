@@ -1077,6 +1077,31 @@ static void draw_textured_quad(renderer_t* renderer,
     }
 }
 
+// OPTIMIZATION: Precomputed voxel face data (static const = initialized once at boot)
+// Voxel corners: 0-3 are bottom (Y=0), 4-7 are top (Y=1)
+// Bottom: 0=(0,0,0) 1=(1,0,0) 2=(1,0,1) 3=(0,0,1)
+// Top:    4=(0,1,0) 5=(1,1,0) 6=(1,1,1) 7=(0,1,1)
+// Format: {4 corner indices in counter-clockwise order when viewed from outside}
+static const int g_voxel_faces[6][5] = {
+    {0, 3, 7, 4, 0},  // Left (X-): normal = (-1, 0, 0)
+    {1, 2, 6, 5, 1},  // Right (X+): normal = (1, 0, 0)
+    {0, 1, 5, 4, 2},  // Front (Z-): normal = (0, 0, -1)
+    {2, 3, 7, 6, 2},  // Back (Z+): normal = (0, 0, 1)
+    {4, 5, 6, 7, 1},  // Top (Y+): normal = (0, 1, 0)
+    {0, 3, 2, 1, 1}   // Bottom (Y-): normal = (0, -1, 0)
+};
+
+static const float g_voxel_normals[6][3] = {
+    {-1, 0, 0},  // Left (X-)
+    {1, 0, 0},   // Right (X+)
+    {0, 0, -1},  // Front (Z-)
+    {0, 0, 1},   // Back (Z+)
+    {0, 1, 0},   // Top (Y+)
+    {0, -1, 0}   // Bottom (Y-)
+};
+
+static const float g_voxel_face_shades[6] = {0.6f, 0.5f, 0.7f, 0.5f, 1.0f, 0.4f};
+
 /**
  * @brief Draw a single voxel with textured faces
  * @param renderer Renderer context
@@ -1127,88 +1152,53 @@ static void draw_voxel_3d(renderer_t* renderer, int32_t x, int32_t y, int32_t z,
     float cam_dy = renderer->camera->y - (y + 0.5f);
     float cam_dz = renderer->camera->z - (z + 0.5f);
 
-    // Face normals and visibility tests
-    // Voxel corners: 0-3 are bottom (Y=0), 4-7 are top (Y=1)
-    // Bottom: 0=(0,0,0) 1=(1,0,0) 2=(1,0,1) 3=(0,0,1)
-    // Top:    4=(0,1,0) 5=(1,1,0) 6=(1,1,1) 7=(0,1,1)
-    // Format: {4 corner indices in counter-clockwise order when viewed from outside}
-    int faces[6][5] = {
-        {0, 3, 7, 4, 0},  // Left (X-): normal = (-1, 0, 0)
-        {1, 2, 6, 5, 1},  // Right (X+): normal = (1, 0, 0)
-        {0, 1, 5, 4, 2},  // Front (Z-): normal = (0, 0, -1)
-        {2, 3, 7, 6, 2},  // Back (Z+): normal = (0, 0, 1)
-        {4, 5, 6, 7, 1},  // Top (Y+): normal = (0, 1, 0)
-        {0, 3, 2, 1, 1}   // Bottom (Y-): normal = (0, -1, 0)
-    };
+    // OPTIMIZATION: Check all 6 neighbors ONCE per voxel (not 6× per face)
+    // Bitmask: bit 0 = X-, 1 = X+, 2 = Z-, 3 = Z+, 4 = Y+, 5 = Y-
+    uint8_t neighbor_occluded = 0;
 
-    float normals[6][3] = {
-        {-1, 0, 0},  // Left (X-)
-        {1, 0, 0},   // Right (X+)
-        {0, 0, -1},  // Front (Z-)
-        {0, 0, 1},   // Back (Z+)
-        {0, 1, 0},   // Top (Y+)
-        {0, -1, 0}   // Bottom (Y-)
-    };
-
-    float face_shades[6] = {0.6f, 0.5f, 0.7f, 0.5f, 1.0f, 0.4f};
+    // Check X- neighbors
+    if (world_get_block(renderer->world, x - 1, y, z) != BLOCK_AIR) {
+        neighbor_occluded |= (1 << 0);  // X- face blocked
+    }
+    // Check X+ neighbors
+    if (world_get_block(renderer->world, x + 1, y, z) != BLOCK_AIR) {
+        neighbor_occluded |= (1 << 1);  // X+ face blocked
+    }
+    // Check Z- neighbors
+    if (world_get_block(renderer->world, x, y, z - 1) != BLOCK_AIR) {
+        neighbor_occluded |= (1 << 2);  // Z- face blocked
+    }
+    // Check Z+ neighbors
+    if (world_get_block(renderer->world, x, y, z + 1) != BLOCK_AIR) {
+        neighbor_occluded |= (1 << 3);  // Z+ face blocked
+    }
+    // Check Y+ neighbors (top)
+    if (y + 1 <= 15 && world_get_block(renderer->world, x, y + 1, z) != BLOCK_AIR) {
+        neighbor_occluded |= (1 << 4);  // Y+ face blocked
+    }
+    // Check Y- neighbors (bottom)
+    if (y > 0 && world_get_block(renderer->world, x, y - 1, z) != BLOCK_AIR) {
+        neighbor_occluded |= (1 << 5);  // Y- face blocked
+    }
 
     // Debug: Log first voxel
     static bool first_voxel = true;
     int faces_rendered = 0;
 
     // Render visible faces with occlusion culling
+    // Uses precomputed global arrays: g_voxel_faces, g_voxel_normals, g_voxel_face_shades
     for (int f = 0; f < 6; f++) {
         // Back-face culling: dot product of face normal with camera direction
-        float dot = normals[f][0] * cam_dx + normals[f][1] * cam_dy + normals[f][2] * cam_dz;
+        float dot = g_voxel_normals[f][0] * cam_dx + g_voxel_normals[f][1] * cam_dy + g_voxel_normals[f][2] * cam_dz;
 
         if (dot > 0) {  // Face is visible (camera is in front of this face)
-            // OCCLUSION CULLING: Check if this face is blocked by another voxel
-            // For each face direction, check if there's a block immediately adjacent
-            bool face_occluded = false;
-
-            if (f == 0) {  // Left face (X-)
-                // Check if there's a block at (x-1, y, z)
-                if (world_get_block(renderer->world, x - 1, y, z) != BLOCK_AIR) {
-                    face_occluded = true;
-                }
-            } else if (f == 1) {  // Right face (X+)
-                // Check if there's a block at (x+1, y, z)
-                if (world_get_block(renderer->world, x + 1, y, z) != BLOCK_AIR) {
-                    face_occluded = true;
-                }
-            } else if (f == 2) {  // Front face (Z-)
-                // Check if there's a block at (x, y, z-1)
-                if (world_get_block(renderer->world, x, y, z - 1) != BLOCK_AIR) {
-                    face_occluded = true;
-                }
-            } else if (f == 3) {  // Back face (Z+)
-                // Check if there's a block at (x, y, z+1)
-                if (world_get_block(renderer->world, x, y, z + 1) != BLOCK_AIR) {
-                    face_occluded = true;
-                }
-            } else if (f == 4) {  // Top face (Y+)
-                // CRITICAL FIX: Check if there's a block directly ABOVE us (not including ourselves)
-                // We need to check y+1 to see if something is blocking our top face
-                if (y + 1 <= 15) {  // Bounds check
-                    block_type_t block_above = world_get_block(renderer->world, x, y + 1, z);
-                    if (block_above != BLOCK_AIR) {
-                        // There's a block immediately above us, so top face is occluded
-                        face_occluded = true;
-                    }
-                }
-            } else if (f == 5) {  // Bottom face (Y-)
-                // Check if there's a block below
-                if (y > 0 && world_get_block(renderer->world, x, y - 1, z) != BLOCK_AIR) {
-                    face_occluded = true;
-                }
-            }
-
-            // Skip this face if it's occluded by an adjacent block
-            if (face_occluded) {
+            // OPTIMIZATION: Fast bitmask check instead of repeated world_get_block() calls
+            if (neighbor_occluded & (1 << f)) {
+                // This face is occluded by adjacent block
                 continue;
             }
 
-            int* face = faces[f];
+            const int* face = g_voxel_faces[f];
             float fx0 = screen_x[face[0]], fy0 = screen_y[face[0]];
             float fx1 = screen_x[face[1]], fy1 = screen_y[face[1]];
             float fx2 = screen_x[face[2]], fy2 = screen_y[face[2]];
@@ -1253,7 +1243,7 @@ static void draw_voxel_3d(renderer_t* renderer, int32_t x, int32_t y, int32_t z,
             }
 
             draw_textured_quad(renderer, fx0, fy0, fx1, fy1, fx2, fy2, fx3, fy3,
-                             tx0, ty0, tx1, ty1, texture, face_shades[f]);
+                             tx0, ty0, tx1, ty1, texture, g_voxel_face_shades[f]);
             faces_rendered++;
         }
     }
