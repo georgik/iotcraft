@@ -29,7 +29,7 @@
 
 #define TAG "IotCraftClient"
 #define RAYLIB_TASK_STACK_SIZE (160 * 1024)  // 160KB stack for main renderer task
-#define CORE1_RENDER_STACK_SIZE (32 * 1024)   // 32KB stack for Core 1 render task (only raycasting)
+#define CORE1_RENDER_STACK_SIZE (4 * 1024)    // 4KB stack for Core 1 render task (only collects & sorts voxels, no deep call stacks)
 #define RENDER_WIDTH 512    // Half resolution (4x fewer pixels = 4x faster rendering)
 #define RENDER_HEIGHT 300   // Half resolution (will be scaled to 1024x600 by display)
 #define DISPLAY_WIDTH 1024  // Physical display size
