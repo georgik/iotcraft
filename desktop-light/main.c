@@ -175,8 +175,14 @@ static int run_renderer(const cli_options_t* options) {
     bool keys_pressed = false;  // Track if user interacted
 
     while (frameCounter < max_frames && g_running) {
+        // Check if window close button was clicked
+        if (WindowShouldClose()) {
+            g_running = 0;
+            break;
+        }
+
         // Handle keyboard input
-        if (options->interactive || WindowShouldClose()) {
+        if (options->interactive) {
             float move_speed = 0.5f;
             float rot_speed = 0.05f;
             bool any_key = false;
@@ -202,11 +208,11 @@ static int run_renderer(const cli_options_t* options) {
                 g_camera.z += sinf(g_camera.yaw + 1.57f) * move_speed;
                 any_key = true;
             }
-            if (IsKeyDown(KEY_SPACE)) {
+            if (IsKeyDown(KEY_E)) {  // Up (replaces Space)
                 g_camera.y += move_speed;
                 any_key = true;
             }
-            if (IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT)) {
+            if (IsKeyDown(KEY_Q)) {  // Down (replaces Shift)
                 g_camera.y -= move_speed;
                 any_key = true;
             }
@@ -306,7 +312,7 @@ static int run_renderer(const cli_options_t* options) {
             DrawText(TextFormat("Yaw: %.2f Pitch: %.2f", g_camera.yaw, g_camera.pitch), 10, 55, 15, WHITE);
 
             if (options->interactive) {
-                DrawText("WASD=Move Space/Shift=Up/Down Arrows=Look", 10, 75, 12, YELLOW);
+                DrawText("WASD=Move Q/E=Up/Down Arrows=Look", 10, 75, 12, YELLOW);
             }
 
             // Draw horizon line to see where middle is
@@ -464,10 +470,11 @@ int main(int argc, char* argv[])
                     // Rotate camera using camera_rotate function
                     camera_rotate(&g_camera, options.camera_rotate_yaw, 0.0f);
 
-                    // Render a few frames to let the scene update
-                    for (int frame = 0; frame < 10; frame++) {
-                        run_renderer(&options);
-                    }
+                    // Render just ONE frame to update the scene
+                    // Don't use full duration - we just need one frame for the screenshot
+                    cli_options_t single_frame_opts = options;
+                    single_frame_opts.duration_seconds = 0.05f;  // Just 1 frame at 20 FPS
+                    run_renderer(&single_frame_opts);
 
                     // Small delay
                     WaitTime(options.screenshot_interval);

@@ -395,14 +395,26 @@ void renderer_render_columns(renderer_t* renderer, int32_t start_col, int32_t en
 
                 // Only add faces in front of camera
                 if (perp_wall_dist > 0.1f) {
-                    faces[face_count].x = map_x;
-                    faces[face_count].y = map_y;
-                    faces[face_count].z = map_z;
-                    faces[face_count].side = side;
-                    faces[face_count].type = block_type;
-                    faces[face_count].distance = perp_wall_dist;  // Use perpendicular as distance
-                    faces[face_count].perp_dist = perp_wall_dist;
-                    face_count++;
+                    // Check for duplicate faces (same position and side)
+                    bool is_duplicate = false;
+                    for (int32_t f = 0; f < face_count; f++) {
+                        if (faces[f].x == map_x && faces[f].y == map_y &&
+                            faces[f].z == map_z && faces[f].side == side) {
+                            is_duplicate = true;
+                            break;
+                        }
+                    }
+
+                    if (!is_duplicate) {
+                        faces[face_count].x = map_x;
+                        faces[face_count].y = map_y;
+                        faces[face_count].z = map_z;
+                        faces[face_count].side = side;
+                        faces[face_count].type = block_type;
+                        faces[face_count].distance = perp_wall_dist;  // Use perpendicular as distance
+                        faces[face_count].perp_dist = perp_wall_dist;
+                        face_count++;
+                    }
                 }
             }
 
@@ -429,14 +441,46 @@ void renderer_render_columns(renderer_t* renderer, int32_t start_col, int32_t en
         }
 
         // Sort faces by distance (far to near) for painter's algorithm
+        // Use a small epsilon to prevent flickering when distances are nearly equal
+        const float epsilon = 0.0001f;
+
         // Simple bubble sort - we have at most 64 faces, so this is fast enough
         for (int32_t i = 0; i < face_count - 1; i++) {
             for (int32_t j = 0; j < face_count - 1 - i; j++) {
-                if (faces[j].distance < faces[j + 1].distance) {
+                // Only swap if distances are significantly different
+                // This prevents flickering when faces are at nearly the same distance
+                float dist_diff = faces[j].distance - faces[j + 1].distance;
+
+                if (dist_diff < -epsilon) {
+                    // faces[j] is definitely closer than faces[j+1], swap
                     visible_face_t temp = faces[j];
                     faces[j] = faces[j + 1];
                     faces[j + 1] = temp;
+                } else if (fabsf(dist_diff) <= epsilon) {
+                    // Distances are nearly equal - use secondary sort criteria
+                    // Prefer top faces (side=2) over side faces to prevent z-fighting
+                    if (faces[j].side == 2 && faces[j + 1].side != 2) {
+                        // Keep top face first (it should be on top)
+                        visible_face_t temp = faces[j];
+                        faces[j] = faces[j + 1];
+                        faces[j + 1] = temp;
+                    } else if (faces[j].side != 2 && faces[j + 1].side == 2) {
+                        // Already in correct order (top face is at j+1, closer)
+                        // Do nothing
+                    } else {
+                        // Same side type or both not top faces - use position as tiebreaker
+                        // This ensures deterministic sorting
+                        if (faces[j].y < faces[j + 1].y ||
+                            (faces[j].y == faces[j + 1].y && faces[j].x < faces[j + 1].x) ||
+                            (faces[j].y == faces[j + 1].y && faces[j].x == faces[j + 1].x && faces[j].z < faces[j + 1].z)) {
+                            // Swap to get consistent ordering
+                            visible_face_t temp = faces[j];
+                            faces[j] = faces[j + 1];
+                            faces[j + 1] = temp;
+                        }
+                    }
                 }
+                // else: faces[j] is definitely farther, no swap needed
             }
         }
 
@@ -774,6 +818,11 @@ static void draw_voxel_3d(renderer_t* renderer, int32_t x, int32_t y, int32_t z,
     int visible_corners = 0;
     float avg_depth = 0.0f;
 
+    // Initialize all corner_depth to -1 (behind camera/unprojected)
+    for (int i = 0; i < 8; i++) {
+        corner_depth[i] = -1.0f;
+    }
+
     for (int i = 0; i < 8; i++) {
         if (project_point(renderer, corners[i][0], corners[i][1], corners[i][2],
                          &screen_x[i], &screen_y[i], &corner_depth[i])) {
@@ -823,12 +872,58 @@ static void draw_voxel_3d(renderer_t* renderer, int32_t x, int32_t y, int32_t z,
     static bool first_voxel = true;
     int faces_rendered = 0;
 
-    // Render visible faces
+    // Render visible faces with occlusion culling
     for (int f = 0; f < 6; f++) {
         // Back-face culling: dot product of face normal with camera direction
         float dot = normals[f][0] * cam_dx + normals[f][1] * cam_dy + normals[f][2] * cam_dz;
 
         if (dot > 0) {  // Face is visible (camera is in front of this face)
+            // OCCLUSION CULLING: Check if this face is blocked by another voxel
+            // For each face direction, check if there's a block immediately adjacent
+            bool face_occluded = false;
+
+            if (f == 0) {  // Left face (X-)
+                // Check if there's a block at (x-1, y, z)
+                if (world_get_block(renderer->world, x - 1, y, z) != BLOCK_AIR) {
+                    face_occluded = true;
+                }
+            } else if (f == 1) {  // Right face (X+)
+                // Check if there's a block at (x+1, y, z)
+                if (world_get_block(renderer->world, x + 1, y, z) != BLOCK_AIR) {
+                    face_occluded = true;
+                }
+            } else if (f == 2) {  // Front face (Z-)
+                // Check if there's a block at (x, y, z-1)
+                if (world_get_block(renderer->world, x, y, z - 1) != BLOCK_AIR) {
+                    face_occluded = true;
+                }
+            } else if (f == 3) {  // Back face (Z+)
+                // Check if there's a block at (x, y, z+1)
+                if (world_get_block(renderer->world, x, y, z + 1) != BLOCK_AIR) {
+                    face_occluded = true;
+                }
+            } else if (f == 4) {  // Top face (Y+)
+                // CRITICAL FIX: Check if there's a block directly ABOVE us (not including ourselves)
+                // We need to check y+1 to see if something is blocking our top face
+                if (y + 1 <= 15) {  // Bounds check
+                    block_type_t block_above = world_get_block(renderer->world, x, y + 1, z);
+                    if (block_above != BLOCK_AIR) {
+                        // There's a block immediately above us, so top face is occluded
+                        face_occluded = true;
+                    }
+                }
+            } else if (f == 5) {  // Bottom face (Y-)
+                // Check if there's a block below
+                if (y > 0 && world_get_block(renderer->world, x, y - 1, z) != BLOCK_AIR) {
+                    face_occluded = true;
+                }
+            }
+
+            // Skip this face if it's occluded by an adjacent block
+            if (face_occluded) {
+                continue;
+            }
+
             int* face = faces[f];
             float fx0 = screen_x[face[0]], fy0 = screen_y[face[0]];
             float fx1 = screen_x[face[1]], fy1 = screen_y[face[1]];
@@ -1056,13 +1151,16 @@ static void renderer_render_3d(renderer_t* renderer) {
         }
     }
 
-    ESP_LOGI(TAG, "3D Renderer: Collected %d voxels", voxel_count);
+    // ESP_LOGI(TAG, "3D Renderer: Collected %d voxels", voxel_count);  // Disabled - too verbose
 
     // Sort voxels by depth (far to near) for painter's algorithm
     // Largest distance first, smallest distance last
+    // Use epsilon tolerance to prevent flickering (z-fighting)
+    const float epsilon = 0.01f;  // Tolerance for distance comparison (optimized for 32-bit)
+
     for (int i = 0; i < voxel_count - 1; i++) {
         for (int j = 0; j < voxel_count - 1 - i; j++) {
-            // Calculate distance for sorting
+            // Calculate distance squared for sorting (avoid sqrt for performance)
             float d1 = (voxels[j].x - renderer->camera->x) * (voxels[j].x - renderer->camera->x) +
                       (voxels[j].y - renderer->camera->y) * (voxels[j].y - renderer->camera->y) +
                       (voxels[j].z - renderer->camera->z) * (voxels[j].z - renderer->camera->z);
@@ -1070,11 +1168,28 @@ static void renderer_render_3d(renderer_t* renderer) {
                       (voxels[j+1].y - renderer->camera->y) * (voxels[j+1].y - renderer->camera->y) +
                       (voxels[j+1].z - renderer->camera->z) * (voxels[j+1].z - renderer->camera->z);
 
-            if (d1 < d2) {  // If first is closer than second, swap (we want far first)
+            float dist_diff = d1 - d2;
+
+            // Only swap if distances are significantly different
+            if (dist_diff < -epsilon) {
+                // d1 is definitely closer than d2, swap to put farther first
                 visible_voxel_t temp = voxels[j];
                 voxels[j] = voxels[j+1];
                 voxels[j+1] = temp;
+            } else if (fabsf(dist_diff) <= epsilon) {
+                // Distances are nearly equal - use deterministic tiebreaker
+                // Sort by position (Y, then X, then Z) for consistent ordering
+                // This prevents flickering when camera rotates slightly
+                if (voxels[j].y > voxels[j+1].y ||
+                    (voxels[j].y == voxels[j+1].y && voxels[j].x > voxels[j+1].x) ||
+                    (voxels[j].y == voxels[j+1].y && voxels[j].x == voxels[j+1].x && voxels[j].z > voxels[j+1].z)) {
+                    // Swap for deterministic ordering
+                    visible_voxel_t temp = voxels[j];
+                    voxels[j] = voxels[j+1];
+                    voxels[j+1] = temp;
+                }
             }
+            // else: d1 > d2 + epsilon, already in correct order (far first)
         }
     }
 
@@ -1086,5 +1201,5 @@ static void renderer_render_3d(renderer_t* renderer) {
         rendered_count++;
     }
 
-    ESP_LOGI(TAG, "3D Renderer: Rendered %d voxels", rendered_count);
+    // ESP_LOGI(TAG, "3D Renderer: Rendered %d voxels", rendered_count);  // Disabled - too verbose
 }
