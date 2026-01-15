@@ -13,6 +13,7 @@ idf_component_register(
         "world_template.c"
         "trig_lut.c"
         "ppa_helper.c"
+        "brightness.c"
     INCLUDE_DIRS "."
     PRIV_REQUIRES
         georgik__raylib
@@ -21,5 +22,6 @@ idf_component_register(
         esp_eth
         esp_netif
         esp_driver_ppa
+        driver
         # esp_raylib_port is pulled in via georgik__raylib dependency
 )

@@ -31,9 +31,10 @@ void camera_move_forward(camera_t* camera, float delta) {
         return;
     }
 
-    // Calculate forward direction from yaw angle
-    float dx = cosf(camera->yaw) * delta;
-    float dz = sinf(camera->yaw) * delta;
+    // Bevy-compatible coordinate system: X+ = right, Y+ = up, Z- = forward
+    // Forward is negative Z direction
+    float dx = -sinf(camera->yaw) * delta;
+    float dz = -cosf(camera->yaw) * delta;
 
     camera->x += dx;
     camera->z += dz;
@@ -44,9 +45,9 @@ void camera_move_strafe(camera_t* camera, float delta) {
         return;
     }
 
-    // Calculate right direction (perpendicular to forward)
-    float dx = sinf(camera->yaw) * delta;
-    float dz = -cosf(camera->yaw) * delta;
+    // Bevy-compatible: Right is positive X direction (perpendicular to forward)
+    float dx = cosf(camera->yaw) * delta;
+    float dz = -sinf(camera->yaw) * delta;
 
     camera->x += dx;
     camera->z += dz;

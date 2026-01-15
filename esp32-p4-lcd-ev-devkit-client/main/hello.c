@@ -611,6 +611,8 @@ void iotcraft_task(void *pvParameter)
             game_handle_key(&g_game, IOTCRAFT_KEY_Q, input_is_key_pressed(IOTCRAFT_KEY_Q));
             game_handle_key(&g_game, IOTCRAFT_KEY_E, input_is_key_pressed(IOTCRAFT_KEY_E));
             game_handle_key(&g_game, IOTCRAFT_KEY_ESCAPE, input_is_key_pressed(IOTCRAFT_KEY_ESCAPE));
+            game_handle_key(&g_game, IOTCRAFT_KEY_N, input_is_key_pressed(IOTCRAFT_KEY_N));
+            game_handle_key(&g_game, IOTCRAFT_KEY_M, input_is_key_pressed(IOTCRAFT_KEY_M));
 
             // Toggle wireframe mode with F1
             static bool f1_was_pressed = false;

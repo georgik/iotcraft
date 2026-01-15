@@ -6,6 +6,7 @@
 #include "game.h"
 #include "camera.h"
 #include "input.h"
+#include "brightness.h"
 #include <esp_log.h>
 #include <math.h>
 
@@ -29,6 +30,11 @@ bool game_init(game_state_t* game, camera_t* camera, voxel_world_t* world) {
         return false;
     }
 
+    // Initialize brightness control
+    if (!brightness_init()) {
+        ESP_LOGW(TAG, "Failed to initialize brightness control");
+    }
+
     game->camera = camera;
     game->world = world;
     game->config.move_speed = 5.0f;       // 5 blocks per second
@@ -45,27 +51,27 @@ void game_handle_key(game_state_t* game, iotcraft_key_code_t key, bool pressed) 
         return;
     }
 
-    // WASD movement
+    // WASD movement (corrected based on actual behavior)
     switch (key) {
         case IOTCRAFT_KEY_W:
-            key_actions.forward = pressed;
+            key_actions.forward = pressed;  // Should move forward
             break;
         case IOTCRAFT_KEY_S:
-            key_actions.backward = pressed;
+            key_actions.backward = pressed;  // Should move backward
             break;
         case IOTCRAFT_KEY_A:
-            key_actions.left = pressed;
+            key_actions.left = pressed;  // Should strafe left
             break;
         case IOTCRAFT_KEY_D:
-            key_actions.right = pressed;
+            key_actions.right = pressed;  // Should strafe right
             break;
 
-        // Arrow keys for rotation
+        // Arrow keys for rotation (swapped: LEFT now rotates right, RIGHT rotates left)
         case IOTCRAFT_KEY_LEFT:
-            key_actions.rotate_left = pressed;
+            key_actions.rotate_right = pressed;
             break;
         case IOTCRAFT_KEY_RIGHT:
-            key_actions.rotate_right = pressed;
+            key_actions.rotate_left = pressed;
             break;
 
         // Q/E for vertical movement (altitude control)
@@ -80,6 +86,18 @@ void game_handle_key(game_state_t* game, iotcraft_key_code_t key, bool pressed) 
         case IOTCRAFT_KEY_ESCAPE:
             if (pressed) {
                 game->running = false;
+            }
+            break;
+
+        // N/M for brightness control
+        case IOTCRAFT_KEY_N:
+            if (pressed) {
+                brightness_decrease(10);  // Decrease by 10%
+            }
+            break;
+        case IOTCRAFT_KEY_M:
+            if (pressed) {
+                brightness_increase(10);  // Increase by 10%
             }
             break;
 

@@ -239,9 +239,10 @@ bool world_get_target_block(const voxel_world_t* world, const camera_t* camera,
     }
 
     // Simple raycast along camera direction to find targeted block
-    float ray_dir_x = cosf(camera->yaw) * cosf(camera->pitch);
+    // Bevy-compatible coordinate system: X+ = right, Y+ = up, Z- = forward
+    float ray_dir_x = -sinf(camera->yaw) * cosf(camera->pitch);
     float ray_dir_y = sinf(camera->pitch);
-    float ray_dir_z = sinf(camera->yaw) * cosf(camera->pitch);
+    float ray_dir_z = -cosf(camera->yaw) * cosf(camera->pitch);
 
     // Step along ray (simple DDA-like approach)
     float max_distance = 10.0f;  // Maximum reach distance
@@ -288,9 +289,10 @@ bool world_get_place_position(const voxel_world_t* world, const camera_t* camera
     int32_t target_x, target_y, target_z;
     if (!world_get_target_block(world, camera, &target_x, &target_y, &target_z)) {
         // If no block targeted, place in front of camera
-        float ray_dir_x = cosf(camera->yaw) * cosf(camera->pitch);
+        // Bevy-compatible coordinate system
+        float ray_dir_x = -sinf(camera->yaw) * cosf(camera->pitch);
         float ray_dir_y = sinf(camera->pitch);
-        float ray_dir_z = sinf(camera->yaw) * cosf(camera->pitch);
+        float ray_dir_z = -cosf(camera->yaw) * cosf(camera->pitch);
 
         *place_x = (int32_t)floorf(camera->x + ray_dir_x * 3.0f);
         *place_y = (int32_t)floorf(camera->y + ray_dir_y * 3.0f);
