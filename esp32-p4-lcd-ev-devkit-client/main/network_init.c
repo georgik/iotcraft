@@ -27,6 +27,7 @@ static const char* TAG = "Network";
 static esp_netif_t* g_eth_netif = NULL;
 static bool g_connected = false;
 static bool g_got_ip = false;
+static network_got_ip_callback_t g_got_ip_callback = NULL;
 
 /**
  * @brief Ethernet event handler
@@ -82,10 +83,20 @@ static void got_ip_event_handler(void* arg, esp_event_base_t event_base,
     ESP_LOGI(TAG, "~~~~~~~~~~~");
 
     g_got_ip = true;
+
+    // Invoke user callback if registered
+    if (g_got_ip_callback != NULL) {
+        char ip_str[MAX_IP_LEN];
+        snprintf(ip_str, sizeof(ip_str), IPSTR, IP2STR(&ip_info->ip));
+        g_got_ip_callback(ip_str);
+    }
 }
 
 esp_err_t network_init(void) {
-    ESP_LOGI(TAG, "Initializing Ethernet...");
+    ESP_LOGI(TAG, "Initializing Ethernet (non-blocking)...");
+
+    // Initialize TCP/IP network interface (must be called first)
+    ESP_ERROR_CHECK(esp_netif_init());
 
     // Create default event loop
     ESP_ERROR_CHECK(esp_event_loop_create_default());
@@ -125,25 +136,15 @@ esp_err_t network_init(void) {
     ESP_ERROR_CHECK(esp_event_handler_register(ETH_EVENT, ESP_EVENT_ANY_ID, &eth_event_handler, &eth_handle));
     ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_ETH_GOT_IP, &got_ip_event_handler, NULL));
 
-    // Start Ethernet driver
+    // Start Ethernet driver (returns immediately, DHCP happens in background)
     ESP_ERROR_CHECK(esp_eth_start(eth_handle));
 
-    ESP_LOGI(TAG, "Ethernet initialization complete, waiting for connection...");
-
-    // Wait for IP connection (with timeout)
-    int retries = 20;  // 20 * 500ms = 10 seconds
-    while (!g_got_ip && retries > 0) {
-        vTaskDelay(pdMS_TO_TICKS(500));
-        retries--;
-    }
-
-    if (!g_got_ip) {
-        ESP_LOGW(TAG, "Timeout waiting for Ethernet IP");
-        return ESP_ERR_TIMEOUT;
-    }
-
-    ESP_LOGI(TAG, "Network ready!");
+    ESP_LOGI(TAG, "Ethernet started, waiting for link and DHCP...");
     return ESP_OK;
+}
+
+void network_set_got_ip_callback(network_got_ip_callback_t callback) {
+    g_got_ip_callback = callback;
 }
 
 bool network_is_connected(void) {

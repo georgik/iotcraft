@@ -48,6 +48,20 @@ static volatile bool g_core1_ready = false;
 static TaskHandle_t g_core1_task_handle = NULL;
 static voxel_buffer_t g_core1_voxel_buffer;  // Core 1's voxel buffer (right world space)
 
+// Callback for when network IP is acquired
+static void on_got_ip(const char* ip) {
+    ESP_LOGI(TAG, "✓ Network connected! IP: %s", ip);
+
+    // Initialize MQTT client when network is ready
+    ESP_LOGI(TAG, "Initializing MQTT client...");
+    esp_err_t mqtt_ret = iotcraft_mqtt_init("test-world", NULL);
+    if (mqtt_ret == ESP_OK) {
+        ESP_LOGI(TAG, "✓ MQTT client initialized (connecting in background)");
+    } else {
+        ESP_LOGW(TAG, "✗ MQTT client initialization failed (continuing without multiplayer)");
+    }
+}
+
 // Convert block_type_t to string for MQTT messages
 static const char* block_type_to_string(block_type_t type) {
     switch (type) {
@@ -391,29 +405,7 @@ void iotcraft_task(void *pvParameter)
         ESP_LOGI(TAG, "Task added to watchdog successfully");
     }
 
-    // TODO: Network and MQTT temporarily disabled for rendering testing
-    // Initialize network (Ethernet)
-    // ESP_LOGI(TAG, "Initializing network (Ethernet)...");
-    // esp_err_t net_ret = network_init();
-    // if (net_ret == ESP_OK) {
-    //     char ip_str[16];
-    //     if (network_get_ip(ip_str, sizeof(ip_str)) == ESP_OK) {
-    //         ESP_LOGI(TAG, "Network ready! IP: %s", ip_str);
-    //     }
-    // } else {
-    //     ESP_LOGW(TAG, "Network initialization failed: %d (continuing without network)", net_ret);
-    // }
-
-    // Initialize MQTT client for multiplayer/device interaction
-    // ESP_LOGI(TAG, "Initializing MQTT client...");
-    // esp_err_t mqtt_ret = iotcraft_mqtt_init("test-world", NULL);  // Use default broker
-    // if (mqtt_ret == ESP_OK) {
-    //     ESP_LOGI(TAG, "MQTT client initialized (connecting in background)");
-    // } else {
-    //     ESP_LOGW(TAG, "MQTT client initialization failed (continuing without multiplayer)");
-    // }
-
-    ESP_LOGI(TAG, "Network/MQTT disabled for testing - running in standalone mode");
+    ESP_LOGI(TAG, "Running in networked mode (Ethernet + MQTT)");
 
     // Main rendering loop
     int frameCounter = 0;
@@ -952,6 +944,25 @@ void app_main(void)
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to initialize display: %d", ret);
         return;
+    }
+
+    // ============================================================
+    // NETWORK CONNECTIVITY: Initialize Ethernet BEFORE renderer
+    // ============================================================
+    // IMPORTANT: Network initialization must happen BEFORE creating
+    // the renderer task because the EMAC driver needs to allocate
+    // its RX task while there's still sufficient heap memory available.
+    // The renderer allocates large buffers which would cause EMAC task
+    // creation to fail if network is initialized after.
+    // ============================================================
+
+    ESP_LOGI(TAG, "Initializing network (Ethernet)...");
+    network_set_got_ip_callback(on_got_ip);
+    esp_err_t net_ret = network_init();
+    if (net_ret == ESP_OK) {
+        ESP_LOGI(TAG, "✓ Ethernet started (waiting for DHCP in background)");
+    } else {
+        ESP_LOGW(TAG, "✗ Ethernet initialization failed: %s (continuing without network)", esp_err_to_name(net_ret));
     }
 
     ESP_LOGI(TAG, "Creating IotCraft task with %dKB stack...",
