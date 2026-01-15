@@ -918,9 +918,8 @@ static void draw_textured_quad(renderer_t* renderer,
  * @param renderer Renderer context
  * @param x, y, z World coordinates of voxel
  * @param block Block type
- * @param depth Output depth for sorting
  */
-static void draw_voxel_3d(renderer_t* renderer, int32_t x, int32_t y, int32_t z, block_type_t block, float* depth) {
+static void draw_voxel_3d(renderer_t* renderer, int32_t x, int32_t y, int32_t z, block_type_t block) {
     if (!renderer || !renderer->framebuffer) {
         return;
     }
@@ -937,7 +936,6 @@ static void draw_voxel_3d(renderer_t* renderer, int32_t x, int32_t y, int32_t z,
     // Project all 8 corners
     float screen_x[8], screen_y[8], corner_depth[8];
     int visible_corners = 0;
-    float avg_depth = 0.0f;
 
     // Initialize all corner_depth to -1 (behind camera/unprojected)
     for (int i = 0; i < 8; i++) {
@@ -953,16 +951,12 @@ static void draw_voxel_3d(renderer_t* renderer, int32_t x, int32_t y, int32_t z,
                          &screen_x[i], &screen_y[i], &corner_depth[i])) {
 #endif
             visible_corners++;
-            avg_depth += corner_depth[i];
         }
     }
 
     if (visible_corners == 0) {
         return;  // Entire voxel behind camera
     }
-
-    avg_depth /= visible_corners;
-    *depth = avg_depth;
 
     // Check camera direction to determine which faces are visible
     float cam_dx = renderer->camera->x - (x + 0.5f);
@@ -1101,8 +1095,8 @@ static void draw_voxel_3d(renderer_t* renderer, int32_t x, int32_t y, int32_t z,
     }
 
     if (first_voxel && faces_rendered > 0) {
-        ESP_LOGI(TAG, "First voxel at (%d,%d,%d): %d faces rendered, visible_corners=%d, avg_depth=%.2f",
-                 x, y, z, faces_rendered, visible_corners, avg_depth);
+        ESP_LOGI(TAG, "First voxel at (%d,%d,%d): %d faces rendered, visible_corners=%d",
+                 x, y, z, faces_rendered, visible_corners);
         ESP_LOGI(TAG, "  Camera direction: (%.2f, %.2f, %.2f)", cam_dx, cam_dy, cam_dz);
         first_voxel = false;
     }
@@ -1348,12 +1342,7 @@ static void renderer_render_3d(renderer_t* renderer) {
     }
 
     // Render voxels back-to-front
-    int rendered_count = 0;
     for (int i = 0; i < voxel_count; i++) {
-        float depth;
-        draw_voxel_3d(renderer, voxels[i].x, voxels[i].y, voxels[i].z, voxels[i].block, &depth);
-        rendered_count++;
+        draw_voxel_3d(renderer, voxels[i].x, voxels[i].y, voxels[i].z, voxels[i].block);
     }
-
-    // ESP_LOGI(TAG, "3D Renderer: Rendered %d voxels", rendered_count);  // Disabled - too verbose
 }
