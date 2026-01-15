@@ -29,3 +29,6 @@ dependencies:
   espressif/mosquitto: '*'
   espressif/mdns: ^1.8.2
   espressif/cjson: ^1.7.19
+  espressif/esp_lcd_touch: ^1.2.0
+  espressif/esp_lcd_touch_gt911: '*'
+  espressif/esp_lcd_touch_tt21100: '*'

@@ -574,6 +574,10 @@ static void wifi_init_ap_sta(void) {
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config_sta));
     ESP_ERROR_CHECK(esp_wifi_start());
 
+    // Disable power save mode for gateway - ensures low latency packet forwarding
+    ESP_ERROR_CHECK(esp_wifi_set_ps(WIFI_PS_NONE));
+    ESP_LOGI(TAG, "WiFi power save disabled for gateway operation");
+
     ESP_ERROR_CHECK(esp_wifi_connect());
 
     ESP_LOGI(TAG, "AP+STA mode started. AP SSID: %s, AP Password: %s", wifi_ap_config.ssid, wifi_ap_config.password);
