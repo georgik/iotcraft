@@ -20,6 +20,8 @@ static struct {
     bool right;
     bool rotate_left;
     bool rotate_right;
+    bool rotate_up;
+    bool rotate_down;
     bool up;
     bool down;
 } key_actions = {0};
@@ -72,6 +74,12 @@ void game_handle_key(game_state_t* game, iotcraft_key_code_t key, bool pressed) 
             break;
         case IOTCRAFT_KEY_RIGHT:
             key_actions.rotate_left = pressed;
+            break;
+        case IOTCRAFT_KEY_UP:
+            key_actions.rotate_up = pressed;  // Tilt camera up
+            break;
+        case IOTCRAFT_KEY_DOWN:
+            key_actions.rotate_down = pressed;  // Tilt camera down
             break;
 
         // Q/E for vertical movement (altitude control)
@@ -136,6 +144,14 @@ void game_update(game_state_t* game, float delta_time) {
     }
     if (key_actions.rotate_right) {
         camera_rotate(game->camera, rotate_delta, 0.0f);
+    }
+
+    // Pitch (look up/down)
+    if (key_actions.rotate_up) {
+        camera_rotate(game->camera, 0.0f, rotate_delta);
+    }
+    if (key_actions.rotate_down) {
+        camera_rotate(game->camera, 0.0f, -rotate_delta);
     }
 
     // Vertical movement
