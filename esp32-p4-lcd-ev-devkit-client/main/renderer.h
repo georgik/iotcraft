@@ -6,10 +6,28 @@
 #pragma once
 
 #include "iotcraft_types.h"
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+/**
+ * @brief Visible voxel structure for multi-core rendering
+ */
+typedef struct {
+    int32_t x, y, z;
+    block_type_t block;
+    float depth;
+} visible_voxel_t;
+
+/**
+ * @brief Thread-safe voxel buffer for multi-core rendering
+ */
+typedef struct {
+    visible_voxel_t voxels[2048];  // Per-core voxel buffer (reduced from 4096)
+    int count;                     // Number of voxels collected
+} voxel_buffer_t;
 
 /**
  * @brief Initialize renderer
@@ -71,6 +89,30 @@ void renderer_get_dimensions(const renderer_t* renderer, int32_t* width, int32_t
  * @return Current wireframe mode state
  */
 bool renderer_toggle_wireframe(int new_mode);
+
+/**
+ * @brief Collect voxels in world space range (for multi-core rendering)
+ * @param renderer Renderer context
+ * @param buffer Output voxel buffer
+ * @param x_min, x_max X-axis world space bounds (exclusive per-core split)
+ */
+void renderer_collect_voxels_parallel(renderer_t* renderer, voxel_buffer_t* buffer,
+                                      int32_t x_min, int32_t x_max);
+
+/**
+ * @brief Sort voxels in buffer by depth (for multi-core rendering)
+ * @param buffer Voxel buffer to sort
+ * @param cam_x, cam_y, cam_z Camera position for distance calculation
+ */
+void renderer_sort_voxel_buffer(voxel_buffer_t* buffer,
+                                 float cam_x, float cam_y, float cam_z);
+
+/**
+ * @brief Render voxels from buffer
+ * @param renderer Renderer context
+ * @param buffer Voxel buffer to render
+ */
+void renderer_render_voxel_buffer(renderer_t* renderer, const voxel_buffer_t* buffer);
 
 #ifdef __cplusplus
 }

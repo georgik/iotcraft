@@ -26,6 +26,9 @@ static const char* TAG = "Renderer";
 // Wireframe mode (toggle with F1)
 static bool g_wireframe_mode = false;
 
+// Forward declarations
+static void draw_voxel_3d(renderer_t* renderer, int32_t x, int32_t y, int32_t z, block_type_t block);
+
 // RGB565 color helpers
 #define RGB565(r,g,b) ((((r)&0xF8)<<8)|(((g)&0xFC)<<3)|((b)>>3))
 
@@ -681,6 +684,156 @@ bool renderer_toggle_wireframe(int new_mode) {
 
     ESP_LOGI(TAG, "Wireframe mode: %s", g_wireframe_mode ? "ON" : "OFF");
     return g_wireframe_mode;
+}
+
+// ============================================================
+// MULTI-CORE RENDERING: Parallel Voxel Processing
+// ============================================================
+
+/**
+ * @brief Collect voxels in world space range (thread-safe)
+ * @param renderer Renderer context
+ * @param buffer Output voxel buffer
+ * @param x_min, x_max X-axis world space bounds (exclusive per-core split)
+ *
+ * This function collects voxels from the world within the specified X-axis range.
+ * It's designed to be called in parallel by multiple cores with non-overlapping ranges.
+ */
+void renderer_collect_voxels_parallel(renderer_t* renderer, voxel_buffer_t* buffer,
+                                      int32_t x_min, int32_t x_max) {
+    if (!renderer || !renderer->world || !buffer) {
+        return;
+    }
+
+    buffer->count = 0;
+
+    int32_t cam_x = (int32_t)floorf(renderer->camera->x);
+    int32_t cam_z = (int32_t)floorf(renderer->camera->z);
+    int32_t render_distance = 20;
+
+    voxel_world_t* world = renderer->world;
+
+    // Iterate through world space, filtered by X range
+    for (int32_t x = cam_x - render_distance; x <= cam_x + render_distance; x++) {
+        // Skip if outside this core's X range
+        if (x < x_min || x > x_max) continue;
+
+        for (int32_t z = cam_z - render_distance; z <= cam_z + render_distance; z++) {
+            int32_t highest_y = world_get_height(world, x, z);
+
+            for (int32_t y = 0; y <= highest_y; y++) {
+                block_type_t block = world_get_block(world, x, y, z);
+                if (block != BLOCK_AIR) {
+                    if (buffer->count < 2048) {
+                        buffer->voxels[buffer->count].x = x;
+                        buffer->voxels[buffer->count].y = y;
+                        buffer->voxels[buffer->count].z = z;
+                        buffer->voxels[buffer->count].block = block;
+                        buffer->voxels[buffer->count].depth = 0.0f;  // Will be calculated
+                        buffer->count++;
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * @brief Sort voxels in buffer by depth (thread-safe)
+ * @param buffer Voxel buffer to sort
+ * @param cam_x, cam_y, cam_z Camera position for distance calculation
+ *
+ * Uses insertion sort to order voxels from far to near (painter's algorithm).
+ * Each core sorts its own buffer independently, so no synchronization is needed.
+ */
+void renderer_sort_voxel_buffer(voxel_buffer_t* buffer,
+                                 float cam_x, float cam_y, float cam_z) {
+    if (!buffer || buffer->count == 0) {
+        return;
+    }
+
+    const float epsilon = 0.01f;
+
+    // OPTIMIZATION: Fixed-point distance sorting (1.2-1.5x faster on RISC-V)
+    // Convert camera position to fixed-point once
+    const fixed_t sort_cam_x = FIXED_FROM_FLOAT(cam_x);
+    const fixed_t sort_cam_y = FIXED_FROM_FLOAT(cam_y);
+    const fixed_t sort_cam_z = FIXED_FROM_FLOAT(cam_z);
+
+    // Fixed-point epsilon for comparison (0.01 in 16.16 format)
+    const fixed_t epsilon_fixed = FIXED_FROM_FLOAT(epsilon);
+
+    // Insertion sort: O(n²) but with much better constants than bubble sort
+    for (int i = 1; i < buffer->count; i++) {
+        visible_voxel_t key = buffer->voxels[i];
+        int j = i - 1;
+
+        // Calculate distance for key element once (using fixed-point)
+        fixed_t key_dx = FIXED_FROM_INT(key.x) - sort_cam_x;
+        fixed_t key_dy = FIXED_FROM_INT(key.y) - sort_cam_y;
+        fixed_t key_dz = FIXED_FROM_INT(key.z) - sort_cam_z;
+        fixed_t key_dist_sq = fixed_mul(key_dx, key_dx) +
+                             fixed_mul(key_dy, key_dy) +
+                             fixed_mul(key_dz, key_dz);
+
+        // Move elements that should come after key to one position ahead
+        while (j >= 0) {
+            // Calculate distance for current element (using fixed-point)
+            fixed_t v_dx = FIXED_FROM_INT(buffer->voxels[j].x) - sort_cam_x;
+            fixed_t v_dy = FIXED_FROM_INT(buffer->voxels[j].y) - sort_cam_y;
+            fixed_t v_dz = FIXED_FROM_INT(buffer->voxels[j].z) - sort_cam_z;
+            fixed_t v_dist_sq = fixed_mul(v_dx, v_dx) +
+                               fixed_mul(v_dy, v_dy) +
+                               fixed_mul(v_dz, v_dz);
+
+            fixed_t dist_diff = v_dist_sq - key_dist_sq;
+            bool should_swap_here = false;
+
+            // v (current element) closer than key (should swap)
+            if (dist_diff < -epsilon_fixed) {
+                should_swap_here = true;
+            } else if (dist_diff >= -epsilon_fixed && dist_diff <= epsilon_fixed) {
+                // Distances are nearly equal - use deterministic tiebreaker
+                // Sort by position (Y, then X, then Z) for consistent ordering
+                if (buffer->voxels[j].y > key.y ||
+                    (buffer->voxels[j].y == key.y && buffer->voxels[j].x > key.x) ||
+                    (buffer->voxels[j].y == key.y && buffer->voxels[j].x == key.x && buffer->voxels[j].z > key.z)) {
+                    should_swap_here = true;
+                }
+            }
+
+            if (!should_swap_here) {
+                break;  // Found correct position
+            }
+
+            // Move element one position ahead
+            buffer->voxels[j + 1] = buffer->voxels[j];
+            j--;
+        }
+
+        // Place key in its correct position
+        buffer->voxels[j + 1] = key;
+    }
+}
+
+/**
+ * @brief Render voxels from buffer
+ * @param renderer Renderer context
+ * @param buffer Voxel buffer to render
+ *
+ * Renders all voxels in the buffer using the 3D textured voxel renderer.
+ * Voxels should already be sorted by depth (far to near) for correct rendering.
+ */
+void renderer_render_voxel_buffer(renderer_t* renderer, const voxel_buffer_t* buffer) {
+    if (!renderer || !buffer) {
+        return;
+    }
+
+    // Render voxels back-to-front (already sorted)
+    for (int i = 0; i < buffer->count; i++) {
+        draw_voxel_3d(renderer, buffer->voxels[i].x, buffer->voxels[i].y,
+                      buffer->voxels[i].z, buffer->voxels[i].block);
+    }
 }
 
 /**
