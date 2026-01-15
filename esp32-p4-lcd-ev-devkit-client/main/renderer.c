@@ -1005,24 +1005,31 @@ static void draw_textured_quad(renderer_t* renderer,
         float intersections[4];
         int intersect_count = 0;
 
+        // OPTIMIZATION: Precompute reciprocals to replace division with multiplication
+        // Division is ~10× slower than multiplication on RISC-V
+
         // Edge 0-1
         if ((y0 <= y && y1 > y) || (y1 <= y && y0 > y)) {
-            float t = (y - y0) / (y1 - y0);
+            float inv_dy01 = 1.0f / (y1 - y0);  // Precompute reciprocal
+            float t = (y - y0) * inv_dy01;      // Multiply instead of divide
             intersections[intersect_count++] = x0 + t * (x1 - x0);
         }
         // Edge 1-2
         if ((y1 <= y && y2 > y) || (y2 <= y && y1 > y)) {
-            float t = (y - y1) / (y2 - y1);
+            float inv_dy12 = 1.0f / (y2 - y1);  // Precompute reciprocal
+            float t = (y - y1) * inv_dy12;      // Multiply instead of divide
             intersections[intersect_count++] = x1 + t * (x2 - x1);
         }
         // Edge 2-3
         if ((y2 <= y && y3 > y) || (y3 <= y && y2 > y)) {
-            float t = (y - y2) / (y3 - y2);
+            float inv_dy23 = 1.0f / (y3 - y2);  // Precompute reciprocal
+            float t = (y - y2) * inv_dy23;      // Multiply instead of divide
             intersections[intersect_count++] = x2 + t * (x3 - x2);
         }
         // Edge 3-0
         if ((y3 <= y && y0 > y) || (y0 <= y && y3 > y)) {
-            float t = (y - y3) / (y0 - y3);
+            float inv_dy30 = 1.0f / (y0 - y3);  // Precompute reciprocal
+            float t = (y - y3) * inv_dy30;      // Multiply instead of divide
             intersections[intersect_count++] = x3 + t * (x0 - x3);
         }
 
@@ -1042,10 +1049,15 @@ static void draw_textured_quad(renderer_t* renderer,
         if (x_start < min_x) x_start = min_x;
         if (x_end > max_x) x_end = max_x;
 
+        // OPTIMIZATION: Precompute reciprocal for texture coordinate calculation
+        int span_length = x_end - x_start + 1;
+        float inv_span_length = (span_length > 0) ? (1.0f / span_length) : 0.0f;
+
         for (int x = x_start; x <= x_end; x++) {
             // Calculate barycentric coordinates for texture mapping
             // Simplified: just interpolate based on position
-            float u = (float)(x - x_start) / (x_end - x_start + 1);
+            // OPTIMIZATION: Multiply instead of divide
+            float u = (float)(x - x_start) * inv_span_length;
             int tex_x = tex_x0 + (int)(u * (tex_x1 - tex_x0));
             int tex_y = tex_y0 + (int)(u * (tex_y1 - tex_y0));
 
