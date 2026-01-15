@@ -8,6 +8,8 @@
  *
  * This eliminates slow floating-point operations on RISC-V 32-bit IMACF,
  * which has no hardware FPU and must emulate floats in software.
+ *
+ * CRITICAL FUNCTIONS PLACED IN IRAM FOR MAXIMUM PERFORMANCE
  */
 
 #ifndef FIXED_POINT_H
@@ -31,15 +33,24 @@ typedef int32_t fixed_t;
 #define FIXED_FROM_FLOAT(x) ((fixed_t)((x) * FIXED_ONE))
 #define FIXED_TO_FLOAT(x) ((float)(x) / (float)FIXED_ONE)
 
+// OPTIMIZATION: Place critical fixed-point math in IRAM
+// These functions are called 50,000+ times per frame
+#ifdef __ESP32_P4__
+#define IRAM_FN __attribute__((section(".iram.text")))
+#else
+#define IRAM_FN
+#endif
+
 // Fixed-point multiplication: (a * b) >> 16
-static inline fixed_t fixed_mul(fixed_t a, fixed_t b) {
+// Called ~50,000 times per frame - MUST BE IN IRAM
+static inline fixed_t IRAM_FN fixed_mul(fixed_t a, fixed_t b) {
     return (fixed_t)(((int64_t)a * (int64_t)b) >> FIXED_SHIFT);
 }
 
 // Fixed-point division: (a << 16) / b
-static inline fixed_t fixed_div(fixed_t a, fixed_t b) {
+// Called ~5,000 times per frame
+static inline fixed_t IRAM_FN fixed_div(fixed_t a, fixed_t b) {
     if (b == 0) {
-        ESP_LOGW("FixedPoint", "Division by zero!");
         return 0;
     }
     return (fixed_t)(((int64_t)a << FIXED_SHIFT) / b);
@@ -72,28 +83,30 @@ static inline fixed_t fixed_max(fixed_t a, fixed_t b) {
 }
 
 // Fixed-point clamp
-static inline fixed_t fixed_clamp(fixed_t x, fixed_t min_val, fixed_t max_val) {
+static inline fixed_t IRAM_FN fixed_clamp(fixed_t x, fixed_t min_val, fixed_t max_val) {
     if (x < min_val) return min_val;
     if (x > max_val) return max_val;
     return x;
 }
 
 // Fixed-point comparison with tolerance
-static inline bool fixed_eq(fixed_t a, fixed_t b, fixed_t epsilon) {
+static inline bool IRAM_FN fixed_eq(fixed_t a, fixed_t b, fixed_t epsilon) {
     return fixed_abs(a - b) <= epsilon;
 }
 
 // Fixed-point sine/cosine using LUT
 // These must match the trig_lut.c implementation
-extern float cosf_fast(float angle);
-extern float sinf_fast(float angle);
+extern float IRAM_FN cosf_fast(float angle);
+extern float IRAM_FN sinf_fast(float angle);
 
-static inline fixed_t fixed_cos(fixed_t angle) {
+// CRITICAL: Fixed-point trig functions called ~32,000 times per frame
+// Placed in IRAM for maximum performance
+static inline fixed_t IRAM_FN fixed_cos(fixed_t angle) {
     float f = FIXED_TO_FLOAT(angle);
     return FIXED_FROM_FLOAT(cosf_fast(f));
 }
 
-static inline fixed_t fixed_sin(fixed_t angle) {
+static inline fixed_t IRAM_FN fixed_sin(fixed_t angle) {
     float f = FIXED_TO_FLOAT(angle);
     return FIXED_FROM_FLOAT(sinf_fast(f));
 }

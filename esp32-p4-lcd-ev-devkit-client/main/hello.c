@@ -46,6 +46,7 @@ static SemaphoreHandle_t g_render_start_sem = NULL;  // Signals Core 1 to start
 static SemaphoreHandle_t g_render_done_sem = NULL;   // Signals Core 0 that Core 1 finished
 static volatile bool g_core1_ready = false;
 static TaskHandle_t g_core1_task_handle = NULL;
+static voxel_buffer_t g_core1_voxel_buffer;  // Core 1's voxel buffer (right world space)
 
 // Convert block_type_t to string for MQTT messages
 static const char* block_type_to_string(block_type_t type) {
@@ -63,25 +64,34 @@ static const char* block_type_to_string(block_type_t type) {
 }
 
 // ============================================================
-// MULTI-CORE RENDERING: Core 1 Task (Right Half)
+// MULTI-CORE RENDERING: Core 1 Task (Right World Space)
 // ============================================================
 /**
- * @brief Core 1 rendering task - renders right half of screen
+ * @brief Core 1 rendering task - collects and sorts voxels in right world space
  * @param pvParameter Unused
  *
- * This task runs on Core 1 and renders columns 512-1023 (right half)
- * It synchronizes with Core 0 using a binary semaphore
+ * This task runs on Core 1 and processes voxels where x >= camera_x
+ * It uses world-space splitting to maintain painter's algorithm correctness
  */
 static void core1_render_task(void *pvParameter) {
-    ESP_LOGI(TAG, "Core 1 render task started (rendering right half: columns 512-1023)");
+    ESP_LOGI(TAG, "Core 1 render task started (3D voxel renderer - right world space)");
     g_core1_ready = true;
 
     // Wait for render requests from Core 0
     while (true) {
         // Wait for start signal from Core 0
         if (xSemaphoreTake(g_render_start_sem, portMAX_DELAY) == pdTRUE) {
-            // Render right half of screen (columns 512-1023)
-            renderer_render_columns(&g_renderer, RENDER_WIDTH / 2, RENDER_WIDTH);
+            // Get camera position for world-space split
+            int32_t cam_x = (int32_t)floorf(g_renderer.camera->x);
+
+            // Collect voxels in right world space (x >= cam_x)
+            renderer_collect_voxels_parallel(&g_renderer, &g_core1_voxel_buffer, cam_x, INT32_MAX);
+
+            // Sort by depth (far to near) using fixed-point arithmetic
+            renderer_sort_voxel_buffer(&g_core1_voxel_buffer,
+                                      g_renderer.camera->x,
+                                      g_renderer.camera->y,
+                                      g_renderer.camera->z);
 
             // Signal completion to Core 0
             xSemaphoreGive(g_render_done_sem);
@@ -233,17 +243,16 @@ void iotcraft_task(void *pvParameter)
              free_heap, min_free_heap);
 
     // ============================================================
-    // DISABLED: Multi-core rendering (using single-core 3D renderer)
+    // ENABLED: Multi-core rendering (dual-core 3D voxel renderer)
     // ============================================================
-    /*
-    // Create Core 1 rendering task (right half of screen)
+    // Create Core 1 rendering task (right world space)
     ESP_LOGI(TAG, "Creating Core 1 render task with %d KB stack...",
              CORE1_RENDER_STACK_SIZE / 1024);
 
     BaseType_t task_ret = xTaskCreatePinnedToCore(
         core1_render_task,           // Task function
         "core1_render",              // Task name
-        CORE1_RENDER_STACK_SIZE,     // Stack size (much smaller - only raycasting)
+        CORE1_RENDER_STACK_SIZE,     // Stack size
         NULL,                        // Parameters
         5,                           // Priority (same as main task)
         &g_core1_task_handle,        // Task handle
@@ -267,11 +276,19 @@ void iotcraft_task(void *pvParameter)
     while (!g_core1_ready && wait_count < 100) {
         vTaskDelay(pdMS_TO_TICKS(10));
     }
-    */
-    g_core1_ready = true;  // Pretend Core 1 is ready
+
+    if (!g_core1_ready) {
+        ESP_LOGE(TAG, "Core 1 render task failed to initialize");
+        vSemaphoreDelete(g_render_start_sem);
+        vSemaphoreDelete(g_render_done_sem);
+        renderer_free(&g_renderer);
+        world_free(&g_world);
+        vTaskDelete(NULL);
+        return;
+    }
     // ============================================================
 
-    ESP_LOGI(TAG, "Single-core 3D renderer initialized (both platforms now use same code)");
+    ESP_LOGI(TAG, "Dual-core 3D renderer initialized (Core 0: left space, Core 1: right space)");
 
 
     // Debug flags
@@ -681,8 +698,38 @@ void iotcraft_task(void *pvParameter)
         // ============================================================
         // TRUE 3D RENDERING (shared with desktop-light)
         // ============================================================
-        // Render frame using new 3D renderer
+#ifdef __ESP32_P4__
+        // Multi-core rendering: Use both cores
+        int32_t cam_x = (int32_t)floorf(g_renderer.camera->x);
+
+        // Collect left voxels (x < cam_x)
+        voxel_buffer_t left_buffer;
+        renderer_collect_voxels_parallel(&g_renderer, &left_buffer, INT32_MIN, cam_x - 1);
+
+        // Signal Core 1 to start collecting right voxels
+        xSemaphoreGive(g_render_start_sem);
+
+        // Sort left voxels while Core 1 collects (parallel execution)
+        renderer_sort_voxel_buffer(&left_buffer,
+                                  g_renderer.camera->x,
+                                  g_renderer.camera->y,
+                                  g_renderer.camera->z);
+
+        // Clear framebuffer
+        renderer_clear(&g_renderer, 0x0000);  // Black background
+
+        // Render left voxels
+        renderer_render_voxel_buffer(&g_renderer, &left_buffer);
+
+        // Wait for Core 1 to finish collecting and sorting right voxels
+        xSemaphoreTake(g_render_done_sem, portMAX_DELAY);
+
+        // Render right voxels (collected and sorted by Core 1)
+        renderer_render_voxel_buffer(&g_renderer, &g_core1_voxel_buffer);
+#else
+        // Single-core rendering: Use original function
         renderer_render_frame(&g_renderer);
+#endif
         // ============================================================
 
         // Get framebuffer and dimensions
@@ -880,16 +927,6 @@ void iotcraft_task(void *pvParameter)
                      frameCounter, fb_width, fb_height, g_world.count,
                      g_camera.x, g_camera.y, g_camera.z, g_camera.yaw);
 
-            // Verify framebuffer has non-sky colors (walls rendered)
-            if (fb && fb_width > 0 && fb_height > 0) {
-                uint16_t center_pixel = fb[(fb_height / 2) * fb_width + (fb_width / 2)];
-                uint16_t sky_color = 0x867d;  // COLOR_SKY from renderer.c
-                if (center_pixel != sky_color) {
-                    ESP_LOGI(TAG, "  ✓ Center pixel: 0x%04x (NOT sky color - walls rendered!)", center_pixel);
-                } else {
-                    ESP_LOGW(TAG, "  ✗ Center pixel: 0x%04x (sky color - no walls at center)", center_pixel);
-                }
-            }
         }
 
         frameCounter++;

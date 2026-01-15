@@ -883,6 +883,14 @@ static bool project_point(renderer_t* renderer, float wx, float wy, float wz, fl
 }
 
 #if USE_FIXED_POINT
+// OPTIMIZATION: Place in IRAM - called 16,000 times per frame
+// This is THE hottest function in the rendering pipeline
+#ifdef __ESP32_P4__
+#define IRAM_FN __attribute__((section(".iram.text")))
+#else
+#define IRAM_FN
+#endif
+
 /**
  * @brief Fixed-point version of project_point (2-3x faster on RISC-V without FPU)
  * @param renderer Renderer context
@@ -890,8 +898,11 @@ static bool project_point(renderer_t* renderer, float wx, float wy, float wz, fl
  * @param sx, sy Output screen coordinates (float for interface compatibility)
  * @param depth Output depth
  * @return true if point is in front of camera
+ *
+ * CRITICAL: This function is called 16,000 times per frame (8 corners × 2000 voxels)
+ * Placed in IRAM for maximum performance
  */
-static bool project_point_fixed(renderer_t* renderer, float wx, float wy, float wz,
+static bool IRAM_FN project_point_fixed(renderer_t* renderer, float wx, float wy, float wz,
                                 float* sx, float* sy, float* depth) {
     // Convert world coordinates to fixed-point
     fixed_t fx = FIXED_FROM_FLOAT(wx);

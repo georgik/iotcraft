@@ -49,11 +49,11 @@ esp_err_t board_init_display(void)
     
     // Turn on backlight
     bsp_display_backlight_on();
-    
+
     // Initialize raylib port layer
     ray_port_cfg_t port_cfg = {
         .buff_psram = true,
-        .double_buffer = false,
+        .double_buffer = true,  // OPTIMIZATION: Enable double buffering for smoother rendering
         .buffer_pixels = 0,
         .chunk_bytes = 0,  // Auto
         .swap_rgb_bytes = true,  // SPI LCDs need byte swap
@@ -109,7 +109,7 @@ esp_err_t board_init_display(void)
     // Initialize raylib port layer
     ray_port_cfg_t port_cfg = {
         .buff_psram = true,
-        .double_buffer = false,
+        .double_buffer = true,  // OPTIMIZATION: Enable double buffering
         .buffer_pixels = 0,
         .chunk_bytes = 0,
         .swap_rgb_bytes = true,
@@ -197,7 +197,7 @@ esp_err_t board_init_display(void)
     // Initialize raylib port layer
     ray_port_cfg_t port_cfg = {
         .buff_psram = true,
-        .double_buffer = false,
+        .double_buffer = true,  // OPTIMIZATION: Enable double buffering
         .buffer_pixels = 0,
         .chunk_bytes = 0,  // DSI doesn't need chunking
         .swap_rgb_bytes = false,  // DSI panels don't need byte swap
