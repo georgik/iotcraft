@@ -65,6 +65,7 @@ typedef struct {
     int32_t height;           // Rendering resolution height
     camera_t* camera;
     voxel_world_t* world;
+    void* ppa_scaler;        // PPA scaler context (for hardware upscaling)
 } renderer_t;
 
 #ifdef __cplusplus

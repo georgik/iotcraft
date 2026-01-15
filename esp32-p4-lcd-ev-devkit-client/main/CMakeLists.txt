@@ -12,6 +12,7 @@ idf_component_register(
         "network_init.c"
         "world_template.c"
         "trig_lut.c"
+        "ppa_helper.c"
     INCLUDE_DIRS "."
     PRIV_REQUIRES
         georgik__raylib
@@ -19,5 +20,6 @@ idf_component_register(
         mqtt
         esp_eth
         esp_netif
+        esp_driver_ppa
         # esp_raylib_port is pulled in via georgik__raylib dependency
 )

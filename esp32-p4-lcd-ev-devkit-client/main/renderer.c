@@ -7,6 +7,7 @@
 #include "world.h"
 #include "trig_lut.h"
 #include "fixed_point.h"
+#include "ppa_helper.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stdbool.h>
@@ -17,6 +18,10 @@ static const char* TAG = "Renderer";
 
 // Fixed-point optimization: Use 16.16 format for faster calculations
 #define USE_FIXED_POINT 1
+
+// PPA hardware upscaling: Render at lower resolution and scale up
+#define USE_PPA_UPSCALING 1
+#define PPA_SCALE_DIV 2  // Render at half resolution (160x120 -> 320x240)
 
 // Wireframe mode (toggle with F1)
 static bool g_wireframe_mode = false;
@@ -179,17 +184,41 @@ bool renderer_init(renderer_t* renderer, int32_t width, int32_t height,
         return false;
     }
 
+    renderer->width = width;
+    renderer->height = height;
+    renderer->camera = camera;
+    renderer->world = world;
+    renderer->ppa_scaler = NULL;
+
+#if USE_PPA_UPSCALING
+    // Initialize PPA scaler for hardware upscaling
+    ppa_scaler_t* scaler = (ppa_scaler_t*)malloc(sizeof(ppa_scaler_t));
+    if (scaler && ppa_scaler_init(scaler, width, height, PPA_SCALE_DIV)) {
+        renderer->ppa_scaler = scaler;
+        renderer->framebuffer = ppa_scaler_get_render_buffer(scaler);
+        ESP_LOGI(TAG, "PPA scaler initialized: rendering at %dx%d, output %dx%d",
+                 ppa_scaler_get_render_buffer(scaler) ? scaler->small_width : width,
+                 ppa_scaler_get_render_buffer(scaler) ? scaler->small_height : height,
+                 width, height);
+    } else {
+        ESP_LOGW(TAG, "PPA scaler init failed, falling back to software rendering");
+        if (scaler) free(scaler);
+
+        // Allocate framebuffer (RGB565 = 2 bytes per pixel)
+        renderer->framebuffer = (uint16_t*)malloc(width * height * sizeof(uint16_t));
+        if (!renderer->framebuffer) {
+            ESP_LOGE(TAG, "Failed to allocate framebuffer");
+            return false;
+        }
+    }
+#else
     // Allocate framebuffer (RGB565 = 2 bytes per pixel)
     renderer->framebuffer = (uint16_t*)malloc(width * height * sizeof(uint16_t));
     if (!renderer->framebuffer) {
         ESP_LOGE(TAG, "Failed to allocate framebuffer");
         return false;
     }
-
-    renderer->width = width;
-    renderer->height = height;
-    renderer->camera = camera;
-    renderer->world = world;
+#endif
 
     ESP_LOGI(TAG, "Renderer initialized: %dx%d", width, height);
     return true;
@@ -200,6 +229,14 @@ void renderer_free(renderer_t* renderer) {
         return;
     }
 
+#if USE_PPA_UPSCALING
+    if (renderer->ppa_scaler) {
+        ppa_scaler_free((ppa_scaler_t*)renderer->ppa_scaler);
+        free(renderer->ppa_scaler);
+        renderer->ppa_scaler = NULL;
+        renderer->framebuffer = NULL;
+    } else
+#endif
     if (renderer->framebuffer) {
         free(renderer->framebuffer);
         renderer->framebuffer = NULL;
@@ -596,12 +633,27 @@ void renderer_render_frame(renderer_t* renderer) {
         // Normal textured rendering using true 3D projection
         renderer_render_3d(renderer);
     }
+
+#if USE_PPA_UPSCALING
+    // Apply PPA hardware upscaling (if enabled)
+    if (renderer->ppa_scaler) {
+        ppa_scaler_scale((ppa_scaler_t*)renderer->ppa_scaler);
+    }
+#endif
 }
 
 const uint16_t* renderer_get_framebuffer(const renderer_t* renderer) {
     if (!renderer) {
         return NULL;
     }
+
+#if USE_PPA_UPSCALING
+    // Return final scaled buffer (if PPA is enabled)
+    if (renderer->ppa_scaler) {
+        return ppa_scaler_get_final_buffer((ppa_scaler_t*)renderer->ppa_scaler);
+    }
+#endif
+
     return renderer->framebuffer;
 }
 
