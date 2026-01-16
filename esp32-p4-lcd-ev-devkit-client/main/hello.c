@@ -26,6 +26,7 @@
 #include "network_init.h"
 #include "world_template.h"
 #include "trig_lut.h"
+#include "device_manager.h"
 
 // Console overlay
 #include "console.h"
@@ -238,8 +239,16 @@ void iotcraft_task(void *pvParameter)
     // Show welcome message (will be visible when console is opened)
     console_log(LOG_LEVEL_INFO, "SYSTEM", "IoTCraft ESP32-P4 Client");
     console_log(LOG_LEVEL_INFO, "SYSTEM", "Press F3 to toggle console");
+    console_log(LOG_LEVEL_INFO, "SYSTEM", "Press F4 to toggle blink");
     console_log(LOG_LEVEL_INFO, "SYSTEM", "Press ESC to close console");
     console_log(LOG_LEVEL_INFO, "SYSTEM", "Type 'help' for commands");
+    // ============================================================
+
+    // ============================================================
+    // DEVICE MANAGER: Initialize IoT device tracking
+    // ============================================================
+    ESP_LOGI(TAG, "Initializing device manager...");
+    device_manager_init();
     // ============================================================
 
     ESP_LOGI(TAG, "IotCraft client initialized successfully");
@@ -591,6 +600,9 @@ void iotcraft_task(void *pvParameter)
         // Update console overlay
         console_update();
 
+        // Update device manager (spawns/despawns IoT devices)
+        device_manager_update(&g_world, delta_time * 1000.0f);
+
         // Poll input (check for key presses)
         input_poll();
 
@@ -661,6 +673,19 @@ void iotcraft_task(void *pvParameter)
                 renderer_toggle_wireframe(-1);  // Toggle
             }
             f1_was_pressed = f1_is_pressed;
+
+            // Toggle blink mode with F4
+            static bool f4_was_pressed = false;
+            static bool blink_mode = false;
+            bool f4_is_pressed = input_is_key_pressed(IOTCRAFT_KEY_F4);
+            if (f4_is_pressed && !f4_was_pressed) {
+                blink_mode = !blink_mode;
+                int count = device_manager_blink_all(blink_mode);
+                console_log(LOG_LEVEL_INFO, "BLINK", "Mode %s (%d devices)",
+                           blink_mode ? "ON" : "OFF", count);
+                ESP_LOGI(TAG, "Blink mode: %s (%d devices)", blink_mode ? "ON" : "OFF", count);
+            }
+            f4_was_pressed = f4_is_pressed;
         }
 
         // Handle debug keys (Raylib interface for 'H', 'E', 'C')

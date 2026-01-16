@@ -6,11 +6,13 @@
 #include "iotcraft_mqtt.h"
 #include "mqtt_client.h"
 #include "console/console.h"
+#include "device_manager.h"
 #include "esp_log.h"
 #include "esp_event.h"
 #include <string.h>
 #include <sys/time.h>
 #include <inttypes.h>
+#include <stdio.h>
 
 static const char* TAG = "IotCraftMQTT";
 
@@ -32,6 +34,82 @@ static int64_t get_timestamp_ms(void) {
 }
 
 /**
+ * @brief Parse device announcement JSON
+ * Format: {"device_id":"xxx","device_type":"lamp","state":"online","location":{"x":1.0,"y":0.5,"z":2.0}}
+ */
+static void parse_device_announcement(const char* payload) {
+    char device_id[64] = {0};
+    char device_type[32] = {0};
+    float x = 0.0f, y = 0.0f, z = 0.0f;
+
+    // Simple JSON parsing (no heavy JSON library to save space)
+    const char* p = payload;
+
+    // Extract device_id
+    const char* device_id_key = strstr(p, "\"device_id\":");
+    if (device_id_key) {
+        const char* start = strchr(device_id_key + 12, '"');
+        if (start) {
+            start++;
+            const char* end = strchr(start, '"');
+            if (end) {
+                size_t len = end - start;
+                if (len < sizeof(device_id)) {
+                    memcpy(device_id, start, len);
+                    device_id[len] = '\0';
+                }
+            }
+        }
+    }
+
+    // Extract device_type
+    const char* device_type_key = strstr(p, "\"device_type\":");
+    if (device_type_key) {
+        const char* start = strchr(device_type_key + 14, '"');
+        if (start) {
+            start++;
+            const char* end = strchr(start, '"');
+            if (end) {
+                size_t len = end - start;
+                if (len < sizeof(device_type)) {
+                    memcpy(device_type, start, len);
+                    device_type[len] = '\0';
+                }
+            }
+        }
+    }
+
+    // Extract location x, y, z
+    const char* location_key = strstr(p, "\"location\":");
+    if (location_key) {
+        sscanf(location_key, "\"location\":{\"x\":%f,\"y\":%f,\"z\":%f}", &x, &y, &z);
+    }
+
+    if (device_id[0] != '\0') {
+        ESP_LOGI(TAG, "Device announcement: %s (%s) at (%.1f, %.1f, %.1f)",
+                 device_id, device_type, x, y, z);
+
+        // Get or create device
+        iot_device_t* device = device_manager_get_or_create(device_id);
+        if (device) {
+            // Set device type
+            if (strcmp(device_type, "lamp") == 0) {
+                device->type = DEVICE_TYPE_LAMP;
+            } else if (strcmp(device_type, "door") == 0) {
+                device->type = DEVICE_TYPE_DOOR;
+            }
+
+            // Update position
+            device_manager_update_position(device, x, y, z);
+
+            // Log to console
+            console_log(LOG_LEVEL_INFO, "DEVICE", "%s: %s at (%.1f, %.1f, %.1f)",
+                       device_id, device_type, x, y, z);
+        }
+    }
+}
+
+/**
  * @brief MQTT event handler
  */
 static void mqtt_event_handler(void* handler_args, esp_event_base_t base, int32_t event_id, void* event_data) {
@@ -41,6 +119,10 @@ static void mqtt_event_handler(void* handler_args, esp_event_base_t base, int32_
         case MQTT_EVENT_CONNECTED:
             ESP_LOGI(TAG, "MQTT_EVENT_CONNECTED");
             console_log(LOG_LEVEL_INFO, "MQTT", "Connected to broker");
+
+            // Subscribe to device announcements
+            esp_mqtt_client_subscribe(event->client, "devices/announce", 1);
+            ESP_LOGI(TAG, "Subscribed to devices/announce");
 
             // Subscribe to world block events
             char placed_topic[128];
@@ -61,11 +143,33 @@ static void mqtt_event_handler(void* handler_args, esp_event_base_t base, int32_
             g_connected = false;
             break;
 
-        case MQTT_EVENT_DATA:
-            ESP_LOGI(TAG, "MQTT_EVENT_DATA: topic=%.*s", event->topic_len, event->topic);
-            // Handle incoming block changes from other players
-            // For now, just log - we'll implement full sync later
+        case MQTT_EVENT_DATA: {
+            // Create topic string from topic data
+            char topic_str[256];
+            int topic_len = (event->topic_len < sizeof(topic_str) - 1) ? event->topic_len : sizeof(topic_str) - 1;
+            memcpy(topic_str, event->topic, topic_len);
+            topic_str[topic_len] = '\0';
+
+            // Create payload string
+            char payload_str[512];
+            int payload_len = (event->data_len < sizeof(payload_str) - 1) ? event->data_len : sizeof(payload_str) - 1;
+            memcpy(payload_str, event->data, payload_len);
+            payload_str[payload_len] = '\0';
+
+            ESP_LOGI(TAG, "MQTT_EVENT_DATA: topic=%s", topic_str);
+
+            // Handle device announcements
+            if (strcmp(topic_str, "devices/announce") == 0) {
+                ESP_LOGI(TAG, "Received device announcement");
+                parse_device_announcement(payload_str);
+            }
+            // Handle position updates
+            else if (strstr(topic_str, "/position/set") != NULL) {
+                ESP_LOGI(TAG, "Received position update: %s", payload_str);
+                // Position updates can be handled here if needed
+            }
             break;
+        }
 
         case MQTT_EVENT_ERROR:
             ESP_LOGE(TAG, "MQTT_EVENT_ERROR");

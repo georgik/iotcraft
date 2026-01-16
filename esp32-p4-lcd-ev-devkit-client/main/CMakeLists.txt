@@ -15,6 +15,7 @@ idf_component_register(
         "trig_lut.c"
         "ppa_helper.c"
         "brightness.c"
+        "device_manager.c"
         # Console overlay
         "console/console.c"
         "console/console_commands.c"
