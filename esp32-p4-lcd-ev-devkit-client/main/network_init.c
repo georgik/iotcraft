@@ -13,6 +13,7 @@
 
 // ESP-Hosted and WiFi support (can be disabled via idf_component.yml)
 #ifdef CONFIG_ESP_HOSTED_ENABLED
+    #include "esp_hosted.h"
     #include "esp_wifi.h"
     #define HAS_WIFI_SUPPORT 1
 #else
@@ -65,6 +66,21 @@ static void got_ip_event_handler(void* arg, esp_event_base_t event_base,
  */
 static void wifi_init_task(void* arg) {
     ESP_LOGI(TAG, "[WiFi Task] Starting WiFi initialization...");
+
+    // IMPORTANT: Initialize ESP-Hosted FIRST before WiFi
+    ESP_LOGI(TAG, "[WiFi Task] Initializing ESP-Hosted (ESP32-C6 SDIO transport)...");
+    esp_err_t hosted_ret = esp_hosted_init();
+
+    if (hosted_ret != ESP_OK) {
+        ESP_LOGW(TAG, "[WiFi Task] ⚠ ESP-Hosted initialization failed: %s", esp_err_to_name(hosted_ret));
+        ESP_LOGW(TAG, "[WiFi Task] ⚠ Check ESP32-C6 firmware and SDIO connection");
+        g_wifi_init_done = true;
+        g_wifi_init_success = false;
+        vTaskDelete(NULL);
+        return;
+    }
+
+    ESP_LOGI(TAG, "[WiFi Task] ✓ ESP-Hosted initialized successfully");
 
     // Create WiFi station interface
     g_wifi_netif = esp_netif_create_default_wifi_sta();

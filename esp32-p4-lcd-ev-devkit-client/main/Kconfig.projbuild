@@ -29,3 +29,16 @@ menu "Board Configuration"
     endchoice
 
 endmenu
+
+menu "Component Configuration"
+
+    config ESP_HOSTED_ENABLED
+        bool "Enable ESP-Hosted WiFi support"
+        default y
+        depends on BOARD_ESP32_P4_FUNCTION_EV
+        help
+            Enable ESP-Hosted library for WiFi support via ESP32-C6 co-processor.
+            When enabled, WiFi initialization runs in background with timeout.
+            If ESP32-C6 is not present, system continues with Ethernet only.
+
+endmenu
