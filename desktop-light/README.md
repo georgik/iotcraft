@@ -38,10 +38,6 @@ make -j$(sysctl -n hw.ncpu)
 ./iotcraft-desktop
 ```
 
-Shows:
-1. 5-second chessboard test (Phase 2)
-2. 3D medieval world (Phase 3)
-3. Auto-rotating camera
 
 ### Screenshot Mode (for AI/CI)
 
@@ -134,9 +130,6 @@ desktop-light/
     └── ...
 ```
 
-## Phases
-
-
 **Desktop Debugging:**
 
 ```bash
@@ -168,29 +161,6 @@ DrawText(TextFormat("ty: %d", ty), x + 10, y, 10, YELLOW);
 
 - `0` - Success
 - `1` - Error (initialization, rendering, or screenshot failed)
-
-## Integration with CI/CD
-
-```yaml
-# GitHub Actions example
-- name: Run desktop simulator
-  run: |
-    cd desktop-light/build
-    ./iotcraft-desktop --screenshot output.png --duration 5 --headless
-
-- name: Upload screenshot
-  uses: actions/upload-artifact@v3
-  with:
-    name: screenshot
-    path: desktop-light/build/output.png
-```
-
-## Notes
-
-- Frame rate: 20 FPS (50ms per frame)
-- Default resolution: 320x240 (matches ESP32 internal resolution)
-- Screenshot format: PNG (lossless compression)
-- Screenshot size: ~80 KB for 320x240 RGBA
 
 ## See Also
 
