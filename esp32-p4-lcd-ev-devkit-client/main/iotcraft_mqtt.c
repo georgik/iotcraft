@@ -5,6 +5,7 @@
 
 #include "iotcraft_mqtt.h"
 #include "mqtt_client.h"
+#include "console/console.h"
 #include "esp_log.h"
 #include "esp_event.h"
 #include <string.h>
@@ -13,7 +14,7 @@
 
 static const char* TAG = "IotCraftMQTT";
 
-#define MQTT_BROKER_URI "mqtt://192.168.1.100:1883"  // Default broker
+#define MQTT_BROKER_URI "mqtt://192.168.4.1:1883"  // IoT Gateway (DHCP server)
 #define PLAYER_ID "esp32-p4-client"
 #define PLAYER_NAME "ESP32-P4"
 
@@ -39,6 +40,7 @@ static void mqtt_event_handler(void* handler_args, esp_event_base_t base, int32_
     switch ((esp_mqtt_event_id_t)event_id) {
         case MQTT_EVENT_CONNECTED:
             ESP_LOGI(TAG, "MQTT_EVENT_CONNECTED");
+            console_log(LOG_LEVEL_INFO, "MQTT", "Connected to broker");
 
             // Subscribe to world block events
             char placed_topic[128];
@@ -55,6 +57,7 @@ static void mqtt_event_handler(void* handler_args, esp_event_base_t base, int32_
 
         case MQTT_EVENT_DISCONNECTED:
             ESP_LOGW(TAG, "MQTT_EVENT_DISCONNECTED");
+            console_log(LOG_LEVEL_WARN, "MQTT", "Disconnected from broker");
             g_connected = false;
             break;
 
@@ -66,6 +69,11 @@ static void mqtt_event_handler(void* handler_args, esp_event_base_t base, int32_
 
         case MQTT_EVENT_ERROR:
             ESP_LOGE(TAG, "MQTT_EVENT_ERROR");
+            console_log(LOG_LEVEL_ERROR, "MQTT", "Connection error");
+            if (event->error_handle->error_type == MQTT_ERROR_TYPE_TCP_TRANSPORT) {
+                console_log(LOG_LEVEL_ERROR, "MQTT", "Transport error: %d",
+                           event->error_handle->esp_transport_sock_errno);
+            }
             break;
 
         default:
@@ -92,6 +100,7 @@ esp_err_t iotcraft_mqtt_init(const char* world_id, const char* broker_uri) {
 
     ESP_LOGI(TAG, "Initializing MQTT client for world: %s", world_id);
     ESP_LOGI(TAG, "Broker URI: %s", uri);
+    console_log(LOG_LEVEL_INFO, "MQTT", "Broker: %s", uri);
 
     // Configure MQTT client
     esp_mqtt_client_config_t mqtt_cfg = {

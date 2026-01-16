@@ -56,13 +56,19 @@ static voxel_buffer_t g_core1_voxel_buffer;  // Core 1's voxel buffer (right wor
 static void on_got_ip(const char* ip) {
     ESP_LOGI(TAG, "✓ Network connected! IP: %s", ip);
 
+    // Log to console for diagnostics
+    console_log(LOG_LEVEL_INFO, "NETWORK", "IP: %s", ip);
+    console_log(LOG_LEVEL_INFO, "NETWORK", "Connecting to MQTT broker...");
+
     // Initialize MQTT client when network is ready
     ESP_LOGI(TAG, "Initializing MQTT client...");
     esp_err_t mqtt_ret = iotcraft_mqtt_init("test-world", NULL);
     if (mqtt_ret == ESP_OK) {
         ESP_LOGI(TAG, "✓ MQTT client initialized (connecting in background)");
+        console_log(LOG_LEVEL_INFO, "NETWORK", "MQTT init: connecting...");
     } else {
         ESP_LOGW(TAG, "✗ MQTT client initialization failed (continuing without multiplayer)");
+        console_log(LOG_LEVEL_ERROR, "NETWORK", "MQTT init failed!");
     }
 }
 
