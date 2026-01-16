@@ -13,6 +13,10 @@ dependencies:
     version: '*'
   espressif/usb_host_hid:
     version: '*'
+  # espressif/esp_hosted:
+  #   version: ^2.9.6
+  #   rules:
+  #   - if: $CONFIG{BOARD_ESP32_P4_FUNCTION_EV} == True
   georgik/esp_raylib_port:
     version: '*'
   georgik/raylib:
@@ -20,3 +24,4 @@ dependencies:
   idf:
     version: '>=5.1.0'
   espressif/mqtt: ^1.0.0
+  #espressif/esp_wifi_remote: '*'

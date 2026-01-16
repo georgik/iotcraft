@@ -27,6 +27,10 @@
 #include "world_template.h"
 #include "trig_lut.h"
 
+// Console overlay
+#include "console.h"
+#include "console_commands.h"
+
 #define TAG "IotCraftClient"
 #define RAYLIB_TASK_STACK_SIZE (160 * 1024)  // 160KB stack for main renderer task
 #define CORE1_RENDER_STACK_SIZE (4 * 1024)    // 4KB stack for Core 1 render task (only collects & sorts voxels, no deep call stacks)
@@ -216,6 +220,21 @@ void iotcraft_task(void *pvParameter)
         vTaskDelete(NULL);
         return;
     }
+
+    // ============================================================
+    // CONSOLE OVERLAY: Initialize after renderer is ready
+    // ============================================================
+    ESP_LOGI(TAG, "Initializing console overlay...");
+    console_init();
+    console_register_builtin_commands();
+    // Console is hidden by default - press F3 to show it
+
+    // Show welcome message (will be visible when console is opened)
+    console_log(LOG_LEVEL_INFO, "SYSTEM", "IoTCraft ESP32-P4 Client");
+    console_log(LOG_LEVEL_INFO, "SYSTEM", "Press F3 to toggle console");
+    console_log(LOG_LEVEL_INFO, "SYSTEM", "Press ESC to close console");
+    console_log(LOG_LEVEL_INFO, "SYSTEM", "Type 'help' for commands");
+    // ============================================================
 
     ESP_LOGI(TAG, "IotCraft client initialized successfully");
     ESP_LOGI(TAG, "Controls: WASD=Move (Spectator mode), Arrows=Look, Q=Fly Up, E=Fly Down");
@@ -563,6 +582,9 @@ void iotcraft_task(void *pvParameter)
         float delta_time = (current_time - last_time) / 1000.0f;  // Convert to seconds
         last_time = current_time;
 
+        // Update console overlay
+        console_update();
+
         // Poll input (check for key presses)
         input_poll();
 
@@ -610,9 +632,21 @@ void iotcraft_task(void *pvParameter)
             game_handle_key(&g_game, IOTCRAFT_KEY_DOWN, input_is_key_pressed(IOTCRAFT_KEY_DOWN));
             game_handle_key(&g_game, IOTCRAFT_KEY_Q, input_is_key_pressed(IOTCRAFT_KEY_Q));
             game_handle_key(&g_game, IOTCRAFT_KEY_E, input_is_key_pressed(IOTCRAFT_KEY_E));
-            game_handle_key(&g_game, IOTCRAFT_KEY_ESCAPE, input_is_key_pressed(IOTCRAFT_KEY_ESCAPE));
             game_handle_key(&g_game, IOTCRAFT_KEY_N, input_is_key_pressed(IOTCRAFT_KEY_N));
             game_handle_key(&g_game, IOTCRAFT_KEY_M, input_is_key_pressed(IOTCRAFT_KEY_M));
+            game_handle_key(&g_game, IOTCRAFT_KEY_F3, input_is_key_pressed(IOTCRAFT_KEY_F3));
+
+            // Handle console controls
+            // ESC closes console if it's visible
+            static bool esc_was_pressed = false;
+            bool esc_is_pressed = input_is_key_pressed(IOTCRAFT_KEY_ESCAPE);
+            if (esc_is_pressed && !esc_was_pressed) {
+                if (console_is_visible()) {
+                    console_hide();
+                }
+                // ESC never quits on ESP32-P4 - it only controls console
+            }
+            esc_was_pressed = esc_is_pressed;
 
             // Toggle wireframe mode with F1
             static bool f1_was_pressed = false;
@@ -731,11 +765,14 @@ void iotcraft_task(void *pvParameter)
         int32_t fb_width, fb_height;
         renderer_get_dimensions(&g_renderer, &fb_width, &fb_height);
 
+        // Writable framebuffer pointer for console overlay
+        uint16_t* fb_writable = NULL;
+
         // Draw debug text to verify display is working
         // If we see text but no walls, it's a renderer bug, not display timing
         if (fb && fb_width > 0 && fb_height > 0) {
             // Cast away const to draw debug overlay
-            uint16_t* fb_writable = (uint16_t*)fb;
+            fb_writable = (uint16_t*)fb;
 
             // Draw colored test bars at the top
             for (int x = 0; x < fb_width && x < 80; x++) {
@@ -903,6 +940,10 @@ void iotcraft_task(void *pvParameter)
             draw_int(fb_writable, fb_width, fb_height, hud_x, hud_y, yaw_scaled, hud_color);
         }
 
+        // Render console overlay (on top of everything else)
+        // Pass framebuffer so console can draw directly to it
+        console_render(fb_writable, fb_width, fb_height);
+
         // Push framebuffer to display with hardware scaling
         // Render at 512x300, scale to 1024x600 by display hardware (free performance boost!)
         if (fb && fb_width > 0 && fb_height > 0) {
@@ -947,6 +988,8 @@ void app_main(void)
         ESP_LOGE(TAG, "Failed to initialize display: %d", ret);
         return;
     }
+
+    // Console will be initialized in iotcraft_task after renderer is ready
 
     // ============================================================
     // NETWORK CONNECTIVITY: Initialize Ethernet BEFORE renderer

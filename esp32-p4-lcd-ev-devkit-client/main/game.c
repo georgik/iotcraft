@@ -7,6 +7,7 @@
 #include "camera.h"
 #include "input.h"
 #include "brightness.h"
+#include "console.h"
 #include <esp_log.h>
 #include <math.h>
 
@@ -90,11 +91,11 @@ void game_handle_key(game_state_t* game, iotcraft_key_code_t key, bool pressed) 
             key_actions.down = pressed;
             break;
 
-        // Quit on ESC
+        // ESC - on desktop it quits, on ESP32-P4 it's handled by console overlay
+        // We don't set running=false here because ESP32-P4 should never exit
         case IOTCRAFT_KEY_ESCAPE:
-            if (pressed) {
-                game->running = false;
-            }
+            // ESC is handled in hello.c for console control
+            // On ESP32-P4, we ignore it here (no quit)
             break;
 
         // N/M for brightness control
@@ -106,6 +107,13 @@ void game_handle_key(game_state_t* game, iotcraft_key_code_t key, bool pressed) 
         case IOTCRAFT_KEY_M:
             if (pressed) {
                 brightness_increase(10);  // Increase by 10%
+            }
+            break;
+
+        // F3 for console toggle
+        case IOTCRAFT_KEY_F3:
+            if (pressed) {
+                console_toggle();
             }
             break;
 

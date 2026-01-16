@@ -1,6 +1,6 @@
 /**
  * @file network_init.c
- * @brief Network connectivity implementation - Ethernet for ESP32-P4
+ * @brief Network connectivity implementation - Ethernet and WiFi (ESP-Hosted) for ESP32-P4
  */
 
 #include "network_init.h"
@@ -10,6 +10,14 @@
 #include "esp_log.h"
 #include "driver/gpio.h"
 #include <string.h>
+
+// ESP-Hosted and WiFi support (can be disabled via idf_component.yml)
+#ifdef CONFIG_ESP_HOSTED_ENABLED
+    #include "esp_wifi.h"
+    #define HAS_WIFI_SUPPORT 1
+#else
+    #define HAS_WIFI_SUPPORT 0
+#endif
 
 #if CONFIG_BOARD_ESP32_P4_FUNCTION_EV
 #include "esp32p4/rom/ets_sys.h"
@@ -25,9 +33,106 @@ static const char* TAG = "Network";
 #define MAX_IP_LEN          16
 
 static esp_netif_t* g_eth_netif = NULL;
+#if HAS_WIFI_SUPPORT
+static esp_netif_t* g_wifi_netif = NULL;
+#endif
 static bool g_connected = false;
 static bool g_got_ip = false;
 static network_got_ip_callback_t g_got_ip_callback = NULL;
+
+#if HAS_WIFI_SUPPORT
+// WiFi credentials
+#define DEFAULT_WIFI_SSID     "iotcraft"
+#define DEFAULT_WIFI_PASSWORD "iotcraft123"
+
+// WiFi init task synchronization
+static TaskHandle_t g_wifi_init_task_handle = NULL;
+static volatile bool g_wifi_init_done = false;
+static volatile bool g_wifi_init_success = false;
+
+// Forward declarations
+static void wifi_event_handler(void* arg, esp_event_base_t event_base,
+                                int32_t event_id, void* event_data);
+static void got_ip_event_handler(void* arg, esp_event_base_t event_base,
+                                  int32_t event_id, void* event_data);
+
+/**
+ * @brief WiFi initialization task with timeout protection
+ *
+ * This task runs esp_wifi_init() which can block indefinitely if ESP32-C6
+ * co-processor is not responding. We run it in a separate task so we can
+ * detect if it's taking too long and continue without WiFi.
+ */
+static void wifi_init_task(void* arg) {
+    ESP_LOGI(TAG, "[WiFi Task] Starting WiFi initialization...");
+
+    // Create WiFi station interface
+    g_wifi_netif = esp_netif_create_default_wifi_sta();
+
+    // Initialize WiFi with default configuration
+    wifi_init_config_t wifi_cfg = WIFI_INIT_CONFIG_DEFAULT();
+    esp_err_t ret = esp_wifi_init(&wifi_cfg);
+
+    if (ret == ESP_OK) {
+        ESP_LOGI(TAG, "[WiFi Task] ✓ WiFi initialized successfully");
+
+        // Register WiFi event handlers
+        ESP_ERROR_CHECK(esp_event_handler_instance_register(WIFI_EVENT,
+                                                            ESP_EVENT_ANY_ID,
+                                                            &wifi_event_handler,
+                                                            NULL,
+                                                            NULL));
+        ESP_ERROR_CHECK(esp_event_handler_instance_register(IP_EVENT,
+                                                            IP_EVENT_STA_GOT_IP,
+                                                            &got_ip_event_handler,
+                                                            NULL,
+                                                            NULL));
+
+        // Configure WiFi
+        wifi_config_t wifi_config = {
+            .sta = {
+                .ssid = DEFAULT_WIFI_SSID,
+                .password = DEFAULT_WIFI_PASSWORD,
+                .threshold.authmode = WIFI_AUTH_WPA2_PSK,
+            },
+        };
+
+        ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
+        ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
+        ESP_ERROR_CHECK(esp_wifi_start());
+
+        ESP_LOGI(TAG, "[WiFi Task] ✓ WiFi started, connecting to '%s'...", DEFAULT_WIFI_SSID);
+        g_wifi_init_success = true;
+    } else {
+        ESP_LOGW(TAG, "[WiFi Task] ⚠ WiFi initialization failed: %s", esp_err_to_name(ret));
+        ESP_LOGW(TAG, "[WiFi Task] ⚠ WiFi co-processor (ESP32-C6) may not be present or not have firmware");
+        ESP_LOGW(TAG, "[WiFi Task] ⚠ Continuing with Ethernet only");
+        g_wifi_init_success = false;
+    }
+
+    g_wifi_init_done = true;
+    g_wifi_init_task_handle = NULL;
+    vTaskDelete(NULL);
+}
+#endif // HAS_WIFI_SUPPORT
+
+/**
+ * @brief WiFi event handler
+ */
+#if HAS_WIFI_SUPPORT
+static void wifi_event_handler(void* arg, esp_event_base_t event_base,
+                                int32_t event_id, void* event_data) {
+    if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
+        ESP_LOGI(TAG, "WiFi started, connecting to AP...");
+        esp_wifi_connect();
+    } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_CONNECTED) {
+        ESP_LOGI(TAG, "WiFi connected to AP");
+    } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
+        ESP_LOGW(TAG, "WiFi disconnected, retrying...");
+        esp_wifi_connect();
+    }
+}
+#endif
 
 /**
  * @brief Ethernet event handler
@@ -93,7 +198,7 @@ static void got_ip_event_handler(void* arg, esp_event_base_t event_base,
 }
 
 esp_err_t network_init(void) {
-    ESP_LOGI(TAG, "Initializing Ethernet (non-blocking)...");
+    ESP_LOGI(TAG, "Initializing network connectivity...");
 
     // Initialize TCP/IP network interface (must be called first)
     ESP_ERROR_CHECK(esp_netif_init());
@@ -101,9 +206,62 @@ esp_err_t network_init(void) {
     // Create default event loop
     ESP_ERROR_CHECK(esp_event_loop_create_default());
 
+#if HAS_WIFI_SUPPORT
+    // ============================================================
+    // WIFI INITIALIZATION: Non-blocking with timeout
+    // ============================================================
+    // IMPORTANT: ESP-Hosted SDIO driver can block indefinitely if C6 is not ready
+    // Solution: Run WiFi init in separate task with watchdog timeout
+    ESP_LOGI(TAG, "Initializing WiFi (ESP32-C6 co-processor via ESP-Hosted)...");
+    ESP_LOGI(TAG, "  Starting WiFi init in background task (10 second timeout)...");
+
+    g_wifi_init_done = false;
+    g_wifi_init_success = false;
+
+    // Create WiFi init task (high priority to ensure it runs quickly)
+    BaseType_t ret = xTaskCreatePinnedToCore(
+        wifi_init_task,
+        "wifi_init",
+        8192,  // 8KB stack
+        NULL,
+        5,     // Priority
+        &g_wifi_init_task_handle,
+        0      // Core 0
+    );
+
+    if (ret != pdPASS) {
+        ESP_LOGW(TAG, "⚠ Failed to create WiFi init task, skipping WiFi");
+        goto skip_wifi;
+    }
+
+    // Wait for WiFi init to complete with 10 second timeout
+    int timeout_seconds = 10;
+    for (int i = 0; i < timeout_seconds * 10; i++) {
+        if (g_wifi_init_done) {
+            ESP_LOGI(TAG, "  WiFi init completed in %d ms", i * 100);
+            break;
+        }
+        vTaskDelay(pdMS_TO_TICKS(100));
+    }
+
+    if (!g_wifi_init_done) {
+        ESP_LOGW(TAG, "⚠ WiFi init timeout after %d seconds", timeout_seconds);
+        ESP_LOGW(TAG, "  ESP32-C6 co-processor may not be present or firmware not loaded");
+        ESP_LOGW(TAG, "  Continuing without WiFi (Ethernet only)");
+        // Note: WiFi init task is still running in background, but we're proceeding anyway
+    } else if (!g_wifi_init_success) {
+        ESP_LOGW(TAG, "⚠ WiFi init failed, continuing with Ethernet only");
+    }
+
+skip_wifi:
+    // ============================================================
+#else
+    ESP_LOGI(TAG, "WiFi support disabled (ESP-Hosted not available)");
+#endif // HAS_WIFI_SUPPORT
+
     // Create netif for Ethernet
-    esp_netif_config_t cfg = ESP_NETIF_DEFAULT_ETH();
-    g_eth_netif = esp_netif_new(&cfg);
+    esp_netif_config_t eth_cfg = ESP_NETIF_DEFAULT_ETH();
+    g_eth_netif = esp_netif_new(&eth_cfg);
 
     // Initialize Ethernet MAC
     eth_mac_config_t mac_config = ETH_MAC_DEFAULT_CONFIG();

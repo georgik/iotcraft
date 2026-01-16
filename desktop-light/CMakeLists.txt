@@ -15,7 +15,8 @@ include_directories(
     ${RAYLIB_INCLUDE_DIRS}
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/mocks
-    ../esp32-p4-lcd-ev-devkit-client/main  # Shared headers
+    ${CMAKE_CURRENT_SOURCE_DIR}/../esp32-p4-lcd-ev-devkit-client/main
+    ${CMAKE_CURRENT_SOURCE_DIR}/../esp32-p4-lcd-ev-devkit-client/main/console
 )
 
 # Add desktop build flag
@@ -31,12 +32,16 @@ set(SHARED_SOURCES
     ../esp32-p4-lcd-ev-devkit-client/main/renderer.c
     ../esp32-p4-lcd-ev-devkit-client/main/trig_lut.c
     ../esp32-p4-lcd-ev-devkit-client/main/ppa_helper.c
+    # Console overlay
+    ../esp32-p4-lcd-ev-devkit-client/main/console/console.c
+    ../esp32-p4-lcd-ev-devkit-client/main/console/console_commands.c
 )
 
 # Mock sources (ESP-IDF replacements)
 set(MOCK_SOURCES
     mocks/esp_log.c
     mocks/freertos_mock.c
+    mocks/brightness_mock.c
 )
 
 # Main executable source

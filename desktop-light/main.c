@@ -21,6 +21,10 @@
 // Local
 #include "cli_options.h"
 
+// Console overlay
+#include "console.h"
+#include "console_commands.h"
+
 // Shared components (from ESP32 version)
 #include "iotcraft_types.h"
 #include "camera.h"
@@ -91,6 +95,17 @@ static void display_chessboard_test(int duration_ms) {
  */
 static int run_renderer(const cli_options_t* options) {
     printf("[%s] Initializing 3D renderer...\n", TAG);
+
+    // Initialize console overlay
+    printf("[%s] Initializing console overlay...\n", TAG);
+    console_init();
+    console_register_builtin_commands();
+    console_show();
+
+    // Show welcome message
+    console_log(LOG_LEVEL_INFO, "SYSTEM", "IoTCraft Desktop Simulator");
+    console_log(LOG_LEVEL_INFO, "SYSTEM", "Press F3 or ` to toggle console");
+    console_log(LOG_LEVEL_INFO, "SYSTEM", "Type 'help' for available commands");
 
     // Initialize global camera (only on first call)
     static bool camera_initialized = false;
@@ -179,6 +194,14 @@ static int run_renderer(const cli_options_t* options) {
         if (WindowShouldClose()) {
             g_running = 0;
             break;
+        }
+
+        // Update console animation
+        console_update();
+
+        // Handle console toggle key
+        if (IsKeyPressed(KEY_F3) || IsKeyPressed(KEY_GRAVE)) {
+            console_toggle();
         }
 
         // Handle keyboard input
@@ -318,6 +341,10 @@ static int run_renderer(const cli_options_t* options) {
             // Draw horizon line to see where middle is
             DrawLine(0, GetScreenHeight()/2, GetScreenWidth(), GetScreenHeight()/2, RED);
         }
+
+        // Render console overlay (after everything else)
+        // Desktop build passes NULL for framebuffer (uses Raylib drawing)
+        console_render(NULL, 0, 0);
 
         EndDrawing();
 
