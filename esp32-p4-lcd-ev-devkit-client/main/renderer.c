@@ -27,8 +27,15 @@ static const char* TAG = "Renderer";
 // Wireframe mode (toggle with F1)
 static bool g_wireframe_mode = false;
 
-// Debug block mode (toggle with F5) - displays redstone block in center
+// Debug block mode (toggle with F5) - displays static block at fixed position
 static bool g_debug_block_mode = false;
+static bool g_debug_block_logged = false;  // Log position once when enabled
+static int32_t g_debug_block_x = 0;  // Fixed world coordinates
+static int32_t g_debug_block_y = 2;  // 2 blocks above ground
+static int32_t g_debug_block_z = 0;
+
+// Global renderer reference (set by hello.c and desktop-light/main.c)
+renderer_t* g_global_renderer = NULL;
 
 // Forward declarations
 static void draw_voxel_3d(renderer_t* renderer, int32_t x, int32_t y, int32_t z, block_type_t block);
@@ -617,6 +624,14 @@ bool renderer_toggle_wireframe(int new_mode) {
 }
 
 /**
+ * @brief Check if wireframe mode is currently enabled
+ * @return true if wireframe mode is enabled, false otherwise
+ */
+bool renderer_is_wireframe_enabled(void) {
+    return g_wireframe_mode;
+}
+
+/**
  * @brief Toggle debug block mode (F5)
  * @param new_mode If true, enable debug block; if false, disable. If -1, toggle current state
  * @return Current debug block mode state
@@ -634,6 +649,22 @@ bool renderer_toggle_debug_block(int new_mode) {
              old_state ? "ON" : "OFF",
              g_debug_block_mode ? "ON" : "OFF",
              old_state != g_debug_block_mode);
+
+    // When enabling, place debug block 3 units in front of camera (one-time placement)
+    if (g_debug_block_mode && !old_state) {
+        extern renderer_t* g_global_renderer;
+        if (g_global_renderer && g_global_renderer->camera) {
+            float debug_dist = 3.0f;
+            g_debug_block_x = (int32_t)(g_global_renderer->camera->x + cosf_fast(g_global_renderer->camera->yaw) * debug_dist);
+            g_debug_block_y = (int32_t)(g_global_renderer->camera->y + 0.5f);
+            g_debug_block_z = (int32_t)(g_global_renderer->camera->z + sinf_fast(g_global_renderer->camera->yaw) * debug_dist);
+
+            ESP_LOGI(TAG, "Debug block placed at world coordinates: (%d, %d, %d)",
+                     g_debug_block_x, g_debug_block_y, g_debug_block_z);
+        }
+        g_debug_block_logged = false;  // Reset for render-time log
+    }
+
     return g_debug_block_mode;
 }
 
@@ -1463,15 +1494,16 @@ static void renderer_render_3d(renderer_t* renderer) {
         draw_voxel_3d(renderer, voxels[i].x, voxels[i].y, voxels[i].z, voxels[i].block);
     }
 
-    // Debug block visualization (F5) - draw redstone block in center above ground
+    // Debug block visualization (F5) - draw static block at fixed world position
     if (g_debug_block_mode) {
-        // Position block in front of camera, slightly above ground
-        float debug_dist = 5.0f;
-        float debug_x = renderer->camera->x + cosf_fast(renderer->camera->yaw) * debug_dist;
-        float debug_y = 2.0f;  // 2 blocks above ground
-        float debug_z = renderer->camera->z + sinf_fast(renderer->camera->yaw) * debug_dist;
+        // Log position once when first rendered
+        if (!g_debug_block_logged) {
+            ESP_LOGI(TAG, "Rendering debug block at fixed position: (%d, %d, %d)",
+                     g_debug_block_x, g_debug_block_y, g_debug_block_z);
+            g_debug_block_logged = true;
+        }
 
-        // Draw as stone block (placeholder for redstone - we don't have redstone texture yet)
-        draw_voxel_3d(renderer, (int32_t)debug_x, (int32_t)debug_y, (int32_t)debug_z, BLOCK_STONE);
+        // Draw debug block at its fixed world coordinates
+        draw_voxel_3d(renderer, g_debug_block_x, g_debug_block_y, g_debug_block_z, BLOCK_STONE);
     }
 }

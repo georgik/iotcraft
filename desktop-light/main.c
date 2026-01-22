@@ -168,12 +168,16 @@ static int run_renderer(const cli_options_t* options) {
     }
 
     // Initialize renderer
-    renderer_t renderer = {0};
+    static renderer_t renderer = {0};
     if (!renderer_init(&renderer, options->width, options->height, &g_camera, &world)) {
         fprintf(stderr, "[%s] Failed to initialize renderer\n", TAG);
         world_free(&world);
         return -1;
     }
+
+    // Set global renderer reference for debug block placement
+    extern renderer_t* g_global_renderer;
+    g_global_renderer = &renderer;
 
     printf("[%s] Renderer initialized: %dx%d\n", TAG, options->width, options->height);
 
@@ -216,6 +220,19 @@ static int run_renderer(const cli_options_t* options) {
         // Handle console toggle key
         if (IsKeyPressed(KEY_F3) || IsKeyPressed(KEY_GRAVE)) {
             console_toggle();
+        }
+
+        // Handle diagnostic keys
+        if (IsKeyPressed(KEY_F5)) {
+            // Toggle debug block mode
+            printf("[%s] F5 pressed - toggling debug block mode\n", TAG);
+            renderer_toggle_debug_block(-1);
+        }
+
+        if (IsKeyPressed(KEY_F6)) {
+            // Toggle wireframe mode
+            printf("[%s] F6 pressed - toggling wireframe mode\n", TAG);
+            renderer_toggle_wireframe(-1);
         }
 
         // Handle keyboard input

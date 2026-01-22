@@ -9,6 +9,18 @@
 #include <math.h>
 #include <esp_log.h>
 
+#ifdef __ESP32_P4__
+    #include "freertos/FreeRTOS.h"
+    #include "freertos/semphr.h"
+    static SemaphoreHandle_t g_world_mutex = NULL;
+#else
+    // Desktop simulator - single threaded, no mutex needed
+    #define xSemaphoreTake(mutex, timeout) (1)
+    #define xSemaphoreGive(mutex) ((void)0)
+    #define portMAX_DELAY 0
+    #define pdTRUE 1
+#endif
+
 static const char* TAG = "World";
 
 #define HASH_TABLE_SIZE 4096  // Power of 2 for fast modulo
@@ -39,6 +51,17 @@ bool world_init(voxel_world_t* world) {
         ESP_LOGE(TAG, "Null world pointer");
         return false;
     }
+
+#ifdef __ESP32_P4__
+    // Create mutex for multi-core hash table protection
+    if (!g_world_mutex) {
+        g_world_mutex = xSemaphoreCreateMutex();
+        if (!g_world_mutex) {
+            ESP_LOGE(TAG, "Failed to create world mutex");
+            return false;
+        }
+    }
+#endif
 
     // Initialize hash table to NULL
     for (int i = 0; i < HASH_TABLE_SIZE; i++) {
@@ -98,19 +121,31 @@ block_type_t world_get_block(const voxel_world_t* world, int32_t x, int32_t y, i
         return BLOCK_AIR;
     }
 
-    // Hash table lookup - O(1) average case
-    uint32_t hash = hash_position(x, y, z);
-    hash_entry_t* entry = g_hash_table[hash];
+#ifdef __ESP32_P4__
+    // Lock mutex for multi-core safety
+    if (g_world_mutex && xSemaphoreTake(g_world_mutex, portMAX_DELAY) == pdTRUE) {
+#endif
+        // Hash table lookup - O(1) average case
+        uint32_t hash = hash_position(x, y, z);
+        hash_entry_t* entry = g_hash_table[hash];
 
-    while (entry) {
-        if (entry->used &&
-            entry->voxel.x == x &&
-            entry->voxel.y == y &&
-            entry->voxel.z == z) {
-            return entry->voxel.type;
+        while (entry) {
+            if (entry->used &&
+                entry->voxel.x == x &&
+                entry->voxel.y == y &&
+                entry->voxel.z == z) {
+#ifdef __ESP32_P4__
+                xSemaphoreGive(g_world_mutex);
+#endif
+                return entry->voxel.type;
+            }
+            entry = entry->next;
         }
-        entry = entry->next;
+
+#ifdef __ESP32_P4__
+        xSemaphoreGive(g_world_mutex);
     }
+#endif
 
     return BLOCK_AIR;
 }
@@ -119,6 +154,15 @@ bool world_set_block(voxel_world_t* world, int32_t x, int32_t y, int32_t z, bloc
     if (!world) {
         return false;
     }
+
+#ifdef __ESP32_P4__
+    // Lock mutex for multi-core safety
+    if (g_world_mutex && xSemaphoreTake(g_world_mutex, portMAX_DELAY) != pdTRUE) {
+        return false;
+    }
+#endif
+
+    bool success = false;
 
     uint32_t hash = hash_position(x, y, z);
     hash_entry_t* entry = g_hash_table[hash];
@@ -159,7 +203,8 @@ bool world_set_block(voxel_world_t* world, int32_t x, int32_t y, int32_t z, bloc
                     }
                 }
             }
-            return true;
+            success = true;
+            goto unlock;
         }
         prev_entry = entry;
         entry = entry->next;
@@ -167,20 +212,23 @@ bool world_set_block(voxel_world_t* world, int32_t x, int32_t y, int32_t z, bloc
 
     // Add new block
     if (type == BLOCK_AIR) {
-        return true;  // Nothing to add
+        success = true;  // Nothing to add
+        goto unlock;
     }
 
     // Check capacity
     if (world->count >= MAX_VOXELS) {
         ESP_LOGE(TAG, "World at maximum capacity");
-        return false;
+        success = false;
+        goto unlock;
     }
 
     // Create new hash entry
     hash_entry_t* new_entry = (hash_entry_t*)malloc(sizeof(hash_entry_t));
     if (!new_entry) {
         ESP_LOGE(TAG, "Failed to allocate hash entry");
-        return false;
+        success = false;
+        goto unlock;
     }
 
     new_entry->voxel.x = x;
@@ -203,7 +251,15 @@ bool world_set_block(voxel_world_t* world, int32_t x, int32_t y, int32_t z, bloc
     }
 
     world->count++;
-    return true;
+    success = true;
+
+unlock:
+#ifdef __ESP32_P4__
+    if (g_world_mutex) {
+        xSemaphoreGive(g_world_mutex);
+    }
+#endif
+    return success;
 }
 
 void world_generate_test_terrain(voxel_world_t* world) {

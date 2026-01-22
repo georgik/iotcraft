@@ -91,6 +91,12 @@ void renderer_get_dimensions(const renderer_t* renderer, int32_t* width, int32_t
 bool renderer_toggle_wireframe(int new_mode);
 
 /**
+ * @brief Check if wireframe mode is currently enabled
+ * @return true if wireframe mode is enabled, false otherwise
+ */
+bool renderer_is_wireframe_enabled(void);
+
+/**
  * @brief Toggle debug block mode (F5 - displays redstone block for visual debugging)
  * @param new_mode If true, enable debug block; if false, disable. If -1, toggle current state
  * @return Current debug block mode state

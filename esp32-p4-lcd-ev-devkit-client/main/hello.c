@@ -235,6 +235,12 @@ void iotcraft_task(void *pvParameter)
         return;
     }
 
+    // Set global renderer reference for debug block placement
+    {
+        extern renderer_t* g_global_renderer;
+        g_global_renderer = &g_renderer;
+    }
+
     // Initialize game
     if (!game_init(&g_game, &g_camera, &g_world)) {
         ESP_LOGE(TAG, "Failed to initialize game");
@@ -669,6 +675,8 @@ void iotcraft_task(void *pvParameter)
             game_handle_key(&g_game, IOTCRAFT_KEY_N, input_is_key_pressed(IOTCRAFT_KEY_N));
             game_handle_key(&g_game, IOTCRAFT_KEY_M, input_is_key_pressed(IOTCRAFT_KEY_M));
             game_handle_key(&g_game, IOTCRAFT_KEY_F3, input_is_key_pressed(IOTCRAFT_KEY_F3));
+            game_handle_key(&g_game, IOTCRAFT_KEY_F5, input_is_key_pressed(IOTCRAFT_KEY_F5));
+            game_handle_key(&g_game, IOTCRAFT_KEY_F6, input_is_key_pressed(IOTCRAFT_KEY_F6));
 
             // Handle console controls
             // ESC closes console if it's visible
@@ -774,33 +782,40 @@ void iotcraft_task(void *pvParameter)
         // TRUE 3D RENDERING (shared with desktop-light)
         // ============================================================
 #ifdef __ESP32_P4__
-        // Multi-core rendering: Use both cores
-        int32_t cam_x = (int32_t)floorf(g_renderer.camera->x);
+        // Check if wireframe mode is enabled
+        if (renderer_is_wireframe_enabled()) {
+            // Wireframe mode: use single-core renderer_render_frame
+            // which has the wireframe rendering logic
+            renderer_render_frame(&g_renderer);
+        } else {
+            // Normal mode: Use multi-core rendering for performance
+            int32_t cam_x = (int32_t)floorf(g_renderer.camera->x);
 
-        // Collect left voxels (x < cam_x)
-        voxel_buffer_t left_buffer;
-        renderer_collect_voxels_parallel(&g_renderer, &left_buffer, INT32_MIN, cam_x - 1);
+            // Collect left voxels (x < cam_x)
+            voxel_buffer_t left_buffer;
+            renderer_collect_voxels_parallel(&g_renderer, &left_buffer, INT32_MIN, cam_x - 1);
 
-        // Signal Core 1 to start collecting right voxels
-        xSemaphoreGive(g_render_start_sem);
+            // Signal Core 1 to start collecting right voxels
+            xSemaphoreGive(g_render_start_sem);
 
-        // Sort left voxels while Core 1 collects (parallel execution)
-        renderer_sort_voxel_buffer(&left_buffer,
-                                  g_renderer.camera->x,
-                                  g_renderer.camera->y,
-                                  g_renderer.camera->z);
+            // Sort left voxels while Core 1 collects (parallel execution)
+            renderer_sort_voxel_buffer(&left_buffer,
+                                      g_renderer.camera->x,
+                                      g_renderer.camera->y,
+                                      g_renderer.camera->z);
 
-        // Clear framebuffer
-        renderer_clear(&g_renderer, 0x0000);  // Black background
+            // Clear framebuffer
+            renderer_clear(&g_renderer, 0x0000);  // Black background
 
-        // Render left voxels
-        renderer_render_voxel_buffer(&g_renderer, &left_buffer);
+            // Render left voxels
+            renderer_render_voxel_buffer(&g_renderer, &left_buffer);
 
-        // Wait for Core 1 to finish collecting and sorting right voxels
-        xSemaphoreTake(g_render_done_sem, portMAX_DELAY);
+            // Wait for Core 1 to finish collecting and sorting right voxels
+            xSemaphoreTake(g_render_done_sem, portMAX_DELAY);
 
-        // Render right voxels (collected and sorted by Core 1)
-        renderer_render_voxel_buffer(&g_renderer, &g_core1_voxel_buffer);
+            // Render right voxels (collected and sorted by Core 1)
+            renderer_render_voxel_buffer(&g_renderer, &g_core1_voxel_buffer);
+        }
 #else
         // Single-core rendering: Use original function
         renderer_render_frame(&g_renderer);
