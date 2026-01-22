@@ -18,7 +18,8 @@ static int g_device_count = 0;
 
 // Blink timing
 static float g_blink_timer = 0.0f;
-static const float BLINK_INTERVAL = 500.0f;  // 500ms blink cycle
+static const float BLINK_INTERVAL = 1000.0f;  // 1000ms (1 second) blink cycle
+static bool g_current_blink_state = false;  // Current blink phase (true=bright, false=dark)
 
 void device_manager_init(void) {
     memset(g_devices, 0, sizeof(g_devices));
@@ -107,6 +108,9 @@ void device_manager_update(voxel_world_t* world, float delta_time) {
         last_blink_state = blink_state;
     }
 
+    // Store global blink state for renderer access
+    g_current_blink_state = blink_state;
+
     // Update all devices
     for (int i = 0; i < g_device_count; i++) {
         iot_device_t* device = &g_devices[i];
@@ -169,4 +173,20 @@ int device_manager_blink_all(bool blinking) {
              blinking ? "ON" : "OFF", count);
 
     return count;
+}
+
+bool device_manager_is_blinking_lamp(int32_t x, int32_t y, int32_t z) {
+    for (int i = 0; i < g_device_count; i++) {
+        const iot_device_t* device = &g_devices[i];
+
+        if (device->type == DEVICE_TYPE_LAMP &&
+            device->is_visible &&
+            device->is_blinking &&
+            (int32_t)device->x == x &&
+            (int32_t)device->y == y &&
+            (int32_t)device->z == z) {
+            return g_current_blink_state;  // Bright during "on" phase
+        }
+    }
+    return false;
 }

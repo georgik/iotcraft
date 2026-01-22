@@ -45,6 +45,7 @@ set(MOCK_SOURCES
     mocks/esp_log.c
     mocks/freertos_mock.c
     mocks/brightness_mock.c
+    mocks/device_manager_mock.c
 )
 
 # Main executable source

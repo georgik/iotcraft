@@ -103,6 +103,13 @@ const iot_device_t* device_manager_get_all(int* count);
  */
 int device_manager_blink_all(bool blinking);
 
+/**
+ * @brief Check if a block at world position is a blinking lamp (should be rendered brighter)
+ * @param x, y, z World coordinates
+ * @return true if block is a blinking lamp in "on" phase, false otherwise
+ */
+bool device_manager_is_blinking_lamp(int32_t x, int32_t y, int32_t z);
+
 #ifdef __cplusplus
 }
 #endif

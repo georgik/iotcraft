@@ -952,7 +952,8 @@ static void draw_textured_quad(renderer_t* renderer,
                                float x0, float y0, float x1, float y1,
                                float x2, float y2, float x3, float y3,
                                int tex_x0, int tex_y0, int tex_x1, int tex_y1,
-                               const uint16_t* texture, float shade) {
+                               const uint16_t* texture, float shade,
+                               int32_t vx, int32_t vy, int32_t vz) {  // Added voxel position
     if (!renderer || !renderer->framebuffer || !texture) {
         return;
     }
@@ -1031,26 +1032,50 @@ static void draw_textured_quad(renderer_t* renderer,
         if (x_start < min_x) x_start = min_x;
         if (x_end > max_x) x_end = max_x;
 
-        // OPTIMIZATION: Precompute reciprocal for texture coordinate calculation
+        // OPTIMIZATION: Precompute reciprocals for texture coordinate calculation
         int span_length = x_end - x_start + 1;
         float inv_span_length = (span_length > 0) ? (1.0f / span_length) : 0.0f;
+        int row_height = max_y - min_y + 1;
+        float inv_row_height = (row_height > 0) ? (1.0f / row_height) : 0.0f;
 
-        for (int x = x_start; x <= x_end; x++) {
-            // Calculate barycentric coordinates for texture mapping
-            // Simplified: just interpolate based on position
-            // OPTIMIZATION: Multiply instead of divide
-            float u = (float)(x - x_start) * inv_span_length;
-            int tex_x = tex_x0 + (int)(u * (tex_x1 - tex_x0));
-            int tex_y = tex_y0 + (int)(u * (tex_y1 - tex_y0));
+        for (int x_pixel = x_start; x_pixel <= x_end; x_pixel++) {
+            // Calculate normalized coordinates within the quad
+            float u = (float)(x_pixel - x_start) * inv_span_length;  // X coordinate (0-1)
+            float v = (float)(y - min_y) * inv_row_height;  // Y coordinate (0-1)
 
-            // Clamp texture coordinates
+            // Bilinear interpolation for texture mapping
+            // Map (u,v) to texture coordinates
+            int tex_x = tex_x0 + (int)(u * (tex_x1 - tex_x0 + 1));
+            int tex_y = tex_y0 + (int)(v * (tex_y1 - tex_y0 + 1));
+
+            // Wrap/clamp texture coordinates to 0-7 range
             tex_x = tex_x & 0x7;
             tex_y = tex_y & 0x7;
 
             uint16_t texel = texture[tex_y * TEXTURE_SIZE + tex_x];
             texel = shade_color(texel, shade);
 
-            renderer->framebuffer[y * renderer->width + x] = texel;
+            // Apply glow effect for blinking lamps
+            extern bool device_manager_is_blinking_lamp(int32_t x, int32_t y, int32_t z);
+            if (device_manager_is_blinking_lamp(vx, vy, vz)) {
+                // Brighten the color by 1.5x for glow effect
+                // RGB565 format: RRRRR GGGGGG BBBBB
+                uint16_t r = (texel >> 11) & 0x1F;
+                uint16_t g = (texel >> 5) & 0x3F;
+                uint16_t b = texel & 0x1F;
+
+                // Apply 1.5x brightness boost (clamp to max)
+                r = (r * 3 / 2);
+                if (r > 31) r = 31;
+                g = (g * 3 / 2);
+                if (g > 63) g = 63;
+                b = (b * 3 / 2);
+                if (b > 31) b = 31;
+
+                texel = (r << 11) | (g << 5) | b;
+            }
+
+            renderer->framebuffer[y * renderer->width + x_pixel] = texel;
             pixels_drawn++;
         }
     }
@@ -1237,7 +1262,8 @@ static void draw_voxel_3d(renderer_t* renderer, int32_t x, int32_t y, int32_t z,
             }
 
             draw_textured_quad(renderer, fx0, fy0, fx1, fy1, fx2, fy2, fx3, fy3,
-                             tx0, ty0, tx1, ty1, texture, g_voxel_face_shades[f]);
+                             tx0, ty0, tx1, ty1, texture, g_voxel_face_shades[f],
+                             x, y, z);  // Pass voxel position for glow effect
             faces_rendered++;
         }
     }
