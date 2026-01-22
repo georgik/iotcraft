@@ -32,6 +32,9 @@ set(SHARED_SOURCES
     ../esp32-p4-lcd-ev-devkit-client/main/renderer.c
     ../esp32-p4-lcd-ev-devkit-client/main/trig_lut.c
     ../esp32-p4-lcd-ev-devkit-client/main/ppa_helper.c
+    ../esp32-p4-lcd-ev-devkit-client/main/sdcard_init.c
+    ../esp32-p4-lcd-ev-devkit-client/main/texture_loader.c
+    ../esp32-p4-lcd-ev-devkit-client/main/block_textures.c
     # Console overlay
     ../esp32-p4-lcd-ev-devkit-client/main/console/console.c
     ../esp32-p4-lcd-ev-devkit-client/main/console/console_commands.c

@@ -15,13 +15,14 @@
 #include <inttypes.h>
 
 // Only include ESP-IDF headers on ESP32 platform
-#ifdef __ESP32_P4__
+#if defined(__ESP32_P4__) || defined(IDF_TARGET_ESP32P4)
 #include "esp_log.h"
+#include "esp_err.h"
 #include "driver/ppa.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #else
-// Desktop simulator stubs
+// Desktop simulator stubs (PPA not needed on desktop)
 #ifndef ESP_LOGI
 #define ESP_LOGI(tag, fmt, ...) printf("[%s] " fmt "\n", tag, ##__VA_ARGS__)
 #define ESP_LOGE(tag, fmt, ...) printf("[%s] ERROR: " fmt "\n", tag, ##__VA_ARGS__)
@@ -34,8 +35,12 @@ typedef enum { PPA_SRM_ROTATION_ANGLE_0 } ppa_srm_rotation_angle_t;
 typedef enum { PPA_TRANS_MODE_BLOCKING } ppa_trans_mode_t;
 typedef enum { PPA_DATA_BURST_LENGTH_128 } ppa_data_burst_length_t;
 typedef enum { PPA_ALPHA_NO_CHANGE } ppa_alpha_update_mode_t;
-typedef enum { ESP_OK } esp_err_t;
-#define esp_err_to_name(x) "unknown"
+// Desktop stub: define esp_err_t and esp_err_to_name only for desktop
+#ifndef ESP_OK
+#define ESP_OK 0
+typedef int esp_err_t;
+static inline const char* esp_err_to_name(esp_err_t code) { (void)code; return "unknown"; }
+#endif
 #endif
 
 #ifdef __cplusplus

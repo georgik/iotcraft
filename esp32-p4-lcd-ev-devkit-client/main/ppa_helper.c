@@ -4,11 +4,20 @@
  */
 
 #include "ppa_helper.h"
+
+// Desktop simulator - define esp_err_t if not available (must be before functions)
+#if !defined(__ESP32_P4__) && !defined(IDF_TARGET_ESP32P4)
+#ifndef ESP_OK
+#define ESP_OK 0
+typedef int esp_err_t;
+#endif
+#endif
+
 #include <stdlib.h>
 #include <string.h>
 #include <inttypes.h>
 
-#ifdef __ESP32_P4__
+#if defined(__ESP32_P4__) || defined(IDF_TARGET_ESP32P4)
 #include "esp_log.h"
 #include "esp_heap_caps.h"
 #else

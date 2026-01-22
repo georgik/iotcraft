@@ -27,6 +27,7 @@
 #include "world_template.h"
 #include "trig_lut.h"
 #include "device_manager.h"
+#include "texture_loader.h"
 
 // Console overlay
 #include "console.h"
@@ -210,6 +211,21 @@ void iotcraft_task(void *pvParameter)
     }
     ESP_LOGI(TAG, "  Total blocks found in 5x5x10 area: %d", blocks_found);
     ESP_LOGI(TAG, "");
+
+    // ============================================================
+    // TEXTURE LOADING: Initialize texture system
+    // ============================================================
+    ESP_LOGI(TAG, "Initializing texture system...");
+    esp_err_t tex_ret = texture_loader_init();
+    if (tex_ret == ESP_OK) {
+        bool using_sd = texture_loader_using_sdcard();
+        ESP_LOGI(TAG, "✓ Texture system initialized (%s)",
+                 using_sd ? "SD card" : "embedded fallback");
+        // Note: Don't use console_log here - console not initialized yet
+        // console_log() will be available after console_init() below
+    } else {
+        ESP_LOGW(TAG, "✗ Texture system initialization failed (using embedded textures)");
+    }
 
     // Initialize renderer
     if (!renderer_init(&g_renderer, RENDER_WIDTH, RENDER_HEIGHT, &g_camera, &g_world)) {

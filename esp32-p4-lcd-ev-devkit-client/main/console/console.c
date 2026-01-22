@@ -413,6 +413,7 @@ void console_render(void* framebuffer, int width, int height) {
     #if __DESKTOP_BUILD__
         int screen_w = GetScreenWidth();
         int screen_h = GetScreenHeight();
+        uint16_t* fb = NULL;  // Not used on desktop
     #else
         int screen_w = width;
         int screen_h = height;

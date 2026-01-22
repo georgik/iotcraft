@@ -16,6 +16,9 @@ idf_component_register(
         "ppa_helper.c"
         "brightness.c"
         "device_manager.c"
+        "sdcard_init.c"
+        "texture_loader.c"
+        "block_textures.c"
         # Console overlay
         "console/console.c"
         "console/console_commands.c"
@@ -29,6 +32,8 @@ idf_component_register(
         esp_netif
         esp_driver_ppa
         driver
+        sdmmc
+        vfs
         # esp_raylib_port is pulled in via georgik__raylib dependency
         # esp_wifi_remote and esp_hosted are pulled in via idf_component.yml
 )

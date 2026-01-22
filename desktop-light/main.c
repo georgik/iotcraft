@@ -34,6 +34,7 @@
 #include "input.h"
 #include "world_template.h"
 #include "trig_lut.h"
+#include "texture_loader.h"
 
 #define TAG "IotCraftDesktop"
 
@@ -152,6 +153,19 @@ static int run_renderer(const cli_options_t* options) {
     // Initialize trigonometry lookup tables
     printf("[%s] Initializing trigonometry lookup tables...\n", TAG);
     trig_lut_init();
+
+    // Initialize texture system
+    printf("[%s] Initializing texture system...\n", TAG);
+    esp_err_t tex_ret = texture_loader_init();
+    if (tex_ret == ESP_OK) {
+        bool using_sd = texture_loader_using_sdcard();
+        printf("[%s] Texture system initialized (%s)\n", TAG,
+               using_sd ? "SD card" : "embedded fallback");
+        console_log(LOG_LEVEL_INFO, "TEXTURES", "%s textures",
+                    using_sd ? "SD card" : "embedded");
+    } else {
+        printf("[%s] WARNING: Texture system initialization failed (using embedded textures)\n", TAG);
+    }
 
     // Initialize renderer
     renderer_t renderer = {0};
