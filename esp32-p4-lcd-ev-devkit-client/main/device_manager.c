@@ -18,7 +18,7 @@ static int g_device_count = 0;
 
 // Blink timing
 static float g_blink_timer = 0.0f;
-static const float BLINK_INTERVAL = 1000.0f;  // 1000ms (1 second) blink cycle
+static const float BLINK_INTERVAL = 2000.0f;  // 2000ms (2 second) blink cycle
 static bool g_current_blink_state = false;  // Current blink phase (true=bright, false=dark)
 
 void device_manager_init(void) {
@@ -132,17 +132,31 @@ void device_manager_update(voxel_world_t* world, float delta_time) {
         }
 
         // Only update when needed to minimize race conditions
-        // 1. When blink state changes (every ~250ms for blinking devices)
+        // 1. When blink state changes (every ~500ms for blinking devices)
         // 2. When device first becomes visible (initial placement)
         static bool device_initialized[MAX_DEVICES] = {false};
 
         if (blink_changed && device->is_blinking) {
-            // Blink state changed - update block
+            // Blink state changed - update block and send MQTT command
             world_set_block(world, vx, vy, vz, block_type);
+
+            // Send MQTT command to actual lamp to turn ON/OFF
+            const char* mqtt_state = blink_state ? "ON" : "OFF";
+            iotcraft_mqtt_send_blink_command(device->id, mqtt_state);
+
+            ESP_LOGI(TAG, "Blink state changed for %s: %s (sent via MQTT)",
+                     device->id, mqtt_state);
         } else if (!device_initialized[i]) {
             // First time seeing this device - place initial block
             world_set_block(world, vx, vy, vz, block_type);
             device_initialized[i] = true;
+
+            // Send initial state to lamp
+            if (device->is_blinking && blink_state) {
+                iotcraft_mqtt_send_blink_command(device->id, "ON");
+            } else {
+                iotcraft_mqtt_send_blink_command(device->id, "OFF");
+            }
         }
     }
 }
