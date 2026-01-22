@@ -48,8 +48,9 @@ void input_update_key(iotcraft_key_code_t key, bool pressed) {
         g_input_state.keys[key].timestamp = xTaskGetTickCount();
         g_input_state.last_update = xTaskGetTickCount();
 
+        // Log all key presses (including F-keys) for debugging
         if (pressed) {
-            ESP_LOGV(TAG, "Key pressed: %d", key);
+            ESP_LOGI(TAG, "Key pressed: %d (0x%02x)", key, key);
         } else {
             ESP_LOGV(TAG, "Key released: %d", key);
         }

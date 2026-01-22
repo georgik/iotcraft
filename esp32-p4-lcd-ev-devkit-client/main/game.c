@@ -8,6 +8,7 @@
 #include "input.h"
 #include "brightness.h"
 #include "console.h"
+#include "renderer.h"
 #include <esp_log.h>
 #include <math.h>
 
@@ -114,6 +115,22 @@ void game_handle_key(game_state_t* game, iotcraft_key_code_t key, bool pressed) 
         case IOTCRAFT_KEY_F3:
             if (pressed) {
                 console_toggle();
+            }
+            break;
+
+        // F5 for debug block visualization
+        case IOTCRAFT_KEY_F5:
+            if (pressed) {
+                ESP_LOGI(TAG, "F5 pressed - toggling debug block");
+                renderer_toggle_debug_block(-1);  // Toggle
+            }
+            break;
+
+        // F6 for wireframe mode toggle
+        case IOTCRAFT_KEY_F6:
+            if (pressed) {
+                ESP_LOGI(TAG, "F6 pressed - toggling wireframe");
+                renderer_toggle_wireframe(-1);  // Toggle
             }
             break;
 

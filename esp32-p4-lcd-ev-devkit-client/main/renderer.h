@@ -91,6 +91,13 @@ void renderer_get_dimensions(const renderer_t* renderer, int32_t* width, int32_t
 bool renderer_toggle_wireframe(int new_mode);
 
 /**
+ * @brief Toggle debug block mode (F5 - displays redstone block for visual debugging)
+ * @param new_mode If true, enable debug block; if false, disable. If -1, toggle current state
+ * @return Current debug block mode state
+ */
+bool renderer_toggle_debug_block(int new_mode);
+
+/**
  * @brief Collect voxels in world space range (for multi-core rendering)
  * @param renderer Renderer context
  * @param buffer Output voxel buffer

@@ -27,6 +27,9 @@ static const char* TAG = "Renderer";
 // Wireframe mode (toggle with F1)
 static bool g_wireframe_mode = false;
 
+// Debug block mode (toggle with F5) - displays redstone block in center
+static bool g_debug_block_mode = false;
+
 // Forward declarations
 static void draw_voxel_3d(renderer_t* renderer, int32_t x, int32_t y, int32_t z, block_type_t block);
 
@@ -543,9 +546,19 @@ void renderer_render_frame(renderer_t* renderer) {
     // Check wireframe mode
     if (g_wireframe_mode) {
         // Render wireframe view (shows all voxels)
+        static bool wireframe_logged = false;
+        if (!wireframe_logged) {
+            ESP_LOGI(TAG, "Rendering in WIREFRAME mode");
+            wireframe_logged = true;
+        }
         renderer_render_wireframe(renderer);
     } else {
         // Normal textured rendering using true 3D projection
+        static bool normal_logged = false;
+        if (!normal_logged) {
+            ESP_LOGI(TAG, "Rendering in NORMAL mode (debug_block=%d)", g_debug_block_mode);
+            normal_logged = true;
+        }
         renderer_render_3d(renderer);
     }
 
@@ -588,14 +601,40 @@ void renderer_get_dimensions(const renderer_t* renderer, int32_t* width, int32_t
  * @return Current wireframe mode state
  */
 bool renderer_toggle_wireframe(int new_mode) {
+    bool old_state = g_wireframe_mode;
+
     if (new_mode == -1) {
         g_wireframe_mode = !g_wireframe_mode;
     } else {
         g_wireframe_mode = (new_mode != 0);
     }
 
-    ESP_LOGI(TAG, "Wireframe mode: %s", g_wireframe_mode ? "ON" : "OFF");
+    ESP_LOGI(TAG, "Wireframe mode: %s → %s (changed=%d)",
+             old_state ? "ON" : "OFF",
+             g_wireframe_mode ? "ON" : "OFF",
+             old_state != g_wireframe_mode);
     return g_wireframe_mode;
+}
+
+/**
+ * @brief Toggle debug block mode (F5)
+ * @param new_mode If true, enable debug block; if false, disable. If -1, toggle current state
+ * @return Current debug block mode state
+ */
+bool renderer_toggle_debug_block(int new_mode) {
+    bool old_state = g_debug_block_mode;
+
+    if (new_mode == -1) {
+        g_debug_block_mode = !g_debug_block_mode;
+    } else {
+        g_debug_block_mode = (new_mode != 0);
+    }
+
+    ESP_LOGI(TAG, "Debug block mode: %s → %s (changed=%d)",
+             old_state ? "ON" : "OFF",
+             g_debug_block_mode ? "ON" : "OFF",
+             old_state != g_debug_block_mode);
+    return g_debug_block_mode;
 }
 
 // ============================================================
@@ -1422,5 +1461,17 @@ static void renderer_render_3d(renderer_t* renderer) {
     // Render voxels back-to-front
     for (int i = 0; i < voxel_count; i++) {
         draw_voxel_3d(renderer, voxels[i].x, voxels[i].y, voxels[i].z, voxels[i].block);
+    }
+
+    // Debug block visualization (F5) - draw redstone block in center above ground
+    if (g_debug_block_mode) {
+        // Position block in front of camera, slightly above ground
+        float debug_dist = 5.0f;
+        float debug_x = renderer->camera->x + cosf_fast(renderer->camera->yaw) * debug_dist;
+        float debug_y = 2.0f;  // 2 blocks above ground
+        float debug_z = renderer->camera->z + sinf_fast(renderer->camera->yaw) * debug_dist;
+
+        // Draw as stone block (placeholder for redstone - we don't have redstone texture yet)
+        draw_voxel_3d(renderer, (int32_t)debug_x, (int32_t)debug_y, (int32_t)debug_z, BLOCK_STONE);
     }
 }
