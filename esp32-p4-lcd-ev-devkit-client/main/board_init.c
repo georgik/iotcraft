@@ -19,7 +19,7 @@ static const char *TAG = "board_init";
 // Store panel handle for framebuffer push (P4 uses panel directly, not IO)
 static esp_lcd_panel_handle_t g_panel_handle = NULL;
 
-// Scaling buffer for 2x upscale (512x300 -> 1024x600)
+// Scaling buffer for upscale (supports 2x and 3x)
 static uint16_t *g_scale_buf = NULL;
 static size_t g_scale_buf_size = 0;
 
@@ -272,13 +272,26 @@ esp_err_t board_display_push_frame_scaled(const uint16_t* framebuffer,
         return ESP_ERR_INVALID_ARG;
     }
 
-    // Check if 2x scaling is requested
-    if (dst_width != src_width * 2 || dst_height != src_height * 2) {
-        ESP_LOGE(TAG, "Only 2x scaling supported: %dx%d -> %dx%d", src_width, src_height, dst_width, dst_height);
+    // Calculate scale factors
+    int scale_x = dst_width / src_width;
+    int scale_y = dst_height / src_height;
+
+    // Validate that scaling is uniform (same factor in both dimensions)
+    if (scale_x != scale_y || scale_x < 2 || scale_x > 3) {
+        ESP_LOGE(TAG, "Only 2x or 3x scaling supported: %dx%d -> %dx%d (attempted %dx scale)",
+                 src_width, src_height, dst_width, dst_height, scale_x, scale_y);
         return ESP_ERR_NOT_SUPPORTED;
     }
 
-    // Allocate scaling buffer if needed (1024x600x2 = 1.2MB)
+    // Calculate actual scaled dimensions
+    int scaled_width = src_width * scale_x;
+    int scaled_height = src_height * scale_y;
+
+    // Calculate centering offsets for black borders
+    int offset_x = (dst_width - scaled_width) / 2;
+    int offset_y = (dst_height - scaled_height) / 2;
+
+    // Allocate scaling buffer if needed (fill with black for borders)
     size_t required_size = dst_width * dst_height * sizeof(uint16_t);
     if (!g_scale_buf || g_scale_buf_size < required_size) {
         if (g_scale_buf) {
@@ -291,23 +304,28 @@ esp_err_t board_display_push_frame_scaled(const uint16_t* framebuffer,
             g_scale_buf_size = 0;
             return ESP_ERR_NO_MEM;
         }
-        ESP_LOGI(TAG, "Scale buffer allocated: %d bytes (%dx%d)", g_scale_buf_size, dst_width, dst_height);
+        ESP_LOGI(TAG, "Scale buffer allocated: %d bytes (%dx%d, %dx scale)",
+                 g_scale_buf_size, dst_width, dst_height, scale_x);
     }
 
-    // Fast 2x nearest-neighbor scaling
-    // Each source pixel becomes 2x2 block in destination
+    // Clear buffer to black (for borders)
+    memset(g_scale_buf, 0, required_size);
+
+    // Fast nearest-neighbor scaling (supports 2x or 3x)
+    // Each source pixel becomes scale_x x scale_y block in destination
     for (int y = 0; y < src_height; y++) {
         for (int x = 0; x < src_width; x++) {
             uint16_t pixel = framebuffer[y * src_width + x];
 
-            // Write 2x2 block
-            int dst_x = x * 2;
-            int dst_y = y * 2;
+            // Write scale_x x scale_y block (with offset for centering)
+            int dst_x = offset_x + x * scale_x;
+            int dst_y = offset_y + y * scale_y;
 
-            g_scale_buf[dst_y * dst_width + dst_x] = pixel;
-            g_scale_buf[dst_y * dst_width + dst_x + 1] = pixel;
-            g_scale_buf[(dst_y + 1) * dst_width + dst_x] = pixel;
-            g_scale_buf[(dst_y + 1) * dst_width + dst_x + 1] = pixel;
+            for (int dy = 0; dy < scale_y; dy++) {
+                for (int dx = 0; dx < scale_x; dx++) {
+                    g_scale_buf[(dst_y + dy) * dst_width + (dst_x + dx)] = pixel;
+                }
+            }
         }
     }
 

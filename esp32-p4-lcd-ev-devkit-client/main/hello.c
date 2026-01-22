@@ -36,8 +36,8 @@
 #define TAG "IotCraftClient"
 #define RAYLIB_TASK_STACK_SIZE (160 * 1024)  // 160KB stack for main renderer task
 #define CORE1_RENDER_STACK_SIZE (4 * 1024)    // 4KB stack for Core 1 render task (only collects & sorts voxels, no deep call stacks)
-#define RENDER_WIDTH 512    // Half resolution (4x fewer pixels = 4x faster rendering)
-#define RENDER_HEIGHT 300   // Half resolution (will be scaled to 1024x600 by display)
+#define RENDER_WIDTH 341    // One-third width (scale 3x = 1023, centered to fit 1024)
+#define RENDER_HEIGHT 200   // One-third height (scale 3x = 600)
 #define DISPLAY_WIDTH 1024  // Physical display size
 #define DISPLAY_HEIGHT 600  // Physical display size
 
@@ -1007,7 +1007,7 @@ void iotcraft_task(void *pvParameter)
         console_render(fb_writable, fb_width, fb_height);
 
         // Push framebuffer to display with hardware scaling
-        // Render at 512x300, scale to 1024x600 by display hardware (free performance boost!)
+        // Render at 341x200, scale 3x to 1024x600 (9x fewer pixels = 9x faster!)
         if (fb && fb_width > 0 && fb_height > 0) {
             esp_err_t ret = board_display_push_frame_scaled(fb, fb_width, fb_height, DISPLAY_WIDTH, DISPLAY_HEIGHT);
             if (ret != ESP_OK) {
