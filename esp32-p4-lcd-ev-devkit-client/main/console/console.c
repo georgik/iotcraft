@@ -626,6 +626,16 @@ static void render_text(const char* text, int x, int y, Color color,
 }
 
 //=============================================================================
+// Public Text Drawing API
+//=============================================================================
+
+void console_draw_text(const char* text, int x, int y, unsigned char r, unsigned char g, unsigned char b,
+                       void* framebuffer, int fb_width, int fb_height) {
+    Color color = {r, g, b, 255};
+    render_text(text, x, y, color, (uint16_t*)framebuffer, fb_width, fb_height);
+}
+
+//=============================================================================
 // Command System
 //=============================================================================
 

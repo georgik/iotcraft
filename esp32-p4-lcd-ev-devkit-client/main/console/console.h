@@ -121,6 +121,19 @@ void console_execute(const char* command_line);
  */
 void console_register_builtin_commands(void);
 
+/**
+ * @brief Draw text directly to framebuffer
+ * @param text Text string to draw
+ * @param x X position
+ * @param y Y position
+ * @param color Text color (RGB)
+ * @param framebuffer RGB565 framebuffer to draw to
+ * @param fb_width Framebuffer width
+ * @param fb_height Framebuffer height
+ */
+void console_draw_text(const char* text, int x, int y, unsigned char r, unsigned char g, unsigned char b,
+                       void* framebuffer, int fb_width, int fb_height);
+
 #ifdef __cplusplus
 }
 #endif

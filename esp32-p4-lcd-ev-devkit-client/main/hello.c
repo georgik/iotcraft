@@ -467,6 +467,14 @@ void iotcraft_task(void *pvParameter)
     int frameCounter = 0;
     TickType_t last_time = xTaskGetTickCount();
 
+    // Auto-play mode (F7 toggles)
+    bool autoplay_enabled = false;
+    float autoplay_start_x = 0.0f;
+    float autoplay_start_z = 0.0f;
+    float autoplay_direction = 1.0f;  // 1.0 = forward, -1.0 = backward
+    const float autoplay_distance = 20.0f;  // Move 20 blocks
+    const float autoplay_speed = 5.0f;  // Blocks per second
+
     // Auto-movement for testing (when no keyboard connected)
     float auto_rotate = 0.0f;
 
@@ -559,6 +567,62 @@ void iotcraft_task(void *pvParameter)
          0,0,0,0,1,
          1,0,0,0,1,
          0,1,1,1,0}
+    };
+
+    // Simple 5x7 bitmap font for uppercase letters
+    static const char letter_font[26][35] = {
+        // A
+        {0,0,1,0,0, 0,1,0,1,0, 1,0,0,0,1, 1,1,1,1,1, 1,0,0,0,1, 1,0,0,0,1, 1,0,0,0,1},
+        // B
+        {1,1,1,1,0, 1,0,0,0,1, 1,1,1,1,0, 1,0,0,0,1, 1,0,0,0,1, 1,1,1,1,0},
+        // C
+        {0,1,1,1,0, 1,0,0,0,1, 1,0,0,0,0, 1,0,0,0,0, 1,0,0,0,1, 0,1,1,1,0},
+        // D
+        {1,1,1,1,0, 1,0,0,0,1, 1,0,0,0,1, 1,0,0,0,1, 1,0,0,0,1, 1,1,1,1,0},
+        // E
+        {1,1,1,1,1, 1,0,0,0,0, 1,1,1,1,0, 1,0,0,0,0, 1,0,0,0,0, 1,1,1,1,1},
+        // F
+        {1,1,1,1,1, 1,0,0,0,0, 1,1,1,1,0, 1,0,0,0,0, 1,0,0,0,0, 1,0,0,0,0},
+        // G
+        {0,1,1,1,1, 1,0,0,0,0, 1,0,1,1,1, 1,0,0,0,1, 1,0,0,0,1, 0,1,1,1,0},
+        // H
+        {1,0,0,0,1, 1,0,0,0,1, 1,1,1,1,1, 1,0,0,0,1, 1,0,0,0,1, 1,0,0,0,1},
+        // I
+        {1,1,1,1,1, 0,0,1,0,0, 0,0,1,0,0, 0,0,1,0,0, 0,0,1,0,0, 1,1,1,1,1},
+        // J
+        {0,0,1,1,1, 0,0,0,1,0, 0,0,0,1,0, 0,0,0,1,0, 1,0,0,1,0, 0,1,1,0,0},
+        // K
+        {1,0,0,1,0, 1,0,1,0,0, 1,1,0,0,0, 1,0,1,0,0, 1,0,0,1,0, 1,0,0,0,1},
+        // L
+        {1,0,0,0,0, 1,0,0,0,0, 1,0,0,0,0, 1,0,0,0,0, 1,0,0,0,0, 1,1,1,1,1},
+        // M
+        {1,0,0,0,1, 1,1,0,1,1, 1,0,1,0,1, 1,0,0,0,1, 1,0,0,0,1, 1,0,0,0,1},
+        // N
+        {1,0,0,0,1, 1,1,0,0,1, 1,0,1,0,1, 1,0,0,1,1, 1,0,0,0,1, 1,0,0,0,1},
+        // O
+        {0,1,1,1,0, 1,0,0,0,1, 1,0,0,0,1, 1,0,0,0,1, 1,0,0,0,1, 0,1,1,1,0},
+        // P
+        {1,1,1,1,0, 1,0,0,0,1, 1,0,0,0,1, 1,1,1,1,0, 1,0,0,0,0, 1,0,0,0,0},
+        // Q
+        {0,1,1,1,0, 1,0,0,0,1, 1,0,0,0,1, 1,0,1,0,1, 1,0,0,1,0, 0,1,1,0,1},
+        // R
+        {1,1,1,1,0, 1,0,0,0,1, 1,0,0,0,1, 1,1,1,1,0, 1,0,1,0,0, 1,0,0,0,1},
+        // S
+        {0,1,1,1,1, 1,0,0,0,0, 0,1,1,1,0, 0,0,0,0,1, 1,0,0,0,0, 1,1,1,1,0},
+        // T
+        {1,1,1,1,1, 0,0,1,0,0, 0,0,1,0,0, 0,0,1,0,0, 0,0,1,0,0, 0,0,1,0,0},
+        // U
+        {1,0,0,0,1, 1,0,0,0,1, 1,0,0,0,1, 1,0,0,0,1, 1,0,0,0,1, 0,1,1,1,0},
+        // V
+        {1,0,0,0,1, 1,0,0,0,1, 1,0,0,0,1, 0,1,0,1,0, 0,1,0,1,0, 0,0,1,0,0},
+        // W
+        {1,0,0,0,1, 1,0,0,0,1, 1,0,1,0,1, 1,0,1,0,1, 1,1,0,1,1, 1,0,0,0,1},
+        // X
+        {1,0,0,0,1, 0,1,0,1,0, 0,0,1,0,0, 0,0,1,0,0, 0,1,0,1,0, 1,0,0,0,1},
+        // Y
+        {1,0,0,0,1, 0,1,0,1,0, 0,0,1,0,0, 0,0,1,0,0, 0,0,1,0,0, 0,0,1,0,0},
+        // Z
+        {1,1,1,1,1, 0,0,0,0,1, 0,0,0,1,0, 0,0,1,0,0, 0,1,0,0,0, 1,1,1,1,1}
     };
 
     // Helper function to draw integer on framebuffer
@@ -678,6 +742,23 @@ void iotcraft_task(void *pvParameter)
             game_handle_key(&g_game, IOTCRAFT_KEY_F5, input_is_key_pressed(IOTCRAFT_KEY_F5));
             game_handle_key(&g_game, IOTCRAFT_KEY_F6, input_is_key_pressed(IOTCRAFT_KEY_F6));
 
+            // Handle F7 - Toggle autoplay mode
+            static bool f7_was_pressed = false;
+            bool f7_is_pressed = input_is_key_pressed(IOTCRAFT_KEY_F7);
+            if (f7_is_pressed && !f7_was_pressed) {
+                autoplay_enabled = !autoplay_enabled;
+                if (autoplay_enabled) {
+                    // Initialize autoplay
+                    autoplay_start_x = g_camera.x;
+                    autoplay_start_z = g_camera.z;
+                    autoplay_direction = 1.0f;
+                    ESP_LOGI(TAG, "Autoplay enabled: moving forward 20 blocks");
+                } else {
+                    ESP_LOGI(TAG, "Autoplay disabled");
+                }
+            }
+            f7_was_pressed = f7_is_pressed;
+
             // Handle console controls
             // ESC closes console if it's visible
             static bool esc_was_pressed = false;
@@ -777,6 +858,28 @@ void iotcraft_task(void *pvParameter)
 
         // Update game logic
         game_update(&g_game, delta_time);
+
+        // Handle autoplay mode (F7)
+        if (autoplay_enabled) {
+            // Calculate current distance from start position
+            float dx = g_camera.x - autoplay_start_x;
+            float dz = g_camera.z - autoplay_start_z;
+            float distance = sqrtf(dx * dx + dz * dz);
+
+            // Check if we need to reverse direction
+            if (distance >= autoplay_distance) {
+                autoplay_direction *= -1.0f;
+                ESP_LOGI(TAG, "Autoplay reversing: %s", autoplay_direction > 0 ? "forward" : "backward");
+            }
+
+            // Move in the current direction along the camera's forward vector
+            float move_amount = autoplay_speed * delta_time * autoplay_direction;
+            float sin_yaw = sinf(g_camera.yaw);
+            float cos_yaw = cosf(g_camera.yaw);
+
+            g_camera.x += sin_yaw * move_amount;
+            g_camera.z += cos_yaw * move_amount;
+        }
 
         // ============================================================
         // TRUE 3D RENDERING (shared with desktop-light)
@@ -1005,6 +1108,65 @@ void iotcraft_task(void *pvParameter)
         // Render console overlay (on top of everything else)
         // Pass framebuffer so console can draw directly to it
         console_render(fb_writable, fb_width, fb_height);
+
+        // Draw title overlay at the top-left (direct framebuffer drawing)
+        // Using simple 5x7 bitmap font like the HUD
+        const char* title1 = "IOTCRAFT ESP32-P4";
+        const char* title2 = "DIGITAL TWIN";
+
+        // Dynamic hint based on autoplay state
+        const char* hint = autoplay_enabled ? "AUTOPLAY ON [F7]" : "PRESS F4 TOGGLE BLINK MODE";
+
+        // Helper function to draw a string
+        auto void draw_string(const char* str, int x, int y) {
+            int cursor_x = x;
+            for (const char* c = str; *c != '\0'; c++) {
+                if (*c >= 'A' && *c <= 'Z') {
+                    const char* glyph = letter_font[*c - 'A'];
+                    for (int py = 0; py < 7; py++) {
+                        for (int px = 0; px < 5; px++) {
+                            if (glyph[py * 5 + px]) {
+                                int draw_x = cursor_x + px;
+                                int draw_y = y + py;
+                                if (draw_x < fb_width && draw_y < fb_height) {
+                                    fb_writable[draw_y * fb_width + draw_x] = 0xFFFF;  // White
+                                }
+                            }
+                        }
+                    }
+                } else if (*c >= '0' && *c <= '9') {
+                    const char* glyph = digit_font[*c - '0'];
+                    for (int py = 0; py < 7; py++) {
+                        for (int px = 0; px < 5; px++) {
+                            if (glyph[py * 5 + px]) {
+                                int draw_x = cursor_x + px;
+                                int draw_y = y + py;
+                                if (draw_x < fb_width && draw_y < fb_height) {
+                                    fb_writable[draw_y * fb_width + draw_x] = 0xFFFF;  // White
+                                }
+                            }
+                        }
+                    }
+                } else if (*c == '-') {
+                    // Draw dash
+                    for (int px = 1; px < 4; px++) {
+                        int draw_x = cursor_x + px;
+                        int draw_y = y + 3;
+                        if (draw_x < fb_width && draw_y < fb_height) {
+                            fb_writable[draw_y * fb_width + draw_x] = 0xFFFF;  // White
+                        }
+                    }
+                } else if (*c == ' ') {
+                    cursor_x += 3;
+                    continue;
+                }
+                cursor_x += 6;  // 5 pixels width + 1 pixel spacing
+            }
+        };
+
+        draw_string(title1, 10, 10);
+        draw_string(title2, 10, 20);
+        draw_string(hint, 10, 32);
 
         // Push framebuffer to display with hardware scaling
         // Render at 341x200, scale 3x to 1024x600 (9x fewer pixels = 9x faster!)
