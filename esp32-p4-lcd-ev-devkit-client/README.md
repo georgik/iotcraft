@@ -43,7 +43,8 @@ This project implements a real-time 3D voxel rendering engine on ESP32-P4, featu
 ### Network & MQTT
 - **Dual Network Support**:
   - Ethernet (primary): 100Mbps with DHCP
-  - WiFi (via ESP32-C6): ESP-Hosted SDIO transport
+  - WiFi (via ESP32-C6): ESP-Hosted SDIO transport (patched version)
+- **Patched ESP-Hosted**: Custom version with auto-init disabled to prevent boot hangs
 - **SD Card + ESP-Hosted Coexistence**: Properly configured to work simultaneously
 - MQTT client for device communication
 - Automatic device discovery via `devices/announce` topic
@@ -93,6 +94,73 @@ idf.py flash monitor
 ### Flash Size
 
 Current binary size: ~1.06 MB (66% of 3MB app partition free)
+
+## Known Issues & Compatibility Notes
+
+### ESP-IDF Version Compatibility
+
+This project requires ESP-IDF v6.1 or later. When updating ESP-IDF, you may encounter API changes that require manual fixes:
+
+#### SPI Driver API Change (ESP-IDF v6.1)
+
+**Symptom:** Build error in `esp_cam_sensor` component:
+```
+error: incompatible type for argument 1 of 'spicommon_bus_free_io_cfg'
+```
+
+**Fix:** Update `managed_components/espressif__esp_cam_sensor/src/driver_spi/spi_slave.c:366`:
+```c
+// OLD (pre-v6.1):
+spicommon_bus_free_io_cfg(&spihost[host]->bus_config, &spihost[host]->gpio_reserve);
+
+// NEW (v6.1+):
+spicommon_bus_free_io_cfg(spihost[host]->id);
+```
+
+The API signature changed from taking a `spi_bus_config_t*` pointer to taking `spi_host_device_t` directly.
+
+### ESP-Hosted Auto-Init Issue
+
+**Problem:** The official ESP-Hosted library uses `__attribute__((constructor))` to auto-initialize before `app_main()`. This causes the application to hang during boot if:
+- ESP32-C6 co-processor is not present or not responding
+- SDIO communication fails
+- The init task blocks indefinitely
+
+**Symptom:** Serial output stops after:
+```
+I (xxxx) H_SDIO_DRV: sdio_data_to_rx_buf_task started
+```
+And `app_main()` never executes.
+
+**Solution:** This project uses a modified ESP-Hosted component with auto-init disabled:
+```c
+// File: components/espressif__esp_hosted/host/port/esp/freertos/src/port_esp_hosted_host_init.c
+// DISABLED: Auto-init was blocking app_main() from starting
+// ESP-Hosted is now initialized manually from network_init() with timeout protection
+```
+
+**To restore official ESP-Hosted:**
+1. Remove `components/espressif__esp_hosted/`
+2. Add ESP-Hosted as a managed component via `idf_component.yml`
+3. Be aware that the app may hang if ESP32-C6 is not present
+
+**Our patched version:** Located in `components/espressif__esp_hosted/` with:
+- Auto-init constructor disabled (line 16-22)
+- Manual initialization with timeout protection in `network_init()`
+- Proper SD card coexistence support
+
+### SD Card + ESP-Hosted Coexistence
+
+This project properly configures SDMMC to work with both SD card (Slot 0) and ESP-Hosted (Slot 1):
+
+**Key Points:**
+- ESP-Hosted calls `sdmmc_host_init()` during startup (initializes entire peripheral)
+- SD card uses dummy init/deinit functions to avoid re-initialization
+- SD card uses Slot 0 with IO MUX mode (no GPIO configuration)
+- ESP-Hosted uses Slot 1 with GPIO matrix (GPIO 14-19)
+- LDO power control (channel 4) required for SD card on ESP32-P4 Function EV board
+
+**Reference:** See `esp-hosted-sdcard-problem.txt` for detailed technical documentation.
 
 ## Controls
 
